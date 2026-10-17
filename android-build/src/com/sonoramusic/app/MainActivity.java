@@ -1,7 +1,9 @@
 package com.sonoramusic.app;
 
 import android.app.Activity;
+import android.Manifest;
 import android.os.Bundle;
+import android.os.Build;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.Window;
@@ -18,6 +20,8 @@ import android.webkit.URLUtil;
 import android.webkit.CookieManager;
 import android.webkit.ValueCallback;
 import android.app.DownloadManager;
+import android.content.ContentUris;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Environment;
 import android.content.Context;
@@ -33,9 +37,33 @@ import java.io.File;
 public class MainActivity extends Activity {
     private static final String TAG = "SonoraMusic";
     private static final int FILE_CHOOSER_REQ = 1001;
+    private static final int AUDIO_PERM_REQ = 1002;
 
     private WebView webView;
     private ValueCallback<Uri[]> uploadMessage;
+
+    private String[] audioPermissions() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            return new String[]{ Manifest.permission.READ_MEDIA_AUDIO };
+        }
+        return new String[]{ Manifest.permission.READ_EXTERNAL_STORAGE };
+    }
+
+    public boolean hasAudioPermission() {
+        for (String p : audioPermissions()) {
+            if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) return false;
+        }
+        return true;
+    }
+
+    public void requestAudioPermission() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                requestPermissions(audioPermissions(), AUDIO_PERM_REQ);
+            }
+        });
+    }
 
     public static class SonoraNativeInterface {
         private final MainActivity activity;
@@ -188,8 +216,24 @@ public class MainActivity extends Activity {
         }
 
         @android.webkit.JavascriptInterface
+        public boolean hasStoragePermission() {
+            return activity.hasAudioPermission();
+        }
+
+        @android.webkit.JavascriptInterface
+        public void requestStoragePermission() {
+            activity.requestAudioPermission();
+        }
+
+        @android.webkit.JavascriptInterface
         public String getDeviceMusicFiles() {
             JSONArray arr = new JSONArray();
+
+            // Sin permiso no se puede leer la música del teléfono (Android 6+)
+            if (!activity.hasAudioPermission()) {
+                return "{\"__needsPermission\":true}";
+            }
+
             Cursor cursor = null;
             try {
                 String[] projection = {
@@ -198,7 +242,8 @@ public class MainActivity extends Activity {
                     MediaStore.Audio.Media.ARTIST,
                     MediaStore.Audio.Media.ALBUM,
                     MediaStore.Audio.Media.DURATION,
-                    MediaStore.Audio.Media.DATA
+                    MediaStore.Audio.Media.DATA,
+                    MediaStore.Audio.Media.ALBUM_ID
                 };
                 String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
                 cursor = activity.getContentResolver().query(
@@ -218,14 +263,20 @@ public class MainActivity extends Activity {
                         String album = cursor.getString(3);
                         long durMs = cursor.getLong(4);
                         String path = cursor.getString(5);
+                        long albumId = cursor.getLong(6);
+
+                        // URI de contenido: reproducible por el WebView en Android 10+
+                        Uri contentUri = ContentUris.withAppendedId(
+                            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id);
 
                         obj.put("id", "device_" + id);
                         obj.put("title", title != null ? title : "Canción local");
-                        obj.put("artist", artist != null ? artist : "Artista desconocido");
+                        obj.put("artist", (artist != null && !artist.equals("<unknown>")) ? artist : "Artista desconocido");
                         obj.put("album", album != null ? album : "Dispositivo");
                         obj.put("duration", durMs > 0 ? (durMs / 1000) : 180);
-                        obj.put("filePath", path != null ? ("file://" + path) : "");
+                        obj.put("filePath", contentUri.toString());
                         obj.put("rawPath", path != null ? path : "");
+                        obj.put("albumId", albumId);
                         obj.put("isDownloaded", 1);
                         obj.put("isDeviceTrack", 1);
                         arr.put(obj);
@@ -357,6 +408,25 @@ public class MainActivity extends Activity {
                 }
                 uploadMessage.onReceiveValue(results);
                 uploadMessage = null;
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == AUDIO_PERM_REQ) {
+            final boolean granted = hasAudioPermission();
+            Log.d(TAG, "Audio permission granted: " + granted);
+            if (webView != null) {
+                webView.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        webView.evaluateJavascript(
+                            "window.onSonoraPermissionResult && window.onSonoraPermissionResult(" + granted + ");",
+                            null);
+                    }
+                });
             }
         }
     }

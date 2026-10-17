@@ -55,6 +55,11 @@
   let allAlbums = [];
   let allArtists = [];
   let currentTabTracks = [];
+  // Sección "Este dispositivo / Local"
+  let deviceTracks = [];
+  let deviceNeedsPermission = false;
+  let deviceLoading = false;
+  let deviceLoadedOnce = false;
 
   // Tab definitions
   const TABS = [
@@ -62,7 +67,8 @@
     { id: 'albumes', label: 'Álbumes' },
     { id: 'artistas', label: 'Artistas' },
     { id: 'favoritos', label: 'Favoritos' },
-    { id: 'descargados', label: 'Descargados' }
+    { id: 'descargados', label: 'Descargados' },
+    { id: 'dispositivo', label: 'Este dispositivo' }
   ];
 
   // Renderers
@@ -268,6 +274,132 @@
       ${renderSortBar()}
       <div class="lib-tracks-container">
         ${sorted.map((t, idx) => renderTrackRow(t, idx, 'favoritos')).join('')}
+      </div>
+    `;
+  }
+
+  // ---------------------------------------------------------------------------
+  // "Este dispositivo / Local": lee los archivos de audio del teléfono (Android)
+  // ---------------------------------------------------------------------------
+  function deviceBridgeAvailable() {
+    return !!(window.SonoraNative && typeof window.SonoraNative.getDeviceMusicFiles === 'function');
+  }
+
+  async function loadDeviceTracks() {
+    if (!deviceBridgeAvailable()) {
+      deviceTracks = [];
+      deviceNeedsPermission = false;
+      deviceLoadedOnce = true;
+      return;
+    }
+    deviceLoading = true;
+    renderCurrentView();
+    try {
+      const raw = window.SonoraNative.getDeviceMusicFiles();
+      const parsed = JSON.parse(raw || '[]');
+      if (parsed && parsed.__needsPermission) {
+        deviceNeedsPermission = true;
+        deviceTracks = [];
+      } else {
+        deviceNeedsPermission = false;
+        deviceTracks = Array.isArray(parsed) ? parsed : [];
+      }
+    } catch (e) {
+      console.warn('[Library] Error escaneando dispositivo:', e);
+      deviceTracks = [];
+    } finally {
+      deviceLoading = false;
+      deviceLoadedOnce = true;
+      renderCurrentView();
+    }
+  }
+
+  // Android nos avisa cuando el usuario concede/niega el permiso de audio
+  window.onSonoraPermissionResult = function (granted) {
+    deviceNeedsPermission = !granted;
+    deviceLoadedOnce = false;
+    if (granted) {
+      loadDeviceTracks();
+    } else {
+      renderCurrentView();
+    }
+  };
+
+  function renderDispositivoTab() {
+    if (!deviceBridgeAvailable()) {
+      return `
+        <div class="lib-empty-state">
+          <div class="empty-icon">📵</div>
+          <h3>Solo en la app Android</h3>
+          <p>Esta sección lee los MP3, M4A, WAV y FLAC que tengas en el teléfono. Ábrela desde la app instalada en tu Android.</p>
+        </div>
+      `;
+    }
+
+    if (deviceNeedsPermission) {
+      return `
+        <div class="lib-empty-state">
+          <div class="empty-icon">🔓</div>
+          <h3>Falta el permiso</h3>
+          <p>Sonora necesita permiso para leer los archivos de audio del teléfono.</p>
+          <button type="button" class="btn btn--primary" data-action="request-storage"
+                  style="margin-top:16px; background:var(--color-primary, #FF4757); color:#fff; border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
+            🔓 Conceder permiso
+          </button>
+        </div>
+      `;
+    }
+
+    if (deviceLoading) {
+      return `
+        <div class="lib-empty-state">
+          <div class="empty-icon">⏳</div>
+          <h3>Buscando música en el teléfono…</h3>
+          <p>Un momento.</p>
+        </div>
+      `;
+    }
+
+    if (!deviceTracks.length) {
+      return `
+        <div class="lib-empty-state">
+          <div class="empty-icon">📁</div>
+          <h3>No se encontró música</h3>
+          <p>No hay archivos de audio visibles en el teléfono. Copia música a la memoria y vuelve a escanear.</p>
+          <div style="display:flex; gap:10px; justify-content:center; margin-top:16px; flex-wrap:wrap;">
+            <button type="button" class="btn btn--primary" data-action="scan-device"
+                    style="background:var(--color-primary, #FF4757); color:#fff; border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
+              🔄 Escanear de nuevo
+            </button>
+            <button type="button" class="btn" data-action="request-storage"
+                    style="background:#25253a; color:#fff; border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
+              🔓 Permisos
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    const sorted = sortTracks(deviceTracks, currentSort);
+    currentTabTracks = sorted;
+
+    return `
+      <div class="tab-header-action">
+        <button class="btn btn--primary play-all-btn" data-action="play-tab-all">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Reproducir todo (${sorted.length})
+        </button>
+        <button type="button" class="btn" data-action="scan-device" title="Escanear de nuevo"
+                style="background:#25253a; color:#fff; border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
+          🔄
+        </button>
+        <button type="button" class="btn" data-action="request-storage" title="Permisos"
+                style="background:#25253a; color:#fff; border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
+          🔓
+        </button>
+      </div>
+      <div class="lib-tracks-container">
+        ${sorted.map((t, idx) => renderTrackRow(t, idx, 'device')).join('')}
       </div>
     `;
   }
@@ -1189,6 +1321,22 @@
             return;
           }
 
+          // 1b. Escanear dispositivo
+          const scanBtn = target.closest('[data-action="scan-device"]');
+          if (scanBtn) {
+            loadDeviceTracks();
+            return;
+          }
+
+          // 1c. Pedir permiso de audio
+          const permBtn = target.closest('[data-action="request-storage"]');
+          if (permBtn) {
+            if (window.SonoraNative && typeof window.SonoraNative.requestStoragePermission === 'function') {
+              window.SonoraNative.requestStoragePermission();
+            }
+            return;
+          }
+
           // 2. Sort Chip
           const sortChip = target.closest('.sort-chip');
           if (sortChip) {
@@ -1479,6 +1627,12 @@
         break;
       case 'descargados':
         tabContent.innerHTML = renderDescargadosTab(allTracks);
+        break;
+      case 'dispositivo':
+        tabContent.innerHTML = renderDispositivoTab();
+        if (deviceBridgeAvailable() && !deviceLoadedOnce && !deviceLoading) {
+          loadDeviceTracks();
+        }
         break;
       default:
         tabContent.innerHTML = renderCancionesTab(allTracks);

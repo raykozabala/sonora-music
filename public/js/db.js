@@ -474,8 +474,10 @@
 
     downloads: {
       save: function (trackId, blob) {
-        return putToStore('downloads', { id: 'dl_' + trackId, trackId: Number(trackId), blob: blob, savedAt: new Date().toISOString() }).then(function () {
-          return getByIdFromStore('tracks', Number(trackId)).then(function (track) {
+        return putToStore('downloads', { id: 'dl_' + trackId, trackId: trackId, blob: blob, savedAt: new Date().toISOString() }).then(function () {
+          var numeric = Number(trackId);
+          if (isNaN(numeric)) return; // IDs de YouTube (yt_...) no son numéricos
+          return getByIdFromStore('tracks', numeric).then(function (track) {
             if (track) { track.isDownloaded = 1; return putToStore('tracks', track); }
           });
         });
@@ -492,7 +494,9 @@
       },
       delete: function (trackId) {
         return deleteFromStore('downloads', 'dl_' + trackId).then(function () {
-          return getByIdFromStore('tracks', Number(trackId)).then(function (track) {
+          var numeric = Number(trackId);
+          if (isNaN(numeric)) return;
+          return getByIdFromStore('tracks', numeric).then(function (track) {
             if (track) { track.isDownloaded = 0; return putToStore('tracks', track); }
           });
         });

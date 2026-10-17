@@ -531,10 +531,53 @@
         return Sonora.DB.downloads.delete(trackId).then(function () {
           if (Sonora.Store) {
             Sonora.Store.emit('toast', { message: 'Descarga eliminada', type: 'info' });
+            Sonora.Store.emit('downloadsChanged', { active: Object.values(_activeDownloads), completed: _completedHistory });
           }
         });
       }
       return Promise.resolve();
+    },
+
+    /**
+     * Compatibilidad: descarga rápida de una canción (MP3 320k, copia offline + teléfono)
+     */
+    downloadTrack: function (track, opts) {
+      opts = opts || {};
+      return Sonora.Download.startDownload(
+        track,
+        opts.format || 'mp3',
+        opts.quality || (opts.format === 'mp4' ? '720p' : '320k'),
+        opts.mode || 'both'
+      );
+    },
+
+    /**
+     * Espacio total usado por las descargas offline (bytes)
+     */
+    getStorageUsed: function () {
+      if (Sonora.DB && Sonora.DB.downloads && typeof Sonora.DB.downloads.getStorageUsed === 'function') {
+        return Sonora.DB.downloads.getStorageUsed().catch(function () { return 0; });
+      }
+      return Promise.resolve(0);
+    },
+
+    /**
+     * Lista de pistas descargadas (para reproducción offline)
+     */
+    getDownloadedTracks: function () {
+      if (!Sonora.DB || !Sonora.DB.downloads || typeof Sonora.DB.downloads.getAll !== 'function') {
+        return Promise.resolve([]);
+      }
+      return Sonora.DB.downloads.getAll().then(function (ids) {
+        if (!ids || !ids.length) return [];
+        return Promise.all(ids.map(function (id) {
+          var key = (typeof id === 'number' && isNaN(id)) ? null : id;
+          if (key === null) return null;
+          return Sonora.DB.tracks.getById(key).then(function (t) { return t || null; }).catch(function () { return null; });
+        }));
+      }).then(function (tracks) {
+        return tracks.filter(function (t) { return !!t; });
+      }).catch(function () { return []; });
     }
   };
 })();
