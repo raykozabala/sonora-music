@@ -689,30 +689,51 @@ if (process.env.YTDLP_COOKIES_B64) {
   }
 }
 
-function getCookiesFile() {
-  for (const c of COOKIES_CANDIDATES) {
-    try {
-      if (fs.existsSync(c) && fs.statSync(c).size > 50) return c;
-    } catch (e) {}
+// yt-dlp necesita ESCRIBIR en el archivo de cookies (renueva tokens de sesión).
+// Los Secret Files de Render son de solo lectura, así que trabajamos siempre
+// sobre una copia escribible en /tmp.
+const WRITABLE_COOKIES = '/tmp/sonora-cookies-rw.txt';
+let COOKIES_PATH = null;
+
+function prepareCookies() {
+  try {
+    let src = null;
+    for (const c of COOKIES_CANDIDATES) {
+      try {
+        if (fs.existsSync(c) && fs.statSync(c).size > 50) { src = c; break; }
+      } catch (e) {}
+    }
+
+    if (!src) {
+      COOKIES_PATH = null;
+      console.warn('[Cookies] SIN cookies: YouTube puede bloquear las descargas desde este servidor');
+      return;
+    }
+
+    if (path.resolve(src) !== path.resolve(WRITABLE_COOKIES)) {
+      fs.copyFileSync(src, WRITABLE_COOKIES);
+      try { fs.chmodSync(WRITABLE_COOKIES, 0o600); } catch (e) {}
+    }
+    COOKIES_PATH = WRITABLE_COOKIES;
+
+    let size = 0;
+    try { size = fs.statSync(COOKIES_PATH).size; } catch (e) {}
+    console.log('[Cookies] listas | origen=' + src + ' | copia escribible=' + COOKIES_PATH + ' (' + size + ' bytes)');
+  } catch (e) {
+    console.warn('[Cookies] error preparando las cookies:', e.message);
+    COOKIES_PATH = null;
   }
-  return null;
+}
+
+function getCookiesFile() {
+  return COOKIES_PATH;
 }
 
 function withCookies(args) {
-  const c = getCookiesFile();
-  return c ? args.concat(['--cookies', c]) : args.slice();
+  return COOKIES_PATH ? args.concat(['--cookies', COOKIES_PATH]) : args.slice();
 }
 
-(function logCookiesStatus() {
-  const c = getCookiesFile();
-  if (c) {
-    let size = 0;
-    try { size = fs.statSync(c).size; } catch (e) {}
-    console.log('[Cookies] archivo de cookies en uso: ' + c + ' (' + size + ' bytes)');
-  } else {
-    console.warn('[Cookies] SIN cookies: YouTube puede bloquear las descargas desde este servidor');
-  }
-})();
+prepareCookies();
 
 // ---------------------------------------------------------------------------
 // Helpers: yt-dlp / ffmpeg wrappers robustos
