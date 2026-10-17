@@ -460,18 +460,54 @@
     var plainLyricsText = track.lyrics || null;
 
     if (!syncedLyricsText) {
-      try {
-        var cleanTitle = (track.title || '').replace(/\(.*?\)|\{.*?\}|\[.*?\]/g, '').trim();
-        var cleanArtist = (track.artist || '').replace(/\(.*?\)|\{.*?\}|\[.*?\]/g, '').trim();
-        var apiUrl = 'https://lrclib.net/api/get?artist_name=' + encodeURIComponent(cleanArtist) + '&track_name=' + encodeURIComponent(cleanTitle);
-        var resp = await fetch(apiUrl);
-        if (resp.ok) {
-          var lrcData = await resp.json();
-          if (lrcData.syncedLyrics) syncedLyricsText = lrcData.syncedLyrics;
-          if (lrcData.plainLyrics && !plainLyricsText) plainLyricsText = lrcData.plainLyrics;
+      var cleanTitle = (track.title || '').replace(/\(.*?\)|\{.*?\}|\[.*?\]/g, '').trim();
+      var cleanArtist = (track.artist || '').replace(/\(.*?\)|\{.*?\}|\[.*?\]/g, '').trim();
+      var lrcData = null;
+
+      // 1) A través de nuestro servidor (evita CORS y es más fiable)
+      var serverBase = (Sonora.API && typeof Sonora.API.getActiveUrl === 'function')
+        ? Sonora.API.getActiveUrl() : '';
+      if (serverBase) {
+        try {
+          var lyricsUrl = serverBase + '/api/lyrics?artist=' + encodeURIComponent(cleanArtist) +
+            '&title=' + encodeURIComponent(cleanTitle) +
+            '&album=' + encodeURIComponent(track.album || '');
+          var sResp = await fetch(lyricsUrl);
+          if (sResp.ok) {
+            var sData = await sResp.json();
+            if (sData && (sData.syncedLyrics || sData.plainLyrics)) lrcData = sData;
+          }
+        } catch (e) {
+          console.warn('[Lyrics] proxy del servidor falló:', e);
         }
-      } catch (err) {
-        console.warn('[Lyrics] LRCLIB fetch failed:', err);
+      }
+
+      // 2) Directo a LRCLIB como respaldo
+      if (!lrcData) {
+        try {
+          var apiUrl = 'https://lrclib.net/api/get?artist_name=' + encodeURIComponent(cleanArtist) +
+            '&track_name=' + encodeURIComponent(cleanTitle);
+          var resp = await fetch(apiUrl);
+          if (resp.ok) lrcData = await resp.json();
+        } catch (err) {
+          console.warn('[Lyrics] LRCLIB directo falló:', err);
+        }
+      }
+
+      if (lrcData) {
+        if (lrcData.syncedLyrics) syncedLyricsText = lrcData.syncedLyrics;
+        if (lrcData.plainLyrics && !plainLyricsText) plainLyricsText = lrcData.plainLyrics;
+      }
+
+      // Guardar la letra en la base local para tenerla sin conexión
+      if ((syncedLyricsText || plainLyricsText) && Sonora.DB && Sonora.DB.tracks && track.id !== undefined) {
+        Sonora.DB.tracks.getById(track.id).then(function (dbTrack) {
+          if (dbTrack && !dbTrack.syncedLyrics) {
+            dbTrack.syncedLyrics = syncedLyricsText || '';
+            dbTrack.lyrics = dbTrack.lyrics || plainLyricsText || '';
+            if (typeof Sonora.DB.tracks.update === 'function') Sonora.DB.tracks.update(dbTrack);
+          }
+        }).catch(function () {});
       }
     }
 

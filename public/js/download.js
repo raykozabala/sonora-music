@@ -245,7 +245,11 @@
         try {
           var cleanSearchArtist = artist.replace(/\(.*?\)|\{.*?\}|\[.*?\]/g, '').trim();
           var cleanSearchTitle = title.replace(/\(.*?\)|\{.*?\}|\[.*?\]/g, '').trim();
-          var lrcResp = await fetch('https://lrclib.net/api/get?artist_name=' + encodeURIComponent(cleanSearchArtist) + '&track_name=' + encodeURIComponent(cleanSearchTitle));
+          var lyricsBase = usedServer || servers[0] || '';
+          var lyricsEndpoint = lyricsBase
+            ? (lyricsBase.replace(/\/+$/, '') + '/api/lyrics?artist=' + encodeURIComponent(cleanSearchArtist) + '&title=' + encodeURIComponent(cleanSearchTitle))
+            : ('https://lrclib.net/api/get?artist_name=' + encodeURIComponent(cleanSearchArtist) + '&track_name=' + encodeURIComponent(cleanSearchTitle));
+          var lrcResp = await fetch(lyricsEndpoint);
           if (lrcResp.ok) {
             var lrcData = await lrcResp.json();
             syncedLyrics = lrcData.syncedLyrics || '';

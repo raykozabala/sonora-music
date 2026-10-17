@@ -785,6 +785,75 @@ app.get('/api/system', (req, res) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Letras (proxy a LRCLIB: evita CORS y permite cachear)
+// ---------------------------------------------------------------------------
+const lyricsCache = new Map();
+
+async function fetchLrclib(url) {
+  const resp = await fetch(url, {
+    headers: {
+      'User-Agent': 'SonoraMusic/7.6 (+https://github.com/raykozabala/sonora-music)'
+    }
+  });
+  if (resp.status === 404) return null;
+  if (!resp.ok) throw new Error('LRCLIB HTTP ' + resp.status);
+  return resp.json();
+}
+
+/**
+ * GET /api/lyrics?artist=...&title=...&album=...
+ * Devuelve { syncedLyrics, plainLyrics, found }
+ */
+app.get('/api/lyrics', async (req, res) => {
+  const artist = (req.query.artist || '').trim();
+  const title = (req.query.title || '').trim();
+  const album = (req.query.album || '').trim();
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  if (!title) return res.status(400).json({ error: 'Falta el parámetro title' });
+
+  const cacheKey = (artist + '|' + title + '|' + album).toLowerCase();
+  if (lyricsCache.has(cacheKey)) {
+    return res.json(lyricsCache.get(cacheKey));
+  }
+
+  try {
+    const qs = new URLSearchParams();
+    if (artist) qs.set('artist_name', artist);
+    qs.set('track_name', title);
+    if (album) qs.set('album_name', album);
+
+    let data = await fetchLrclib('https://lrclib.net/api/get?' + qs.toString());
+
+    if (!data || (!data.syncedLyrics && !data.plainLyrics)) {
+      const search = await fetchLrclib(
+        'https://lrclib.net/api/search?q=' + encodeURIComponent((artist + ' ' + title).trim())
+      );
+      if (Array.isArray(search) && search.length > 0) {
+        data = search.find((x) => x && x.syncedLyrics) || search[0];
+      }
+    }
+
+    const out = {
+      syncedLyrics: (data && data.syncedLyrics) || '',
+      plainLyrics: (data && data.plainLyrics) || '',
+      instrumental: !!(data && data.instrumental),
+      found: !!(data && (data.syncedLyrics || data.plainLyrics))
+    };
+
+    if (out.found) {
+      lyricsCache.set(cacheKey, out);
+      if (lyricsCache.size > 400) lyricsCache.clear();
+    }
+    res.json(out);
+  } catch (err) {
+    console.warn('[Lyrics] error:', err.message);
+    res.status(502).json({ error: 'No se pudo obtener la letra', detail: err.message, found: false });
+  }
+});
+
 
 /**
  * GET /api/search/external?q=
