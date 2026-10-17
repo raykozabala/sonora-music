@@ -107,11 +107,16 @@ La app intenta, en este orden: **Local → Render → Offline**.
 | ------ | ----------------------------- | ------------------------------------ |
 | GET    | `/api/health`                 | Estado del servidor                  |
 | GET    | `/api/tracks`                 | Lista de pistas                      |
+| GET    | `/api/tracks/search?q=`       | Busca en la biblioteca del servidor  |
 | GET    | `/api/search/external?q=`     | Busca en YouTube / YouTube Music     |
 | GET    | `/api/stream/:id`             | Streaming de audio (HTTP 206)        |
 | GET    | `/api/stream/external?url=`   | Streaming desde YouTube              |
-| GET    | `/api/download/mp3?url=`      | Descarga y convierte a MP3 (320 kbps)|
-| GET    | `/api/lyrics?artist=&title=`  | Letras (LRCLIB)                      |
+| GET    | `/api/download/external?url=` | Descarga y convierte a MP3 (320 kbps)|
+| GET    | `/api/recommendations`        | Recomendaciones para autoplay        |
+| GET    | `/api/charts` · `/api/genres` | Tendencias y géneros                 |
+
+> Las **letras** las obtiene la app directamente de [LRCLIB](https://lrclib.net)
+> desde el teléfono, no pasan por este servidor.
 
 ---
 
