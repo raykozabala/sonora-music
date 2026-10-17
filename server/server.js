@@ -667,7 +667,19 @@ function safeExec(cmd, timeoutMs) {
 
 // Player clients probados, de más compatible a más específico. Sirve para
 // esquivar el bloqueo "Sign in to confirm you're not a bot" en servidores cloud.
-const YT_CLIENT_FALLBACKS = [null, 'android', 'ios', 'web_safari', 'tv', 'mweb'];
+// Ojo: android_vr / tv_embedded / mweb son los que suelen pasar en datacenter.
+const YT_CLIENT_FALLBACKS = [
+  null,
+  'android_vr',
+  'tv_embedded',
+  'android',
+  'mweb',
+  'web_embedded',
+  'tv',
+  'ios',
+  'web_safari'
+];
+const YTDLP_CLIENT_TIMEOUT = 30000;
 
 /**
  * Resuelve la URL directa de audio de un video con yt-dlp (--get-url).
@@ -700,18 +712,29 @@ function ytdlpResolveAudioUrl(targetUrl) {
       let err = '';
       let done = false;
 
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        try { proc.kill('SIGKILL'); } catch (e) {}
+        lastError = 'tiempo de espera agotado';
+        console.warn('[yt-dlp] client=' + (client || 'default') + ' timeout');
+        attempt();
+      }, YTDLP_CLIENT_TIMEOUT);
+
       proc.stdout.on('data', (d) => { out += d.toString(); });
       proc.stderr.on('data', (d) => { err += d.toString(); });
 
       proc.on('error', (spawnErr) => {
         if (done) return;
         done = true;
+        clearTimeout(timer);
         reject(spawnErr);
       });
 
       proc.on('close', (code) => {
         if (done) return;
         done = true;
+        clearTimeout(timer);
         const first = out.trim().split('\n').map(s => s.trim()).filter(Boolean)[0];
         if (code === 0 && first && /^https?:\/\//.test(first)) {
           return resolve(first);
@@ -783,6 +806,63 @@ app.get('/api/system', (req, res) => {
       version: ffmpegRaw ? ffmpegRaw.split('\n')[0] : null
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// Diagnóstico de yt-dlp: qué "player client" de YouTube funciona desde aquí
+// ---------------------------------------------------------------------------
+function runCapture(bin, args, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(bin, args);
+    let out = '';
+    let err = '';
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      try { proc.kill('SIGKILL'); } catch (e) {}
+      reject(new Error('timeout'));
+    }, timeoutMs || 45000);
+
+    proc.stdout.on('data', (d) => { out += d.toString(); });
+    proc.stderr.on('data', (d) => { err += d.toString(); });
+    proc.on('error', (e) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      reject(e);
+    });
+    proc.on('close', (code) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      const first = out.trim().split('\n').map((s) => s.trim()).filter(Boolean)[0];
+      if (code === 0 && first) return resolve(first);
+      const lines = err.trim().split('\n').filter(Boolean);
+      reject(new Error(lines.slice(-1)[0] || ('código ' + code)));
+    });
+  });
+}
+
+app.get('/api/ytdiag', async (req, res) => {
+  const id = req.query.id || 'kXYiU_JCYtU';
+  const videoUrl = 'https://www.youtube.com/watch?v=' + id;
+  const clients = ['default', 'android_vr', 'tv_embedded', 'android', 'mweb', 'web_embedded', 'tv', 'ios', 'web_safari'];
+  const results = {};
+  for (const c of clients) {
+    const args = ['--no-playlist', '--no-warnings', '--quiet', '--no-check-certificates',
+      '-f', 'bestaudio[ext=m4a]/bestaudio/best', '--get-url'];
+    if (c !== 'default') args.push('--extractor-args', 'youtube:player_client=' + c);
+    args.push(videoUrl);
+    try {
+      const direct = await runCapture(YTDLP_BIN, args, 45000);
+      const host = (direct.match(/^https?:\/\/([^/]+)/) || [])[1] || '?';
+      results[c] = { ok: true, host: host, prefix: direct.slice(0, 60) };
+    } catch (e) {
+      results[c] = { ok: false, error: String(e.message).slice(0, 150) };
+    }
+  }
+  res.json({ id: id, mode: isRender ? 'render' : 'local', clients: results });
 });
 
 // ---------------------------------------------------------------------------
@@ -963,8 +1043,23 @@ app.get('/api/stream/external', async (req, res) => {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
 
     // Resolvemos la URL directa del audio y hacemos proxy (soporta Range => seek).
-    // Esto es mucho más rápido y fiable que empaquetar todo por ffmpeg.
-    const directUrl = await ytdlpResolveAudioUrl(targetUrl);
+    // Plan A: yt-dlp. Plan B: Invidious (por si YouTube bloquea la IP del servidor).
+    let directUrl = null;
+    try {
+      directUrl = await ytdlpResolveAudioUrl(targetUrl);
+    } catch (ytErr) {
+      console.warn('[Stream] yt-dlp falló: ' + ytErr.message);
+    }
+    if (!directUrl) {
+      const vid = extractYouTubeId(targetUrl);
+      if (vid) directUrl = await resolveViaInvidious(vid);
+    }
+    if (!directUrl) {
+      return res.status(502).json({
+        error: 'No se pudo obtener el audio de esta canción',
+        detail: 'YouTube bloqueó la descarga y los servidores alternativos no respondieron'
+      });
+    }
     console.log('[Stream] proxy ->', directUrl.substring(0, 80) + '...');
     return proxyAudioStream(directUrl, req, res);
   } catch (outerErr) {
@@ -1036,6 +1131,89 @@ async function ytdlpDownloadToFile(baseArgs, targetUrl, tmpDir, stamp) {
     }
   }
   throw new Error(lastError || 'No se pudo descargar el archivo');
+}
+
+// ---------------------------------------------------------------------------
+// Plan B: resolver el audio por Invidious cuando YouTube bloquea el servidor
+// ---------------------------------------------------------------------------
+const INVIDIOUS_INSTANCES = [
+  'https://invidious.privacyredirect.com',
+  'https://inv.nadeko.net',
+  'https://invidious.nerdvpn.de',
+  'https://yewtu.be',
+  'https://invidious.fdn.fr',
+  'https://iv.melmac.space'
+];
+
+function extractYouTubeId(input) {
+  const s = String(input || '');
+  let m = s.match(/[?&]v=([A-Za-z0-9_-]{11})/);
+  if (m) return m[1];
+  m = s.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
+  if (m) return m[1];
+  m = s.match(/\/embed\/([A-Za-z0-9_-]{11})/);
+  if (m) return m[1];
+  m = s.match(/^([A-Za-z0-9_-]{11})$/);
+  if (m) return m[1];
+  return null;
+}
+
+async function resolveViaInvidious(videoId) {
+  for (const base of INVIDIOUS_INSTANCES) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 12000);
+      const r = await fetch(base + '/api/v1/videos/' + videoId, {
+        headers: { 'User-Agent': 'SonoraMusic/7.6' },
+        signal: ctrl.signal
+      });
+      clearTimeout(t);
+      if (!r.ok) continue;
+      const data = await r.json();
+
+      const fmts = (data.adaptiveFormats || []).filter(
+        (f) => typeof f.type === 'string' && f.type.indexOf('audio/') === 0 && f.url
+      );
+      if (!fmts.length) continue;
+
+      // Preferimos audio/mp4 (AAC), que es el más compatible
+      fmts.sort((a, b) => (/audio\/mp4/.test(b.type) ? 1 : 0) - (/audio\/mp4/.test(a.type) ? 1 : 0));
+
+      let u = fmts[0].url;
+      if (u.startsWith('/')) u = base + u;
+      if (u.indexOf('/videoplayback') !== -1 && u.indexOf('local=') === -1) u += '&local=true';
+      console.log('[Fallback] Invidious OK via ' + base);
+      return u;
+    } catch (e) {
+      console.warn('[Fallback] Invidious ' + base + ' falló: ' + e.message);
+    }
+  }
+  return null;
+}
+
+/**
+ * Convierte cualquier fuente de audio accesible por URL a un MP3 en disco.
+ */
+function ffmpegTranscodeToFile(sourceUrl, outPath, title, artist) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-y', '-loglevel', 'error',
+      '-i', sourceUrl,
+      '-vn', '-acodec', 'libmp3lame', '-b:a', '320k', '-ar', '44100',
+      '-metadata', 'title=' + (title || ''),
+      '-metadata', 'artist=' + (artist || ''),
+      outPath
+    ];
+    const proc = spawn(FFMPEG_BIN, args);
+    let err = '';
+    proc.stderr.on('data', (d) => { err += d.toString(); });
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      if (code === 0) return resolve(outPath);
+      const lines = err.trim().split('\n').filter(Boolean);
+      reject(new Error(lines.slice(-2).join(' | ') || ('ffmpeg código ' + code)));
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1115,25 +1293,48 @@ app.get('/api/download/external', async (req, res) => {
   let filePath = getCachedDownload(cachePath);
   let isCached = !!filePath;
 
-  // 2) Si no, generarlo con yt-dlp
+  // 2) Si no, generarlo
   if (!filePath) {
+    let generated = null;
     try {
-      const generated = await ytdlpDownloadToFile(baseArgs, targetUrl, tmpDir, stamp);
-      try {
-        fs.mkdirSync(CACHE_DIR, { recursive: true });
-        fs.copyFileSync(generated, cachePath);
-        fs.unlinkSync(generated);
-        filePath = cachePath;
-        isCached = true;
-      } catch (copyErr) {
-        filePath = generated; // si falla la caché, servimos el temporal
-      }
+      generated = await ytdlpDownloadToFile(baseArgs, targetUrl, tmpDir, stamp);
     } catch (err) {
-      console.error('[Download] fallo:', err.message);
-      return res.status(502).json({
-        error: 'No se pudo descargar ni convertir la canción',
-        detail: err.message
-      });
+      console.warn('[Download] yt-dlp falló: ' + err.message);
+      // Plan B: Invidious + ffmpeg (solo audio MP3)
+      const vid = extractYouTubeId(targetUrl);
+      if (vid && FFMPEG_BIN && format === 'mp3') {
+        const src = await resolveViaInvidious(vid);
+        if (src) {
+          const outPath = path.join(tmpDir, 'sonora_' + stamp + '_fb.mp3');
+          try {
+            await ffmpegTranscodeToFile(src, outPath, title, artist);
+            generated = outPath;
+            console.log('[Download] recuperado por plan B (Invidious + ffmpeg)');
+          } catch (ffErr) {
+            console.error('[Download] plan B falló: ' + ffErr.message);
+            return res.status(502).json({
+              error: 'No se pudo descargar la canción',
+              detail: err.message + ' / ' + ffErr.message
+            });
+          }
+        }
+      }
+      if (!generated) {
+        return res.status(502).json({
+          error: 'No se pudo descargar ni convertir la canción',
+          detail: err.message
+        });
+      }
+    }
+
+    try {
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
+      fs.copyFileSync(generated, cachePath);
+      fs.unlinkSync(generated);
+      filePath = cachePath;
+      isCached = true;
+    } catch (copyErr) {
+      filePath = generated;
     }
     pruneDownloadCache();
   } else {
