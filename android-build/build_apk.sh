@@ -7,7 +7,11 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 export PATH="$JAVA_HOME/bin:$PATH"
 
 SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}"
-BUILD_TOOLS="$SDK_ROOT/build-tools/34.0.0"
+# Usar la build-tools más reciente: el D8 de la 34 falla con el JDK 25 de Android Studio
+BUILD_TOOLS="$(ls -d "$SDK_ROOT"/build-tools/* 2>/dev/null | sort -V | tail -1)"
+if [ -z "$BUILD_TOOLS" ]; then
+    BUILD_TOOLS="$SDK_ROOT/build-tools/34.0.0"
+fi
 PLATFORM="$SDK_ROOT/platforms/android-34/android.jar"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR"
@@ -41,9 +45,10 @@ echo "🔗 2/6: Enlazando paquete APK base..."
     compiled_res/resources.zip
 
 echo "☕ 3/6: Compilando código Java..."
-javac -g:none -source 8 -target 8 -cp "$PLATFORM" -d obj src/com/sonoramusic/app/MainActivity.java
+javac --release 8 -g:none -cp "$PLATFORM" -d obj src/com/sonoramusic/app/MainActivity.java
 
 echo "⚡ 4/6: Generando Dalvik Executable (classes.dex) con D8..."
+echo "   (build-tools: $BUILD_TOOLS)"
 "$D8" --lib "$PLATFORM" --min-api 24 --release --output bin obj/com/sonoramusic/app/*.class
 
 echo "📥 5/6: Empaquetando dex en APK..."
