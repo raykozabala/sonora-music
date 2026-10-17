@@ -91,6 +91,28 @@ la base de datos `sonora.db` se reinicia. Para datos persistentes necesitas un
 
 ---
 
+## Opción manual (sin Docker) — si el Blueprint falla
+
+Si prefieres no usar Docker, puedes crear el servicio a mano:
+
+1. Render → **New → Web Service** → conecta el repositorio.
+2. Configura:
+   - **Root Directory:** `server`
+   - **Runtime:** `Node`
+   - **Build Command:** `npm install`
+   - **Start Command:** `npm start`
+   - **Health Check Path:** `/api/health`
+3. En **Environment**, añade:
+   - `SERVER_MODE` = `render`
+   - `NODE_VERSION` = `20`
+4. **Create Web Service**.
+
+> En este modo la app funciona igual (búsqueda, streaming, biblioteca), pero la
+> conversión **YouTube → MP3** puede no funcionar porque `yt-dlp` y `ffmpeg` no
+> vienen instalados. Para eso, usa el `Dockerfile` (recomendado).
+
+---
+
 ## Cambiar variables de entorno
 
 En Render → tu servicio → **Environment**:
