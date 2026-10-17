@@ -1,0 +1,39 @@
+# --- Dependencias ---
+node_modules/
+**/node_modules/
+
+# --- Base de datos en tiempo de ejecución ---
+server/sonora.db
+server/sonora.db-shm
+server/sonora.db-wal
+*.sqlite
+*.sqlite3
+
+# --- Música subida / generada en el servidor ---
+music/*
+!music/.gitkeep
+
+# --- Artefactos de compilación Android ---
+android-build/assets/
+android-build/obj/
+android-build/bin/
+android-build/build/
+android-build/compiled_res/
+android-build/*.apk
+android-build/*.idsig
+
+# --- Copias de APK en la raíz (los buenos viven en public/) ---
+/*.apk
+/*.idsig
+
+# --- Variables de entorno / secretos ---
+.env
+.env.local
+
+# --- Sistema operativo / editores ---
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+.idea/
+.vscode/

@@ -1,0 +1,29 @@
+{
+  "name": "sonora-music-server",
+  "version": "7.6.0",
+  "description": "Sonora Music dual-mode server (local + Render compatible)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "fs": "^0.0.1-security",
+    "multer": "^1.4.5-lts.1",
+    "path": "^0.12.7",
+    "play-dl": "^1.9.7",
+    "yt-search": "^2.13.1"
+  },
+  "keywords": [
+    "music",
+    "streaming",
+    "pwa",
+    "express",
+    "sqlite"
+  ],
+  "author": "Sonora Team",
+  "license": "MIT"
+}

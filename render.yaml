@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# Sonora Music — Blueprint de Render (Infraestructura como código)
+#
+# Cómo usarlo:
+#   1. Sube este repositorio a GitHub.
+#   2. Entra a https://dashboard.render.com/select-repo?type=blueprint
+#   3. Elige este repositorio -> Render lee este archivo y crea todo solo.
+# ---------------------------------------------------------------------------
+services:
+  - type: web
+    name: sonora-music
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: SERVER_MODE
+        value: render
+      - key: NODE_ENV
+        value: production

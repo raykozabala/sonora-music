@@ -1,0 +1,440 @@
+/**
+ * Sonora Music - Responsive Stylesheet
+ * Mobile-first architecture, adaptive grids, notched display safe-areas,
+ * touch targets, tablet & desktop navigation sidebar, and landscape orientation.
+ */
+
+/* ==========================================================================
+   Base Touch Targets & Safe Areas (Mobile Default)
+   ========================================================================== */
+
+/* Minimum touch targets of 44px x 44px */
+button,
+.nav-item,
+.track-item__favorite,
+.track-item__menu,
+.search-clear,
+.btn--icon {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Safe Area Insets for notched displays and gesture navigation bars */
+#app-header {
+  padding-top: max(env(safe-area-inset-top, 0px), 8px);
+  padding-left: max(env(safe-area-inset-left, 0px), 16px);
+  padding-right: max(env(safe-area-inset-right, 0px), 16px);
+}
+
+#bottom-nav {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 6px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+#mini-player {
+  bottom: calc(var(--bottom-nav-height) + max(env(safe-area-inset-bottom, 0px), 6px) + 6px);
+}
+
+#full-player,
+#queue-panel,
+#lyrics-panel {
+  padding-top: max(env(safe-area-inset-top, 0px), 16px);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+  padding-left: max(env(safe-area-inset-left, 0px), 16px);
+  padding-right: max(env(safe-area-inset-right, 0px), 16px);
+}
+
+/* ==========================================================================
+   Small Tablets / Large Mobiles (min-width: 480px)
+   ========================================================================== */
+
+@media (min-width: 480px) {
+  .genre-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+
+  .album-grid,
+  .playlist-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .card {
+    width: 168px;
+  }
+
+  .card--mix {
+    width: 230px;
+  }
+
+  .player__artwork {
+    width: min(65vw, 340px);
+  }
+
+  .sleep-timer-options {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* ==========================================================================
+   Medium Tablets (min-width: 768px)
+   ========================================================================== */
+
+@media (min-width: 768px) {
+  :root {
+    --header-height: 68px;
+    --mini-player-height: 72px;
+  }
+
+  #main-content {
+    padding-left: 24px;
+    padding-right: 24px;
+    max-width: 1080px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  .section__header {
+    padding: 0 4px;
+  }
+
+  .section__scroll {
+    padding: 6px 4px;
+    gap: 18px;
+  }
+
+  .card {
+    width: 180px;
+    padding: 12px;
+  }
+
+  .card--mix {
+    width: 260px;
+  }
+
+  .genre-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+
+  .genre-card {
+    height: 110px;
+  }
+
+  .album-grid,
+  .playlist-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+  }
+
+  .track-list {
+    padding: 0;
+  }
+
+  .track-item {
+    padding: 10px 14px;
+  }
+
+  .track-item__artwork {
+    width: 52px;
+    height: 52px;
+  }
+
+  /* Slide-Over Panels become Side Drawers instead of Full Screen */
+  #queue-panel,
+  #lyrics-panel {
+    inset: 0 0 0 auto;
+    width: 420px;
+    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.5);
+    border-left: 1px solid var(--color-surface-glass-border);
+  }
+
+  /* Modal width on tablet */
+  .modal__content {
+    max-width: 480px;
+  }
+}
+
+/* ==========================================================================
+   Desktop Layout (min-width: 1024px)
+   ========================================================================== */
+
+@media (min-width: 1024px) {
+  :root {
+    --sidebar-width: 250px;
+    --bottom-nav-height: 0px;
+  }
+
+  /* App Shell transforms into Sidebar + Content Layout */
+  #app {
+    display: flex;
+    flex-direction: row;
+  }
+
+  /* Bottom Navigation becomes Left Sidebar */
+  #bottom-nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: var(--sidebar-width);
+    height: 100vh;
+    height: 100dvh;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    padding: 24px 16px;
+    background: var(--color-surface);
+    border-top: none;
+    border-right: 1px solid var(--color-divider);
+    gap: 8px;
+    z-index: 210;
+  }
+
+  .nav-item {
+    flex: 0 0 48px;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 16px;
+    padding: 0 16px;
+    border-radius: var(--radius-md);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    transition: background-color var(--transition-fast), color var(--transition-fast);
+  }
+
+  .nav-item:hover {
+    background-color: var(--color-surface-elevated);
+    color: var(--color-text-primary);
+  }
+
+  .nav-item.active {
+    background-color: rgba(var(--color-primary-rgb), 0.12);
+    color: var(--color-primary);
+  }
+
+  .nav-item svg {
+    width: 22px;
+    height: 22px;
+    transform: none !important;
+  }
+
+  .nav-item::after {
+    left: 0;
+    bottom: auto;
+    top: 50%;
+    transform: translateY(-50%) scale(0);
+    width: 4px;
+    height: 22px;
+    border-radius: 0 4px 4px 0;
+  }
+
+  .nav-item.active::after {
+    transform: translateY(-50%) scale(1);
+  }
+
+  /* Header adjustments for Desktop */
+  #app-header {
+    position: fixed;
+    top: 0;
+    left: var(--sidebar-width);
+    right: 0;
+    width: calc(100% - var(--sidebar-width));
+    padding: 0 32px;
+  }
+
+  /* Main content pushed by sidebar and header */
+  #main-content {
+    margin-left: var(--sidebar-width);
+    margin-top: var(--header-height);
+    width: calc(100% - var(--sidebar-width));
+    max-width: 1280px;
+    padding: 24px 32px calc(var(--mini-player-height) + 40px) 32px;
+  }
+
+  /* Mini Player sits at the bottom of the content area */
+  #mini-player {
+    left: calc(var(--sidebar-width) + 24px);
+    right: 24px;
+    bottom: 16px;
+    max-width: calc(1280px - 48px);
+    margin: 0 auto;
+  }
+
+  /* FAB position above desktop mini player */
+  .fab {
+    bottom: calc(var(--mini-player-height) + 36px);
+    right: 36px;
+  }
+
+  /* Grid Columns */
+  .genre-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+
+  .album-grid,
+  .playlist-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+
+  /* Full Player Overlay in Desktop View: 2-Column Showcase */
+  #full-player {
+    display: grid;
+    grid-template-columns: 1fr 1.1fr;
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas:
+      "header   header"
+      "artwork  content"
+      "artwork  content";
+    gap: 24px 48px;
+    padding: 32px 64px 40px 64px;
+    max-width: 1100px;
+    max-height: 760px;
+    height: 85vh;
+    border-radius: var(--radius-xl);
+    top: 50%;
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--color-surface-glass-border);
+  }
+
+  .player__header {
+    grid-area: header;
+  }
+
+  .player__artwork-container {
+    grid-area: artwork;
+    height: 100%;
+    min-height: auto;
+    margin: 0;
+  }
+
+  .player__artwork {
+    width: min(38vw, 380px);
+  }
+
+  .player__right-column {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 16px;
+  }
+
+  #full-player .player__info,
+  #full-player .player__progress,
+  #full-player .player__controls,
+  #full-player .player__extras,
+  #full-player .player__volume {
+    grid-column: 2;
+  }
+}
+
+/* ==========================================================================
+   Large Desktop Screens (min-width: 1440px)
+   ========================================================================== */
+
+@media (min-width: 1440px) {
+  :root {
+    --sidebar-width: 270px;
+  }
+
+  #main-content {
+    max-width: 1440px;
+  }
+
+  .genre-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+
+  .album-grid,
+  .playlist-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+
+  .card {
+    width: 196px;
+  }
+
+  .card--mix {
+    width: 280px;
+  }
+}
+
+/* ==========================================================================
+   Mobile Landscape Mode
+   ========================================================================== */
+
+@media (max-height: 520px) and (orientation: landscape) {
+  :root {
+    --header-height: 48px;
+    --mini-player-height: 52px;
+    --bottom-nav-height: 48px;
+  }
+
+  #full-player {
+    flex-direction: row;
+    padding: 12px 24px;
+    gap: 20px;
+  }
+
+  .player__header {
+    position: absolute;
+    top: 8px;
+    left: 20px;
+    right: 20px;
+  }
+
+  .player__artwork-container {
+    flex: 0 0 35%;
+    margin-top: 36px;
+  }
+
+  .player__artwork {
+    width: min(45vh, 200px);
+  }
+
+  .player__info,
+  .player__progress,
+  .player__controls,
+  .player__extras,
+  .player__volume {
+    margin-bottom: 6px;
+  }
+
+  #player-title {
+    font-size: 1.1rem;
+  }
+
+  .btn--play {
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    min-height: 48px;
+  }
+
+  .btn--lg {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* ==========================================================================
+   Cross-Platform Scrollbar Standard
+   ========================================================================== */
+
+@supports (scrollbar-color: auto) {
+  * {
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+    scrollbar-width: thin;
+  }
+
+  body.light * {
+    scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+  }
+}

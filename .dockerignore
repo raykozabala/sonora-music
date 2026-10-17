@@ -1,0 +1,12 @@
+**/node_modules
+**/.git
+**/.gitignore
+server/sonora.db
+server/sonora.db-shm
+server/sonora.db-wal
+android-build
+*.apk
+*.idsig
+.env
+.DS_Store
+*.log
