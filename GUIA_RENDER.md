@@ -91,6 +91,69 @@ la base de datos `sonora.db` se reinicia. Para datos persistentes necesitas un
 
 ---
 
+## Paso 6 (MUY IMPORTANTE) — Cookies de YouTube ☁️🔑
+
+YouTube **bloquea las IP de los servidores** (Render, AWS, etc.) con el mensaje
+*"Sign in to confirm you're not a bot"*. Sin esto, **fuera de casa la app no
+puede reproducir ni descargar** música de YouTube (la búsqueda y las letras sí
+funcionan).
+
+La solución es darle a Render **tus cookies de YouTube**. Es como decirle a
+YouTube *"soy un usuario real"*.
+
+### 6.1 Exportar las cookies
+
+1. En el ordenador, abre **Chrome** y entra a https://youtube.com con la sesión iniciada.
+2. Instala la extensión **"Get cookies.txt LOCALLY"** (es de código abierto).
+3. Con YouTube abierto, pulsa el icono de la extensión → **Export**.
+4. Se descarga el archivo `youtube.com_cookies.txt`.
+
+> ⚠️ Usa preferentemente una **cuenta de Google secundaria**: las cookies dan
+> acceso a esa cuenta. No las compartas ni las subas al repositorio
+> (ya están en `.gitignore`).
+
+### 6.2 Subirlas a Render
+
+1. Servicio → menú lateral → **Environment**
+2. Sección **Secret Files** → **+ Add Secret File**
+3. **Filename:** `youtube-cookies.txt`
+   **Contents:** pega **todo** el contenido del archivo
+4. **Save Changes**
+
+El servidor las detecta solo (las busca en `/etc/secrets/youtube-cookies.txt`)
+y trabaja sobre una copia escribible en `/tmp`, porque yt-dlp necesita
+**actualizar** el archivo y los Secret Files son de solo lectura.
+
+### 6.3 Comprobar que llegaron
+
+```
+https://TU-URL.onrender.com/api/system
+```
+
+Debe mostrar:
+
+```json
+"cookies": { "available": true, "valid": true, "path": "/tmp/sonora-cookies-rw.txt" }
+```
+
+### Alternativa: variable de entorno
+
+Si no encuentras *Secret Files*, también acepta:
+
+| Variable             | Valor                                                    |
+| -------------------- | -------------------------------------------------------- |
+| `YTDLP_COOKIES_B64`  | el `cookies.txt` en base64: `base64 < c.txt \| tr -d '\n'` |
+
+⚠️ Es fácil que un valor tan largo se **corte al pegarlo** (Render lo guarda
+mal y yt-dlp falla con `'utf-8' codec can't decode`). El **Secret File** es más fiable.
+
+### Las cookies caducan
+
+Google las renueva cada cierto tiempo (semanas o meses). Si vuelve a aparecer
+*"Sign in to confirm you're not a bot"*, **exporta y sube cookies nuevas**.
+
+---
+
 ## Opción manual (sin Docker) — si el Blueprint falla
 
 Si prefieres no usar Docker, puedes crear el servicio a mano:
@@ -126,8 +189,19 @@ En Render → tu servicio → **Environment**:
 
 ## Redespliegue automático
 
-Con `autoDeploy: true`, cada vez que hagas `git push` a la rama principal,
-Render reconstruye y publica la nueva versión solo. 🎉
+Con `autoDeploy: true`, Render debería reconstruir solo con cada `git push`.
+Si tu servicio **no** se redespliega automáticamente (ocurre cuando se creó
+como *Public Git Repository*), tienes dos opciones:
+
+1. **Manual Deploy** ▾ → **Deploy latest commit** (a mano cada vez).
+2. **Deploy Hook** (recomendado): Settings → **Deploy Hook** → *Create Deploy Hook*.
+   Te da una URL secreta; al llamarla se lanza el despliegue:
+
+   ```bash
+   curl -X POST "https://api.render.com/deploy/srv-XXXX?key=YYYY"
+   ```
+
+   Ideal para automatizarlo o para que otra persona/tool lo dispare.
 
 ---
 
@@ -156,4 +230,8 @@ Si Render te pide tarjeta y prefieres otra opción:
 | "Not Found" en la URL                | El servicio aún no está *Live*, o usaste el nombre equivocado          |
 | Primera visita lenta (~50 s)         | El plan gratis se duerme; es normal, luego va rápido                   |
 | La app no conecta                    | Revisa que la URL empiece con `https://` y no lleve `/` al final       |
+| "Sign in to confirm you're not a bot" | Faltan las **cookies de YouTube** → mira el Paso 6                    |
+| `'utf-8' codec can't decode`          | El base64 se cortó al pegarlo → usa un **Secret File** en vez de la variable |
+| `Read-only file system` en cookies.py | Ya resuelto: el servidor copia las cookies a `/tmp` antes de usarlas   |
 | YouTube no descarga                  | El Docker ya instala `yt-dlp` + `ffmpeg`; si usas otro runtime, instálalos |
+| "No se pudo descargar" fuera de casa  | Revisa `/api/system` → `cookies.valid` debe ser `true`                  |
