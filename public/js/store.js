@@ -106,7 +106,7 @@
         fontSize: 'medium',
         serverMode: 'off', // 'local' | 'render' | 'off'
         serverLocalUrl: 'http://192.168.1.132:3000',
-        serverRenderUrl: 'https://sonora-app-v4.onrender.com',
+        serverRenderUrl: 'https://sonora-music-b1ee.onrender.com',
         language: 'es',
         customBg: null,
         currentPage: 'home',

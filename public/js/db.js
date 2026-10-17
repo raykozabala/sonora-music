@@ -244,7 +244,7 @@
         store.put({ key: 'language', value: 'es' });
         store.put({ key: 'serverMode', value: 'off' });
         store.put({ key: 'serverLocalUrl', value: 'http://192.168.1.132:3000' });
-        store.put({ key: 'serverRenderUrl', value: 'https://sonora-app-v4.onrender.com' });
+        store.put({ key: 'serverRenderUrl', value: 'https://sonora-music-b1ee.onrender.com' });
         store.put({ key: 'crossfade', value: 0 });
         store.put({ key: 'playbackSpeed', value: 1.0 });
         store.put({ key: 'audioQuality', value: 'normal' });

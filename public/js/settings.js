@@ -700,7 +700,7 @@
                 </div>
 
                 <input type="url" id="input-server-render-url" class="server-url-input"
-                       value="https://sonora-app-v4.onrender.com" placeholder="https://sonora-app-v4.onrender.com" spellcheck="false" />
+                       value="https://sonora-music-b1ee.onrender.com" placeholder="https://sonora-music-b1ee.onrender.com" spellcheck="false" />
 
                 <div class="server-card__bottom">
                   <button class="btn-pill btn-pill--secondary" id="btn-test-render">
@@ -1029,7 +1029,7 @@
 
       // Load saved settings
       let localUrl = await getSetting('server_local_url', 'http://192.168.1.132:3000');
-      let renderUrl = await getSetting('server_render_url', 'https://sonora-app-v4.onrender.com');
+      let renderUrl = await getSetting('server_render_url', 'https://sonora-music-b1ee.onrender.com');
       let serverMode = await getSetting('server_mode', 'off'); // 'local' | 'render' | 'off'
 
       if (inputLocal) inputLocal.value = localUrl;

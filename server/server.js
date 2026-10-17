@@ -8,6 +8,9 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const http = require('http');
+const https = require('https');
 const multer = require('multer');
 const { spawn, execSync } = require('child_process');
 
@@ -650,6 +653,138 @@ function findBinary(name) {
 const YTDLP_BIN = findBinary('yt-dlp');
 const FFMPEG_BIN = findBinary('ffmpeg');
 
+// ---------------------------------------------------------------------------
+// Helpers: yt-dlp / ffmpeg wrappers robustos
+// ---------------------------------------------------------------------------
+function safeExec(cmd, timeoutMs) {
+  try {
+    return execSync(cmd, { encoding: 'utf8', timeout: timeoutMs || 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch (e) {
+    return '';
+  }
+}
+
+// Player clients probados, de más compatible a más específico. Sirve para
+// esquivar el bloqueo "Sign in to confirm you're not a bot" en servidores cloud.
+const YT_CLIENT_FALLBACKS = [null, 'android', 'ios', 'web_safari', 'tv', 'mweb'];
+
+/**
+ * Resuelve la URL directa de audio de un video con yt-dlp (--get-url).
+ * Prueba varios "player clients" hasta que uno funcione.
+ */
+function ytdlpResolveAudioUrl(targetUrl) {
+  return new Promise((resolve, reject) => {
+    let idx = 0;
+    let lastError = '';
+
+    function attempt() {
+      if (idx >= YT_CLIENT_FALLBACKS.length) {
+        return reject(new Error(lastError || 'yt-dlp no devolvió ninguna URL'));
+      }
+      const client = YT_CLIENT_FALLBACKS[idx++];
+
+      const args = [
+        '--no-playlist',
+        '--no-warnings',
+        '--quiet',
+        '--no-check-certificates',
+        '-f', 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
+        '--get-url'
+      ];
+      if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
+      args.push(targetUrl);
+
+      const proc = spawn(YTDLP_BIN, args);
+      let out = '';
+      let err = '';
+      let done = false;
+
+      proc.stdout.on('data', (d) => { out += d.toString(); });
+      proc.stderr.on('data', (d) => { err += d.toString(); });
+
+      proc.on('error', (spawnErr) => {
+        if (done) return;
+        done = true;
+        reject(spawnErr);
+      });
+
+      proc.on('close', (code) => {
+        if (done) return;
+        done = true;
+        const first = out.trim().split('\n').map(s => s.trim()).filter(Boolean)[0];
+        if (code === 0 && first && /^https?:\/\//.test(first)) {
+          return resolve(first);
+        }
+        lastError = (err.trim().split('\n').pop() || ('yt-dlp salió con código ' + code));
+        console.warn('[yt-dlp] client=' + (client || 'default') + ' falló: ' + lastError);
+        attempt();
+      });
+    }
+
+    attempt();
+  });
+}
+
+/**
+ * Hace proxy de una URL de audio respetando el header Range (permite "seek").
+ */
+function proxyAudioStream(directUrl, req, res) {
+  const lib = directUrl.startsWith('https') ? https : http;
+  const headers = {
+    'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Sonora Music)',
+    'Accept': '*/*'
+  };
+  if (req.headers.range) headers['Range'] = req.headers.range;
+
+  const upstream = lib.get(directUrl, { headers }, (up) => {
+    res.status(up.statusCode || 200);
+    ['content-type', 'content-length', 'accept-ranges', 'content-range', 'content-encoding'].forEach((h) => {
+      if (up.headers[h]) res.setHeader(h, up.headers[h]);
+    });
+    if (!up.headers['content-type']) res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+    up.pipe(res);
+  });
+
+  upstream.on('error', (err) => {
+    console.error('[Stream] upstream error:', err.message);
+    if (!res.headersSent) res.status(502).json({ error: 'No se pudo leer el audio', detail: err.message });
+    else res.end();
+  });
+
+  upstream.setTimeout(45000, () => { upstream.destroy(new Error('timeout')); });
+  req.on('close', () => { try { upstream.destroy(); } catch (e) {} });
+}
+
+/**
+ * GET /api/system
+ * Diagnóstico: modo, versiones y disponibilidad de yt-dlp / ffmpeg
+ */
+app.get('/api/system', (req, res) => {
+  const ytdlpVersion = safeExec(`"${YTDLP_BIN}" --version`);
+  const ffmpegRaw = safeExec(`"${FFMPEG_BIN}" -version`);
+  res.json({
+    status: 'ok',
+    mode: isRender ? 'render' : 'local',
+    node: process.version,
+    platform: process.platform,
+    version: '7.6.0',
+    ytdlp: {
+      path: YTDLP_BIN,
+      available: !!ytdlpVersion,
+      version: ytdlpVersion || null
+    },
+    ffmpeg: {
+      path: FFMPEG_BIN,
+      available: !!ffmpegRaw,
+      version: ffmpegRaw ? ffmpegRaw.split('\n')[0] : null
+    }
+  });
+});
+
+
 /**
  * GET /api/search/external?q=
  * Live search across YouTube, YouTube Music and SoundCloud
@@ -751,130 +886,157 @@ app.get('/api/stream/external', async (req, res) => {
       }
     }
 
-    if (!targetUrl) return res.status(400).send('Falta url, id o q');
+    if (!targetUrl) return res.status(400).json({ error: 'Falta url, id o q' });
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Accept-Ranges', 'bytes');
 
-    // Clean streaming flags: --quiet and --no-progress prevent text logs from polluting the audio stream
-    const ytdlpArgs = [
-      '--no-playlist',
-      '--no-progress',
-      '--quiet',
-      '--no-warnings',
-      '-f', 'bestaudio/best',
-      '-o', '-',
-      targetUrl
-    ];
-
-    const proc = spawn(YTDLP_BIN, ytdlpArgs);
-
-    // If ffmpeg is available, pipe through ffmpeg to guarantee valid MP3 frames
-    if (FFMPEG_BIN && fs.existsSync(FFMPEG_BIN)) {
-      const ffmpegArgs = [
-        '-i', 'pipe:0',
-        '-vn',
-        '-f', 'mp3',
-        '-acodec', 'libmp3lame',
-        '-b:a', '192k',
-        '-ar', '44100',
-        'pipe:1'
-      ];
-      const ffmpegProc = spawn(FFMPEG_BIN, ffmpegArgs);
-      proc.stdout.pipe(ffmpegProc.stdin);
-      ffmpegProc.stdout.pipe(res);
-
-      proc.on('error', (err) => {
-        console.error('[Stream] yt-dlp error:', err.message);
-        if (!res.headersSent) res.status(500).send('Error en streaming');
-      });
-      ffmpegProc.on('error', (err) => {
-        console.error('[Stream] ffmpeg error:', err.message);
-      });
-      res.on('close', () => {
-        try { proc.kill(); } catch (e) {}
-        try { ffmpegProc.kill(); } catch (e) {}
-      });
-    } else {
-      proc.stdout.pipe(res);
-      proc.on('error', (err) => {
-        console.error('[Stream] error:', err.message);
-        if (!res.headersSent) res.status(500).send('Error en streaming');
-      });
-      res.on('close', () => {
-        try { proc.kill(); } catch (e) {}
+    // Resolvemos la URL directa del audio y hacemos proxy (soporta Range => seek).
+    // Esto es mucho más rápido y fiable que empaquetar todo por ffmpeg.
+    const directUrl = await ytdlpResolveAudioUrl(targetUrl);
+    console.log('[Stream] proxy ->', directUrl.substring(0, 80) + '...');
+    return proxyAudioStream(directUrl, req, res);
+  } catch (outerErr) {
+    console.error('[Stream] Fatal route error:', outerErr.message);
+    if (!res.headersSent) {
+      res.status(502).json({
+        error: 'No se pudo iniciar el streaming',
+        detail: outerErr.message
       });
     }
-  } catch (outerErr) {
-    console.error('[Stream] Fatal route error:', outerErr);
-    if (!res.headersSent) res.status(500).send('Error interno en streaming');
   }
 });
 
+// ---------------------------------------------------------------------------
+// Descarga real a archivo temporal (yt-dlp + ffmpeg en el servidor)
+// ---------------------------------------------------------------------------
+function runOnce(bin, args) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(bin, args);
+    let err = '';
+    proc.stdout.on('data', () => {});
+    proc.stderr.on('data', (d) => { err += d.toString(); });
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      if (code === 0) return resolve();
+      const lines = err.trim().split('\n').filter(Boolean);
+      reject(new Error(lines.slice(-2).join(' | ') || ('código ' + code)));
+    });
+  });
+}
+
+function findGeneratedFiles(dir, prefix) {
+  try {
+    return fs.readdirSync(dir)
+      .filter((f) => f.startsWith(prefix))
+      .map((f) => {
+        const p = path.join(dir, f);
+        let size = 0;
+        try { size = fs.statSync(p).size; } catch (e) {}
+        return { name: f, path: p, size };
+      })
+      .filter((f) => f.size > 1024)
+      .sort((a, b) => b.size - a.size);
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * Descarga con yt-dlp probando varios player clients hasta lograr el archivo.
+ */
+async function ytdlpDownloadToFile(baseArgs, targetUrl, tmpDir, stamp) {
+  let lastError = '';
+  for (let i = 0; i < YT_CLIENT_FALLBACKS.length; i++) {
+    const client = YT_CLIENT_FALLBACKS[i];
+    const prefix = `sonora_${stamp}_${i}_`;
+    const template = path.join(tmpDir, prefix + '%(ext)s');
+    const args = baseArgs.slice();
+    if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
+    args.push('-o', template, targetUrl);
+    try {
+      await runOnce(YTDLP_BIN, args);
+      const files = findGeneratedFiles(tmpDir, prefix);
+      if (files.length > 0) return files[0].path;
+      lastError = 'yt-dlp no generó archivo';
+    } catch (e) {
+      lastError = e.message;
+      console.warn('[Download] client=' + (client || 'default') + ' falló: ' + lastError);
+    }
+  }
+  throw new Error(lastError || 'No se pudo descargar el archivo');
+}
+
 /**
  * GET /api/download/external
- * Downloads in chosen format (MP3: 320k/192k/128k, MP4: 1080p/720p/360p) with embedded ID3 metadata & thumbnail
+ * Descarga real en MP3 (320/192/128k) o MP4 (1080/720/360p) con metadatos.
+ * Devuelve un error real (502) en lugar de un 200 vacío si algo falla.
  */
-app.get('/api/download/external', (req, res) => {
+app.get('/api/download/external', async (req, res) => {
   const targetUrl = req.query.url;
   const format = (req.query.format || 'mp3').toLowerCase();
   const quality = (req.query.quality || (format === 'mp3' ? '320k' : '720p')).toLowerCase();
   const title = (req.query.title || 'Cancion').replace(/[/\\?%*:|"<>]/g, '_').trim();
   const artist = (req.query.artist || 'Sonora').replace(/[/\\?%*:|"<>]/g, '_').trim();
 
-  if (!targetUrl) {
-    return res.status(400).send('Falta el parámetro url');
-  }
+  if (!targetUrl) return res.status(400).json({ error: 'Falta el parámetro url' });
 
   const filename = `${artist} - ${title}.${format}`;
+  const tmpDir = path.join(os.tmpdir(), 'sonora-downloads');
+  try { fs.mkdirSync(tmpDir, { recursive: true }); } catch (e) {}
+  const stamp = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+
+  let baseArgs;
+  if (format === 'mp3') {
+    const q = ['320k', '192k', '128k'].includes(quality) ? quality : '320k';
+    baseArgs = [
+      '--no-playlist', '--no-warnings', '--no-check-certificates',
+      '-x', '--audio-format', 'mp3', '--audio-quality', q,
+      '--add-metadata', '--embed-thumbnail'
+    ];
+  } else {
+    let formatSpec = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
+    if (quality === '1080p') formatSpec = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best';
+    else if (quality === '720p') formatSpec = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best';
+    else if (quality === '360p') formatSpec = 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360]/best';
+    baseArgs = [
+      '--no-playlist', '--no-warnings', '--no-check-certificates',
+      '-f', formatSpec, '--merge-output-format', 'mp4', '--add-metadata'
+    ];
+  }
+
+  let filePath;
+  try {
+    filePath = await ytdlpDownloadToFile(baseArgs, targetUrl, tmpDir, stamp);
+  } catch (err) {
+    console.error('[Download] fallo:', err.message);
+    return res.status(502).json({
+      error: 'No se pudo descargar ni convertir la canción',
+      detail: err.message
+    });
+  }
+
+  let size = 0;
+  try { size = fs.statSync(filePath).size; } catch (e) {}
+  if (!size) return res.status(502).json({ error: 'El archivo generado está vacío' });
 
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length');
+  res.setHeader('Content-Type', format === 'mp4' ? 'video/mp4' : 'audio/mpeg');
+  res.setHeader('Content-Length', size);
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
 
-  if (format === 'mp3') {
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
-
-    const q = ['320k', '192k', '128k'].includes(quality) ? quality : '320k';
-    // Embed ID3 metadata (artist, title) and embedded cover thumbnail
-    const args = ['-x', '--audio-format', 'mp3', '--audio-quality', q, '--add-metadata', '--embed-thumbnail', '-o', '-', targetUrl];
-    const proc = spawn(YTDLP_BIN, args);
-
-    proc.stdout.pipe(res);
-    proc.stderr.on('data', () => {});
-    proc.on('error', err => {
-      console.error('[Download] yt-dlp error:', err);
-      if (!res.headersSent) res.status(500).send('Error procesando descarga');
-    });
-    res.on('close', () => proc.kill());
-  } else {
-    // MP4 Video
-    res.setHeader('Content-Type', 'video/mp4');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
-
-    let formatSpec = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
-    if (quality === '1080p') {
-      formatSpec = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best';
-    } else if (quality === '720p') {
-      formatSpec = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best';
-    } else if (quality === '360p') {
-      formatSpec = 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360]/best';
-    }
-
-    const args = ['-f', formatSpec, '--add-metadata', '-o', '-', targetUrl];
-    const proc = spawn(YTDLP_BIN, args);
-
-    proc.stdout.pipe(res);
-    proc.stderr.on('data', () => {});
-    proc.on('error', err => {
-      console.error('[Download] yt-dlp error:', err);
-      if (!res.headersSent) res.status(500).send('Error procesando descarga');
-    });
-    res.on('close', () => proc.kill());
-  }
+  const cleanup = () => { try { fs.unlinkSync(filePath); } catch (e) {} };
+  const stream = fs.createReadStream(filePath);
+  stream.on('error', (e) => {
+    console.error('[Download] stream error:', e.message);
+    cleanup();
+    if (!res.headersSent) res.status(500).end();
+  });
+  stream.on('close', cleanup);
+  res.on('close', () => { try { stream.destroy(); } catch (e) {} cleanup(); });
+  stream.pipe(res);
 });
 
 /**

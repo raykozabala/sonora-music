@@ -98,7 +98,7 @@
     }
     const mode = Sonora.Store ? Sonora.Store.get('serverMode') : 'local';
     if (mode === 'render') {
-      return (Sonora.Store && Sonora.Store.get('serverRenderUrl')) || 'https://sonora-app-v4.onrender.com';
+      return (Sonora.Store && Sonora.Store.get('serverRenderUrl')) || 'https://sonora-music-b1ee.onrender.com';
     }
     return (Sonora.Store && Sonora.Store.get('serverLocalUrl')) || 'http://192.168.1.132:3000';
   }
@@ -1178,7 +1178,7 @@
     // 2. Fallback to Render server if local failed
     if (!results || results.length === 0) {
       try {
-        const renderUrl = Sonora.Store ? (Sonora.Store.get('serverRenderUrl') || 'https://sonora-app-v4.onrender.com') : 'https://sonora-app-v4.onrender.com';
+        const renderUrl = Sonora.Store ? (Sonora.Store.get('serverRenderUrl') || 'https://sonora-music-b1ee.onrender.com') : 'https://sonora-music-b1ee.onrender.com';
         if (serverBase !== renderUrl) {
           const resp = await fetch(`${renderUrl}/api/search/external?q=${encodeURIComponent(q)}`);
           if (resp.ok) {

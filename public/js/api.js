@@ -9,7 +9,7 @@
 
   var _mode = 'local'; // 'local' | 'render' | 'off' (Default to Local PC server on same Wi-Fi)
   var _localUrl = 'http://192.168.1.132:3000';
-  var _renderUrl = 'https://sonora-app-v4.onrender.com';
+  var _renderUrl = 'https://sonora-music-b1ee.onrender.com';
   var _timeout = 6000;
 
   // Si la app se está viendo servida por el propio servidor (navegador en la PC
