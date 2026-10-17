@@ -9,6 +9,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const http = require('http');
 const https = require('https');
 const multer = require('multer');
@@ -968,10 +969,44 @@ async function ytdlpDownloadToFile(baseArgs, targetUrl, tmpDir, stamp) {
   throw new Error(lastError || 'No se pudo descargar el archivo');
 }
 
+// ---------------------------------------------------------------------------
+// Caché de descargas (evita reconvertir la misma canción dos veces)
+// ---------------------------------------------------------------------------
+const CACHE_DIR = path.join(os.tmpdir(), 'sonora-cache');
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutos
+
+function downloadCachePath(targetUrl, format, quality) {
+  const key = crypto.createHash('sha1')
+    .update(String(targetUrl) + '|' + format + '|' + quality)
+    .digest('hex');
+  return path.join(CACHE_DIR, key + '.' + (format === 'mp4' ? 'mp4' : 'mp3'));
+}
+
+function getCachedDownload(cachePath) {
+  try {
+    const st = fs.statSync(cachePath);
+    if (st.size > 1024 && (Date.now() - st.mtimeMs) < CACHE_TTL) return cachePath;
+  } catch (e) {}
+  return null;
+}
+
+function pruneDownloadCache() {
+  try {
+    const now = Date.now();
+    for (const f of fs.readdirSync(CACHE_DIR)) {
+      const p = path.join(CACHE_DIR, f);
+      try {
+        const st = fs.statSync(p);
+        if (now - st.mtimeMs > CACHE_TTL) fs.unlinkSync(p);
+      } catch (e) {}
+    }
+  } catch (e) {}
+}
+
 /**
  * GET /api/download/external
  * Descarga real en MP3 (320/192/128k) o MP4 (1080/720/360p) con metadatos.
- * Devuelve un error real (502) en lugar de un 200 vacío si algo falla.
+ * Usa caché en disco y devuelve un error real (502) si algo falla.
  */
 app.get('/api/download/external', async (req, res) => {
   const targetUrl = req.query.url;
@@ -1006,15 +1041,34 @@ app.get('/api/download/external', async (req, res) => {
     ];
   }
 
-  let filePath;
-  try {
-    filePath = await ytdlpDownloadToFile(baseArgs, targetUrl, tmpDir, stamp);
-  } catch (err) {
-    console.error('[Download] fallo:', err.message);
-    return res.status(502).json({
-      error: 'No se pudo descargar ni convertir la canción',
-      detail: err.message
-    });
+  // 1) ¿Está ya en caché?
+  const cachePath = downloadCachePath(targetUrl, format, quality);
+  let filePath = getCachedDownload(cachePath);
+  let isCached = !!filePath;
+
+  // 2) Si no, generarlo con yt-dlp
+  if (!filePath) {
+    try {
+      const generated = await ytdlpDownloadToFile(baseArgs, targetUrl, tmpDir, stamp);
+      try {
+        fs.mkdirSync(CACHE_DIR, { recursive: true });
+        fs.copyFileSync(generated, cachePath);
+        fs.unlinkSync(generated);
+        filePath = cachePath;
+        isCached = true;
+      } catch (copyErr) {
+        filePath = generated; // si falla la caché, servimos el temporal
+      }
+    } catch (err) {
+      console.error('[Download] fallo:', err.message);
+      return res.status(502).json({
+        error: 'No se pudo descargar ni convertir la canción',
+        detail: err.message
+      });
+    }
+    pruneDownloadCache();
+  } else {
+    console.log('[Download] servido desde caché:', cachePath);
   }
 
   let size = 0;
@@ -1027,7 +1081,7 @@ app.get('/api/download/external', async (req, res) => {
   res.setHeader('Content-Length', size);
   res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
 
-  const cleanup = () => { try { fs.unlinkSync(filePath); } catch (e) {} };
+  const cleanup = () => { if (!isCached) { try { fs.unlinkSync(filePath); } catch (e) {} } };
   const stream = fs.createReadStream(filePath);
   stream.on('error', (e) => {
     console.error('[Download] stream error:', e.message);

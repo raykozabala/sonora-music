@@ -1834,3 +1834,10 @@ body.light .skeleton {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
+
+/* Progreso de descargas — barra pulsante mientras el servidor prepara el archivo */
+@keyframes sonora-dl-pulse {
+  0%   { margin-left: 0%; }
+  50%  { margin-left: 55%; }
+  100% { margin-left: 0%; }
+}
