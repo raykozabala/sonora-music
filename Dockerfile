@@ -9,11 +9,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
       python3 \
       curl \
+      unzip \
       ca-certificates \
       build-essential \
     && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
     && chmod +x /usr/local/bin/yt-dlp \
     && rm -rf /var/lib/apt/lists/*
+
+# Deno: runtime de JavaScript que yt-dlp necesita para resolver los desafíos de
+# YouTube (nsig / PO token). Sin él, YouTube no entrega ningún formato
+# descargable y todo falla con "Requested format is not available".
+# Es el runtime recomendado y se habilita solo (no hace falta --js-runtimes).
+# El zipapp oficial de yt-dlp ya incluye los scripts yt-dlp-ejs.
+RUN curl -fsSL https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip \
+      -o /tmp/deno.zip \
+    && unzip -o /tmp/deno.zip -d /usr/local/bin \
+    && chmod +x /usr/local/bin/deno \
+    && rm -f /tmp/deno.zip \
+    && deno --version
+
+# Carpeta de caché de Deno (evita escrituras fallidas en el home del contenedor)
+ENV DENO_DIR=/tmp/deno-cache
 
 WORKDIR /app
 

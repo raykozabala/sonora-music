@@ -653,6 +653,9 @@ function findBinary(name) {
 }
 const YTDLP_BIN = findBinary('yt-dlp');
 const FFMPEG_BIN = findBinary('ffmpeg');
+// Deno es el runtime que yt-dlp usa para resolver los desafíos de YouTube.
+// Sin él la extracción falla con "Requested format is not available".
+const DENO_BIN = findBinary('deno');
 
 // ---------------------------------------------------------------------------
 // Cookies de YouTube
@@ -734,6 +737,14 @@ function withCookies(args) {
 }
 
 prepareCookies();
+
+// Los desafíos de YouTube (nsig/PO token) requieren un runtime de JavaScript.
+// Deno es el único habilitado por defecto en yt-dlp.
+(function logJsRuntimeStatus() {
+  const deno = safeExec(`"${DENO_BIN}" --version`);
+  if (deno) console.log('[JS] deno disponible: ' + deno.split('\n')[0]);
+  else console.warn('[JS] SIN deno: yt-dlp no podrá resolver los desafíos de YouTube (las descargas fallarán)');
+})();
 
 // ---------------------------------------------------------------------------
 // Helpers: yt-dlp / ffmpeg wrappers robustos
@@ -871,6 +882,7 @@ function proxyAudioStream(directUrl, req, res) {
 app.get('/api/system', (req, res) => {
   const ytdlpVersion = safeExec(`"${YTDLP_BIN}" --version`);
   const ffmpegRaw = safeExec(`"${FFMPEG_BIN}" -version`);
+  const denoRaw = safeExec(`"${DENO_BIN}" --version`);
   res.json({
     status: 'ok',
     mode: isRender ? 'render' : 'local',
@@ -886,6 +898,11 @@ app.get('/api/system', (req, res) => {
       path: FFMPEG_BIN,
       available: !!ffmpegRaw,
       version: ffmpegRaw ? ffmpegRaw.split('\n')[0] : null
+    },
+    deno: {
+      path: DENO_BIN,
+      available: !!denoRaw,
+      version: denoRaw ? denoRaw.split('\n')[0] : null
     },
     cookies: (function () {
       const c = getCookiesFile();
@@ -2132,15 +2149,15 @@ app.get('/api/stream/:id', (req, res) => {
       res.setHeader('Content-Type', 'audio/mpeg');
       res.setHeader('Accept-Ranges', 'bytes');
 
-      const ytdlpArgs = [
+      const ytdlpArgs = withCookies([
         '--no-playlist',
         '--no-progress',
         '--quiet',
         '--no-warnings',
         '-f', 'bestaudio/best',
-        '-o', '-',
-        `ytsearch1:${query}`
-      ];
+        '-o', '-'
+      ]);
+      ytdlpArgs.push(`ytsearch1:${query}`);
       const proc = spawn(YTDLP_BIN, ytdlpArgs);
 
       if (FFMPEG_BIN && fs.existsSync(FFMPEG_BIN)) {
