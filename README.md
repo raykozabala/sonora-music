@@ -7,6 +7,10 @@ Reproductor de música para Android + aplicación web **PWA**, con un servidor
 > Music/SoundCloud, muestra letras sincronizadas, lee los MP3 de tu teléfono y
 > funciona **offline** con lo ya descargado.
 
+📍 **Ubicación del proyecto:** `~/SonoraMusic` (fuera de `~/Documents` a
+propósito, porque macOS bloquea a los servicios automáticos el acceso a
+Documentos).
+
 ---
 
 ## 📁 Estructura del proyecto

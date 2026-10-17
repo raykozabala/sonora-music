@@ -10,7 +10,7 @@ servidor. Solo hay que estar en la **misma red WiFi**.
 **macOS / Linux**
 
 ```bash
-cd sonora-music
+cd ~/SonoraMusic
 chmod +x start-local.sh stop-local.sh   # solo la primera vez
 ./start-local.sh
 ```
@@ -18,7 +18,7 @@ chmod +x start-local.sh stop-local.sh   # solo la primera vez
 **Windows**
 
 ```bat
-cd sonora-music
+cd C:\ruta\a\SonoraMusic
 start-local.bat
 ```
 
@@ -104,43 +104,49 @@ sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp $(which node)
 
 ---
 
-## 5 — Arranque automático al encender la PC (opcional)
+## 5 — Arranque automático al encender la Mac (ya incluido)
 
-### macOS con `launchd`
+El proyecto incluye el archivo `com.sonora.server.plist`, que hace que el
+servidor arranque **solo** al iniciar sesión y se **reinicie** si se cae.
 
-Crea `~/Library/LaunchAgents/com.sonora.server.plist`:
+> ⚠️ **Importante:** macOS protege la carpeta `~/Documents` y **bloquea** a los
+> servicios automáticos. Por eso el proyecto vive en `~/SonoraMusic` (fuera de
+> Documentos). Si lo mueves a Documentos, el auto-arranque dejará de funcionar.
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
- "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>com.sonora.server</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/bin/bash</string>
-    <string>/Users/rayko/Documents/Codex/Copia de 2026-07-20/sonora-music/start-local.sh</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/tmp/sonora-server.log</string>
-  <key>StandardErrorPath</key><string>/tmp/sonora-server.err</string>
-</dict>
-</plist>
-```
-
-Activar:
+### Instalar
 
 ```bash
-launchctl load ~/Library/LaunchAgents/com.sonora.server.plist
+cd ~/SonoraMusic
+cp com.sonora.server.plist ~/Library/LaunchAgents/
+launchctl load -w ~/Library/LaunchAgents/com.sonora.server.plist
 ```
 
-> Ajusta la ruta si moviste la carpeta. Desactivar: `launchctl unload ...`
+### Comprobar que está activo
 
-> ⚠️ Con `start-local.sh` se abriría el navegador cada vez. Para el arranque
-> automático usa `node server.js` dentro de `server/` en lugar del script, o
-> comenta la línea del `open`.
+```bash
+launchctl list | grep sonora      # debe mostrar com.sonora.server
+curl http://localhost:3000/api/health
+```
+
+### Gestionarlo
+
+```bash
+# Ver los logs
+tail -f /tmp/sonora-server.log
+
+# Detenerlo (hasta el próximo reinicio)
+launchctl unload ~/Library/LaunchAgents/com.sonora.server.plist
+
+# Volver a activarlo
+launchctl load -w ~/Library/LaunchAgents/com.sonora.server.plist
+
+# Quitarlo del todo
+launchctl unload ~/Library/LaunchAgents/com.sonora.server.plist
+rm ~/Library/LaunchAgents/com.sonora.server.plist
+```
+
+> Si el puerto 3000 lo ocupa otro programa, launchd reintentará cada 10 s.
+> Cambia el puerto editando `service-local.sh` (`export PORT=3001`).
 
 ---
 
