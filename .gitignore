@@ -37,3 +37,7 @@ Thumbs.db
 npm-debug.log*
 .idea/
 .vscode/
+
+# --- Cookies de YouTube (nunca subir) ---
+cookies.txt
+server/cookies.txt

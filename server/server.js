@@ -655,6 +655,53 @@ const YTDLP_BIN = findBinary('yt-dlp');
 const FFMPEG_BIN = findBinary('ffmpeg');
 
 // ---------------------------------------------------------------------------
+// Cookies de YouTube
+// Necesarias cuando la IP del servidor está marcada por YouTube
+// ("Sign in to confirm you're not a bot"), que es el caso de Render.
+// ---------------------------------------------------------------------------
+const COOKIES_CANDIDATES = [
+  process.env.YTDLP_COOKIES_FILE,
+  '/etc/secrets/youtube-cookies.txt',
+  '/etc/secrets/cookies.txt',
+  '/tmp/sonora-cookies.txt',
+  path.join(__dirname, 'cookies.txt'),
+  path.join(process.cwd(), 'cookies.txt')
+].filter(Boolean);
+
+// Permite pasar las cookies como variable de entorno en base64
+if (process.env.YTDLP_COOKIES_B64) {
+  try {
+    const decoded = Buffer.from(process.env.YTDLP_COOKIES_B64, 'base64');
+    if (decoded.length > 50) {
+      fs.writeFileSync('/tmp/sonora-cookies.txt', decoded);
+      console.log('[Cookies] cargadas desde la variable YTDLP_COOKIES_B64');
+    }
+  } catch (e) {
+    console.warn('[Cookies] YTDLP_COOKIES_B64 no se pudo decodificar:', e.message);
+  }
+}
+
+function getCookiesFile() {
+  for (const c of COOKIES_CANDIDATES) {
+    try {
+      if (fs.existsSync(c) && fs.statSync(c).size > 50) return c;
+    } catch (e) {}
+  }
+  return null;
+}
+
+function withCookies(args) {
+  const c = getCookiesFile();
+  return c ? args.concat(['--cookies', c]) : args.slice();
+}
+
+(function logCookiesStatus() {
+  const c = getCookiesFile();
+  if (c) console.log('[Cookies] archivo de cookies en uso: ' + c);
+  else console.warn('[Cookies] SIN cookies: YouTube puede bloquear las descargas desde este servidor');
+})();
+
+// ---------------------------------------------------------------------------
 // Helpers: yt-dlp / ffmpeg wrappers robustos
 // ---------------------------------------------------------------------------
 function safeExec(cmd, timeoutMs) {
@@ -705,9 +752,10 @@ function ytdlpResolveAudioUrl(targetUrl) {
         '--get-url'
       ];
       if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
-      args.push(targetUrl);
+      const finalArgs = withCookies(args);
+      finalArgs.push(targetUrl);
 
-      const proc = spawn(YTDLP_BIN, args);
+      const proc = spawn(YTDLP_BIN, finalArgs);
       let out = '';
       let err = '';
       let done = false;
@@ -804,6 +852,10 @@ app.get('/api/system', (req, res) => {
       path: FFMPEG_BIN,
       available: !!ffmpegRaw,
       version: ffmpegRaw ? ffmpegRaw.split('\n')[0] : null
+    },
+    cookies: {
+      available: !!getCookiesFile(),
+      path: getCookiesFile() || null
     }
   });
 });
@@ -850,8 +902,8 @@ app.get('/api/ytdiag', async (req, res) => {
   const clients = ['default', 'android_vr', 'tv_embedded', 'android', 'mweb', 'web_embedded', 'tv', 'ios', 'web_safari'];
   const results = {};
   for (const c of clients) {
-    const args = ['--no-playlist', '--no-warnings', '--quiet', '--no-check-certificates',
-      '-f', 'bestaudio[ext=m4a]/bestaudio/best', '--get-url'];
+    const args = withCookies(['--no-playlist', '--no-warnings', '--quiet', '--no-check-certificates',
+      '-f', 'bestaudio[ext=m4a]/bestaudio/best', '--get-url']);
     if (c !== 'default') args.push('--extractor-args', 'youtube:player_client=' + c);
     args.push(videoUrl);
     try {
@@ -1117,7 +1169,7 @@ async function ytdlpDownloadToFile(baseArgs, targetUrl, tmpDir, stamp) {
     const client = YT_CLIENT_FALLBACKS[i];
     const prefix = `sonora_${stamp}_${i}_`;
     const template = path.join(tmpDir, prefix + '%(ext)s');
-    const args = baseArgs.slice();
+    const args = withCookies(baseArgs);
     if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
     args.push('-o', template, targetUrl);
     try {
