@@ -671,10 +671,18 @@ const COOKIES_CANDIDATES = [
 // Permite pasar las cookies como variable de entorno en base64
 if (process.env.YTDLP_COOKIES_B64) {
   try {
-    const decoded = Buffer.from(process.env.YTDLP_COOKIES_B64, 'base64');
+    const raw = String(process.env.YTDLP_COOKIES_B64).trim();
+    const decoded = Buffer.from(raw, 'base64');
     if (decoded.length > 50) {
       fs.writeFileSync('/tmp/sonora-cookies.txt', decoded);
-      console.log('[Cookies] cargadas desde la variable YTDLP_COOKIES_B64');
+      const txt = decoded.toString('utf8');
+      const looksValid = txt.indexOf('youtube.com') !== -1;
+      console.log('[Cookies] YTDLP_COOKIES_B64 -> ' + decoded.length + ' bytes, válido=' + looksValid);
+      if (!looksValid) {
+        console.error('[Cookies] ⚠️ El valor de YTDLP_COOKIES_B64 no parece un cookies.txt válido (¿se cortó al pegar?)');
+      }
+    } else {
+      console.error('[Cookies] ⚠️ YTDLP_COOKIES_B64 demasiado corto: ' + decoded.length + ' bytes');
     }
   } catch (e) {
     console.warn('[Cookies] YTDLP_COOKIES_B64 no se pudo decodificar:', e.message);
@@ -697,8 +705,13 @@ function withCookies(args) {
 
 (function logCookiesStatus() {
   const c = getCookiesFile();
-  if (c) console.log('[Cookies] archivo de cookies en uso: ' + c);
-  else console.warn('[Cookies] SIN cookies: YouTube puede bloquear las descargas desde este servidor');
+  if (c) {
+    let size = 0;
+    try { size = fs.statSync(c).size; } catch (e) {}
+    console.log('[Cookies] archivo de cookies en uso: ' + c + ' (' + size + ' bytes)');
+  } else {
+    console.warn('[Cookies] SIN cookies: YouTube puede bloquear las descargas desde este servidor');
+  }
 })();
 
 // ---------------------------------------------------------------------------
@@ -853,10 +866,19 @@ app.get('/api/system', (req, res) => {
       available: !!ffmpegRaw,
       version: ffmpegRaw ? ffmpegRaw.split('\n')[0] : null
     },
-    cookies: {
-      available: !!getCookiesFile(),
-      path: getCookiesFile() || null
-    }
+    cookies: (function () {
+      const c = getCookiesFile();
+      if (!c) return { available: false, path: null };
+      let size = 0, sha = null, preview = null, valid = false;
+      try {
+        const buf = fs.readFileSync(c);
+        size = buf.length;
+        sha = crypto.createHash('sha256').update(buf).digest('hex');
+        preview = buf.toString('utf8', 0, 60).replace(/[\r\n]+/g, ' / ');
+        valid = buf.toString('utf8').indexOf('youtube.com') !== -1;
+      } catch (e) {}
+      return { available: true, path: c, size: size, sha256: sha, preview: preview, valid: valid };
+    })()
   });
 });
 
