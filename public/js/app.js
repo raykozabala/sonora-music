@@ -217,7 +217,7 @@
     // Background blur
     if (bgBlur) {
       var artUrl = track.artworkUrl || generateArtwork(track.id, track.title);
-      bgBlur.style.backgroundImage = 'url(' + artUrl + ')';
+      bgBlur.style.backgroundImage = 'url("' + artUrl + '")';
     }
 
     // Shuffle button
@@ -479,7 +479,7 @@
 
     var art = lyricsArtUrl(track);
     if (discImg) discImg.src = art;
-    if (bgBlur) bgBlur.style.backgroundImage = 'url(' + art + ')';
+    if (bgBlur) bgBlur.style.backgroundImage = 'url("' + art + '")';
     if (titleEl) titleEl.textContent = track.title || 'Letra';
     if (artistEl) artistEl.textContent = track.artist || '';
     if (disc) disc.classList.toggle('spinning', !!(Sonora.Player && Sonora.Player.isPlaying && Sonora.Player.isPlaying()));
