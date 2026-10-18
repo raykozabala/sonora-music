@@ -75,28 +75,28 @@
   const MOODS = [
     { id: 'chill', name: 'Chill', emoji: '🧊', gradient: 'linear-gradient(135deg, #4FC3F7, #0288D1)',
       genres: ['ambient', 'indie', 'r&b', 'jazz', 'acoustic'], keywords: ['chill', 'relax', 'calm', 'lofi', 'tranquil'],
-      query: 'chill lofi relaxing music' },
+      query: 'chill indie r&b songs' },
     { id: 'energia', name: 'Energía', emoji: '⚡', gradient: 'linear-gradient(135deg, #FFD54F, #FFA000)',
       genres: ['rock', 'electrónica', 'metal', 'hip-hop', 'reggaeton'], keywords: ['energy', 'power', 'upbeat', 'remix', 'party'],
-      query: 'energetic upbeat rock mix' },
+      query: 'energetic dance rock songs' },
     { id: 'motivacion', name: 'Motivación', emoji: '🔥', gradient: 'linear-gradient(135deg, #FF7043, #D84315)',
       genres: ['rock', 'metal', 'electrónica'], keywords: ['motivation', 'anthem', 'rise', 'strong', 'victory'],
-      query: 'motivational rock anthems' },
+      query: 'motivational songs anthem' },
     { id: 'relajacion', name: 'Relajación', emoji: '🌊', gradient: 'linear-gradient(135deg, #81C784, #388E3C)',
       genres: ['ambient', 'clásica', 'jazz'], keywords: ['relax', 'sleep', 'calm', 'meditation', 'peaceful'],
-      query: 'relaxing calming sleep music' },
+      query: 'relaxing acoustic songs' },
     { id: 'fiesta', name: 'Fiesta', emoji: '🎉', gradient: 'linear-gradient(135deg, #BA68C8, #7B1FA2)',
       genres: ['reggaeton', 'electrónica', 'pop', 'latino'], keywords: ['party', 'dance', 'club', 'fiesta', 'remix'],
-      query: 'party dance hits mix' },
+      query: 'party dance hits songs' },
     { id: 'romantico', name: 'Romántico', emoji: '💕', gradient: 'linear-gradient(135deg, #F06292, #C2185B)',
       genres: ['r&b', 'pop', 'latino'], keywords: ['love', 'romantic', 'heart', 'amor', 'balada'],
-      query: 'romantic love songs baladas' },
+      query: 'romantic love songs' },
     { id: 'workout', name: 'Workout', emoji: '💪', gradient: 'linear-gradient(135deg, #4DB6AC, #00796B)',
       genres: ['rock', 'metal', 'hip-hop', 'electrónica'], keywords: ['workout', 'gym', 'training', 'run', 'pump'],
-      query: 'workout gym motivation music' },
+      query: 'workout gym songs' },
     { id: 'focus', name: 'Focus', emoji: '🎯', gradient: 'linear-gradient(135deg, #7986CB, #303F9F)',
       genres: ['ambient', 'clásica', 'electrónica'], keywords: ['focus', 'study', 'instrumental', 'concentration', 'deep'],
-      query: 'focus study instrumental music' }
+      query: 'focus study instrumental songs' }
   ];
 
   // State
@@ -240,7 +240,8 @@
   }
 
   function renderFilteredView(filterData) {
-    const { title, tracks, gradient, icon, subtitle } = filterData;
+    const { title, tracks, gradient, icon, subtitle, loading } = filterData;
+    const list = tracks || [];
     return `
       <div class="discover-filtered-view">
         <div class="filtered-header" style="background: ${gradient || 'linear-gradient(135deg, #FF4757, #FF6B35)'};">
@@ -251,9 +252,9 @@
           <div class="filtered-hero-content">
             <span class="filtered-icon">${icon || '🎵'}</span>
             <h1 class="filtered-title">${escapeHtml(title)}</h1>
-            <p class="filtered-count">${tracks.length} canciones encontradas ${subtitle ? '• ' + escapeHtml(subtitle) : ''}</p>
+            <p class="filtered-count">${loading ? 'Buscando música…' : (list.length + ' canciones encontradas' + (subtitle ? ' • ' + escapeHtml(subtitle) : ''))}</p>
           </div>
-          ${tracks.length > 0 ? `
+          ${!loading && list.length > 0 ? `
             <button class="btn btn--primary filtered-play-btn" data-action="play-filtered-all">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               Reproducir Todo
@@ -262,11 +263,16 @@
         </div>
 
         <div class="filtered-tracks-list">
-          ${tracks.length === 0 ? `
+          ${loading ? `
+            <div class="discover-empty-state">
+              <p>⏳ Buscando canciones parecidas…</p>
+            </div>
+          ` : (list.length === 0 ? `
             <div class="discover-empty-state">
               <p>No se encontraron canciones para esta selección.</p>
+              <button class="btn btn--primary" data-action="retry-filtered-view" style="margin-top:14px;">Reintentar</button>
             </div>
-          ` : tracks.map((t, idx) => `
+          ` : list.map((t, idx) => `
             <div class="filtered-track-row" data-action="play-filtered-track" data-idx="${idx}" data-track-id="${escapeHtml(t.id)}">
               <div class="track-row__art-wrap">
                 <img class="track-row__art" src="${escapeHtml(t.artworkUrl || generateArtwork(t.id, t.title))}" alt="" loading="lazy" />
@@ -278,7 +284,7 @@
               </div>
               <div class="track-row__duration">${formatTime(t.duration)}</div>
             </div>
-          `).join('')}
+          `).join(''))}
         </div>
       </div>
     `;
@@ -292,8 +298,8 @@
             .page-discover {
               padding-bottom: 96px;
               min-height: 100vh;
-              color: var(--text-color, #ffffff);
-              background: var(--bg-color, #121212);
+              color: var(--color-text-primary);
+              background: var(--color-background);
               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
               user-select: none;
               -webkit-user-select: none;
@@ -450,7 +456,8 @@
             .genre-title {
               font-size: 14px;
               font-weight: 700;
-              color: var(--color-text-primary);
+              color: #FFFFFF;
+              text-shadow: 0 1px 2px rgba(0,0,0,0.45);
             }
             /* Moods Grid */
             .moods-grid {
@@ -482,7 +489,7 @@
             .mood-name {
               font-size: 12px;
               font-weight: 700;
-              color: var(--color-text-primary);
+              color: #FFFFFF;
               text-shadow: 0 1px 2px rgba(0,0,0,0.4);
             }
             /* Top Charts */
@@ -796,6 +803,15 @@
             return;
           }
 
+          // 5b. Reintentar al no encontrar nada
+          const retryBtn = target.closest('[data-action="retry-filtered-view"]');
+          if (retryBtn && activeFilteredView) {
+            const v = activeFilteredView;
+            if (v.type === 'mood') await openMoodView(v.title, '');
+            else await openGenreView(v.title);
+            return;
+          }
+
           // 6. Play Chart Track
           const chartItem = target.closest('[data-action="play-chart-track"]');
           if (chartItem) {
@@ -1001,6 +1017,56 @@
     });
   }
 
+  /**
+   * Construye una vista filtrada (género o estado de ánimo) mostrando primero
+   * un estado de "cargando" y luego las canciones: las de la biblioteca que
+   * encajan + las que devuelve el servidor para esa búsqueda concreta.
+   */
+  async function buildFilteredView(opts) {
+    const view = {
+      type: opts.type,
+      title: opts.title,
+      subtitle: opts.subtitle,
+      gradient: opts.gradient,
+      icon: opts.icon,
+      query: opts.query || '',
+      localTracks: opts.localTracks || [],
+      tracks: [],
+      loading: true
+    };
+    activeFilteredView = view;
+    showFilteredSubView();
+
+    try {
+      const online = view.query ? await fetchOnlineTracks(view.query) : [];
+      // Descartamos sólo las recopilaciones enormes (más de media hora).
+      const fresh = (online || []).filter(t => t && !(t.duration > 1800));
+
+      // Preferimos canciones "normales" (1-10 min) antes que mixes largos.
+      const songRank = (t) => {
+        const d = (t && t.duration) || 0;
+        if (d >= 75 && d <= 600) return 2;
+        if (d > 0 && d < 1500) return 1;
+        return 0;
+      };
+
+      view.tracks = dedupeTracks(view.localTracks.concat(fresh))
+        .map((t, i) => ({ t, i, r: songRank(t) }))
+        .sort((a, b) => (b.r - a.r) || (a.i - b.i))
+        .map(x => x.t)
+        .slice(0, 60);
+    } catch (e) {
+      console.warn('[Discover] No se pudo completar la vista filtrada:', e && e.message);
+    }
+
+    view.loading = false;
+    if (activeFilteredView === view) {
+      const subContent = $('#discover-subview-content', rootElement);
+      if (subContent) subContent.innerHTML = renderFilteredView(view);
+    }
+    return view;
+  }
+
   async function openGenreView(genreName) {
     let tracks = [];
     let genreMeta = null;
@@ -1024,35 +1090,30 @@
       query: genreName
     };
 
-    // Si la biblioteca tiene pocas canciones del género, se completa con
-    // resultados reales del servidor (rock clásico, pop, etc.).
-    if (tracks.length < 6 && genreMeta.query) {
-      const online = await fetchOnlineTracks(genreMeta.query);
-      tracks = dedupeTracks(tracks.concat(online)).slice(0, 60);
-    }
-
-    activeFilteredView = {
+    // Siempre se completa con resultados reales del servidor para el género
+    // (antes sólo si la biblioteca tenía menos de 6 canciones de ese género).
+    await buildFilteredView({
       type: 'genre',
       title: genreMeta.name,
-      tracks: tracks,
+      subtitle: 'Género',
       gradient: genreMeta.gradient,
       icon: genreMeta.icon,
-      subtitle: 'Género'
-    };
-
-    showFilteredSubView();
+      query: genreMeta.query || (genreName + ' music'),
+      localTracks: tracks
+    });
   }
 
   async function openMoodView(moodName, moodId) {
     let tracks = [];
+    let moodMeta = MOODS.find(m => m.id === moodId || m.name.toLowerCase() === (moodName || '').toLowerCase());
+
     try {
       if (allTracks.length === 0 && Sonora.DB && Sonora.DB.tracks) {
         allTracks = (await Sonora.DB.tracks.getAll()) || [];
       }
 
-      const moodMetaLocal = MOODS.find(m => m.id === moodId || m.name.toLowerCase() === (moodName || '').toLowerCase());
-      const genres = (moodMetaLocal && moodMetaLocal.genres) || [];
-      const keywords = (moodMetaLocal && moodMetaLocal.keywords) || [];
+      const genres = (moodMeta && moodMeta.genres ? moodMeta.genres : []).map(g => g.toLowerCase());
+      const keywords = (moodMeta && moodMeta.keywords ? moodMeta.keywords : []).map(k => k.toLowerCase());
       const q = (moodName || '').toLowerCase();
 
       // Cada estado de ánimo filtra por SUS géneros y SUS palabras clave,
@@ -1064,41 +1125,33 @@
         const mood = (t.mood || '').toLowerCase();
         if (mood && (mood.includes(q) || keywords.some(k => mood.includes(k)))) return true;
         if (genre && (genres.some(g => genre.includes(g)) || genres.some(g => g.includes(genre)))) return true;
-        if (keywords.some(k => title.includes(k) || artist.includes(k))) return true;
+        // Palabras clave largas (evita falsos positivos con "calm" en "calmado"... )
+        if (keywords.some(k => k.length > 3 && (title.includes(k) || artist.includes(k)))) return true;
         return false;
       });
-
-      // Se completa con la búsqueda online del estado de ánimo
-      if (tracks.length < 8) {
-        const query = (moodMetaLocal && moodMetaLocal.query) || (moodName + ' music');
-        const online = await fetchOnlineTracks(query);
-        tracks = dedupeTracks(tracks.concat(online)).slice(0, 60);
-      }
-
-      // Último recurso: una muestra variada de la biblioteca
-      if (tracks.length === 0 && allTracks.length > 0) {
-        tracks = allTracks.slice(0, 15);
-      }
     } catch (e) {
       console.error('[Discover] Mood view error:', e);
     }
 
-    const moodMeta = MOODS.find(m => m.id === moodId || m.name.toLowerCase() === (moodName || '').toLowerCase()) || {
+    moodMeta = moodMeta || {
       name: moodName,
       emoji: '🎵',
-      gradient: 'linear-gradient(135deg, #FF4757, #FF6B35)'
+      gradient: 'linear-gradient(135deg, #FF4757, #FF6B35)',
+      query: (moodName || 'musica') + ' songs'
     };
 
-    activeFilteredView = {
+    // Siempre traemos música de internet propia del estado de ánimo (antes
+    // sólo si había menos de 8 locales, así que todas las categorías
+    // acababan mostrando la misma muestra de la biblioteca).
+    await buildFilteredView({
       type: 'mood',
       title: moodMeta.name,
-      tracks: tracks,
+      subtitle: 'Estado de ánimo',
       gradient: moodMeta.gradient,
       icon: moodMeta.emoji,
-      subtitle: 'Estado de ánimo'
-    };
-
-    showFilteredSubView();
+      query: moodMeta.query || (moodMeta.name + ' music'),
+      localTracks: tracks
+    });
   }
 
   function showFilteredSubView() {

@@ -352,15 +352,15 @@
               padding-left: 0;
               padding-right: 0;
               min-height: 100vh;
-              color: var(--text-color, #ffffff);
-              background: var(--bg-color, #121212);
+              color: var(--color-text-primary);
+              background: var(--color-background);
               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             }
             .search-header-sticky {
               position: sticky;
               top: 0;
               z-index: 100;
-              background: rgba(18, 18, 18, 0.98);
+              background: var(--color-surface-elevated);
               backdrop-filter: blur(16px);
               -webkit-backdrop-filter: blur(16px);
               padding: 14px 16px 10px;

@@ -14,13 +14,13 @@
   left: 10px;
   right: 10px;
   height: 62px;
-  background-color: rgba(22, 24, 38, 0.94);
+  background-color: var(--color-surface-glass, rgba(22, 24, 38, 0.94));
   /* Tinte dinámico con el color de la portada (antes --artwork-color se
      calculaba pero ninguna regla lo usaba: por eso se veía gris). */
   background-image: linear-gradient(120deg,
     rgba(var(--artwork-rgb, 255, 71, 87), 0.55) 0%,
     rgba(var(--artwork-rgb, 255, 71, 87), 0.10) 55%,
-    rgba(22, 24, 38, 0) 100%);
+    rgba(0, 0, 0, 0) 100%);
   transition: background-image 0.6s ease, transform var(--transition-normal), opacity var(--transition-normal);
   backdrop-filter: blur(28px);
   -webkit-backdrop-filter: blur(28px);

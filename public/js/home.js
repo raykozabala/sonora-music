@@ -242,8 +242,8 @@
             .page-home {
               padding-bottom: 96px;
               min-height: 100vh;
-              color: var(--text-color, #ffffff);
-              background: var(--bg-color, #121212);
+              color: var(--color-text-primary);
+              background: var(--color-background);
               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
               user-select: none;
               -webkit-user-select: none;
@@ -545,7 +545,7 @@
             /* Skeletons */
             .skeleton-pulse {
               animation: pulse 1.5s infinite ease-in-out;
-              background: linear-gradient(90deg, #1c1c24 25%, #2a2a38 50%, #1c1c24 75%);
+              background: linear-gradient(90deg, var(--color-surface) 25%, var(--color-surface-elevated) 50%, var(--color-surface) 75%);
               background-size: 200% 100%;
             }
             @keyframes pulse {

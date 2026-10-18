@@ -282,20 +282,20 @@
               flex-shrink: 0;
               transition: background .2s ease, box-shadow .2s ease;
             }
-            /* 🔵 Servidor local conectado */
+            /* 🟢 Conectado */
             .status-dot.local {
-              background: #2F80FF;
-              box-shadow: 0 0 9px rgba(47, 128, 255, 0.95);
+              background: #22C55E;
+              box-shadow: 0 0 9px rgba(34, 197, 94, 0.95);
             }
             /* 🟢 Servidor en la nube (Render) conectado */
             .status-dot.render {
               background: #22C55E;
               box-shadow: 0 0 9px rgba(34, 197, 94, 0.95);
             }
-            /* 🟡 Conectado pero lento (> 1 s) */
+            /* 🟠 Conectado pero muy lento (> 1 s) */
             .status-dot.slow {
-              background: #FFC107;
-              box-shadow: 0 0 9px rgba(255, 193, 7, 0.95);
+              background: #FB8C00;
+              box-shadow: 0 0 9px rgba(251, 140, 0, 0.95);
             }
             .status-dot.connected {
               background: #22C55E;
@@ -637,7 +637,7 @@
               bottom: 84px;
               left: 50%;
               transform: translateX(-50%) translateY(20px);
-              background: rgba(26, 26, 46, 0.95);
+              background: var(--color-surface);
               border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.15));
               color: var(--color-text-primary);
               padding: 10px 20px;
@@ -1067,8 +1067,6 @@
       const updateModeUI = (mode) => {
         if (!modeBadge || !modeText || !overallDot) return;
         modeBadge.className = 'server-mode-indicator mode-' + mode;
-        // 🔵 local · 🟢 nube · 🔴 sin conexión
-        overallDot.className = 'status-dot ' + (mode === 'local' ? 'local' : (mode === 'render' ? 'render' : 'disconnected'));
 
         if (cardLocal) cardLocal.classList.toggle('active-server', mode === 'local');
         if (cardRender) cardRender.classList.toggle('active-server', mode === 'render');
@@ -1078,17 +1076,42 @@
         } else if (mode === 'render') {
           modeText.textContent = 'Servidor Render';
         } else {
-          modeText.textContent = 'Desconectado';
+          modeText.textContent = 'Sin conexión';
         }
+        // El color del punto refleja el estado real (verde/naranja/rojo),
+        // no el tipo de servidor.
+        refreshOverallBadge();
       };
 
-      // Colorea el punto según el tipo de servidor y la latencia:
-      // azul = local · verde = nube · amarillo = lento (>1s) · rojo = sin conexión
+      // Colorea el punto según el estado real de la conexión:
+      // 🟢 verde = conectado · 🟠 naranja = muy lento (> 1 s) · 🔴 rojo = sin conexión
       const dotClassFor = (type, latencyMs) => {
         if (latencyMs > 1000) return 'slow';
-        return type === 'render' ? 'render' : 'local';
+        return 'connected';
       };
-      const dotEmojiFor = (cls) => (cls === 'slow' ? '🟡' : (cls === 'render' ? '🟢' : (cls === 'local' ? '🔵' : '🔴')));
+      const dotEmojiFor = (cls) => (cls === 'slow' ? '🟠' : (cls === 'connected' ? '🟢' : '🔴'));
+
+      // Último estado conocido de cada servidor ('connected' | 'slow' | 'off')
+      const probeState = { local: null, render: null };
+
+      // Aplica el color y el texto del badge superior según el modo activo.
+      const refreshOverallBadge = () => {
+        if (!overallDot) return;
+        let st = null;
+        if (serverMode === 'local') {
+          st = probeState.local;
+        } else if (serverMode === 'render') {
+          st = probeState.render;
+        } else {
+          // Sin servidor elegido mostramos el mejor resultado disponible.
+          const vals = [probeState.local, probeState.render].filter(Boolean);
+          if (vals.indexOf('connected') !== -1) st = 'connected';
+          else if (vals.indexOf('slow') !== -1) st = 'slow';
+          else st = 'off';
+        }
+        const cls = (st === 'connected') ? 'connected' : (st === 'slow' ? 'slow' : 'disconnected');
+        overallDot.className = 'status-dot ' + cls;
+      };
 
       // Comprobación automática al abrir Ajustes (sin pulsar nada)
       const autoColorDot = async (type, dot, latencyEl) => {
@@ -1099,22 +1122,26 @@
           let ok = false, ms = 0;
           if (Sonora.API && typeof Sonora.API.testConnection === 'function') {
             const t0 = Date.now();
-            const res = await Sonora.API.testConnection(type);
+            const res = await Sonora.API.testConnection(type, type === 'render' ? 22000 : 9000);
             ms = (res && res.latency) ? res.latency : (Date.now() - t0);
             ok = !!(res && (res.success || res.status === 200 || res.ok));
           }
           if (ok) {
             const cls = dotClassFor(type, ms);
             dot.className = 'status-dot ' + cls;
+            probeState[type] = cls;
             if (latencyEl) latencyEl.textContent = dotEmojiFor(cls) + ' ' + ms + ' ms' + (cls === 'slow' ? ' (lento)' : '');
           } else {
             dot.className = 'status-dot disconnected';
+            probeState[type] = 'off';
             if (latencyEl) latencyEl.textContent = '🔴 Inaccesible';
           }
         } catch (e) {
           dot.className = 'status-dot disconnected';
+          probeState[type] = 'off';
           if (latencyEl) latencyEl.textContent = '🔴 Inaccesible';
         }
+        refreshOverallBadge();
       };
       autoColorDot('local', dotLocal, latencyLocal);
       autoColorDot('render', dotRender, latencyRender);
@@ -1218,7 +1245,7 @@
 
         try {
           if (Sonora.API && typeof Sonora.API.testConnection === 'function') {
-            const res = await Sonora.API.testConnection(type);
+            const res = await Sonora.API.testConnection(type, type === 'render' ? 25000 : 9000);
             latencyMs = res && res.latency ? res.latency : (Date.now() - startTime);
             success = !!(res && (res.success || res.status === 200 || res.ok));
           } else {
@@ -1245,12 +1272,16 @@
         if (success) {
           const cls = dotClassFor(type, latencyMs);
           dot.className = 'status-dot ' + cls;
+          probeState[type] = cls;
+          refreshOverallBadge();
           latencyEl.textContent = dotEmojiFor(cls) + ' ' + latencyMs + ' ms' + (cls === 'slow' ? ' (lento)' : '');
           showToast(cls === 'slow'
             ? `Conectado pero lento: ${latencyMs} ms`
             : `Conexión exitosa (${latencyMs} ms)`, cls === 'slow' ? 'warning' : 'success');
         } else {
           dot.className = 'status-dot disconnected';
+          probeState[type] = 'off';
+          refreshOverallBadge();
           latencyEl.textContent = `🔴 Inaccesible`;
           showToast(`No se pudo conectar al servidor ${type}`, 'error');
         }
@@ -1311,7 +1342,7 @@
       }
 
       // 2. Dark mode (3-way segmented control: light, dark, system)
-      const currentMode = await getSetting('dark_mode', 'dark');
+      const currentMode = await getSetting('darkMode', 'dark');
       const modeButtons = $$('#control-dark-mode .segmented-btn');
       modeButtons.forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-mode') === currentMode);
@@ -1322,13 +1353,13 @@
           if (Sonora.Themes && typeof Sonora.Themes.setDarkMode === 'function') {
             Sonora.Themes.setDarkMode(selected);
           }
-          await setSetting('dark_mode', selected);
+          await setSetting('darkMode', selected);
           showToast(`Modo cambiado: ${btn.textContent.trim()}`);
         });
       });
 
       // 3. Font size (small, medium, large)
-      const currentFontSize = await getSetting('font_size', 'medium');
+      const currentFontSize = await getSetting('fontSize', 'medium');
       const fontButtons = $$('#control-font-size .segmented-btn');
       fontButtons.forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-size') === currentFontSize);
@@ -1339,7 +1370,7 @@
           if (Sonora.Themes && typeof Sonora.Themes.setFontSize === 'function') {
             Sonora.Themes.setFontSize(size);
           }
-          await setSetting('font_size', size);
+          await setSetting('fontSize', size);
           showToast(`Tamaño de fuente: ${btn.textContent.trim()}`);
         });
       });
@@ -1348,7 +1379,7 @@
       const bgInput = $('#custom-bg-input');
       const bgPreview = $('#bg-preview-thumbnail');
       const btnRemoveBg = $('#btn-remove-custom-bg');
-      const currentBg = await getSetting('custom_bg', null);
+      const currentBg = await getSetting('customBg', null);
 
       const updateBgUI = (bgUrl) => {
         if (bgUrl && bgPreview) {
@@ -1368,15 +1399,43 @@
           const file = e.target.files && e.target.files[0];
           if (!file) return;
 
+          showToast('Preparando la imagen…');
+
           const reader = new FileReader();
-          reader.onload = async (event) => {
-            const dataUrl = event.target.result;
-            updateBgUI(dataUrl);
-            if (Sonora.Themes && typeof Sonora.Themes.setCustomBg === 'function') {
-              Sonora.Themes.setCustomBg(dataUrl);
-            }
-            await setSetting('custom_bg', dataUrl);
-            showToast('Fondo personalizado aplicado');
+          reader.onload = (event) => {
+            const original = event.target.result;
+            // Reducimos la foto (1600 px) para que no ocupe megas de más.
+            const img = new Image();
+            img.onload = async () => {
+              let dataUrl = original;
+              try {
+                const max = 1600;
+                const scale = Math.min(1, max / Math.max(img.width || max, img.height || max));
+                const cw = Math.max(1, Math.round((img.width || max) * scale));
+                const ch = Math.max(1, Math.round((img.height || max) * scale));
+                const canvas = document.createElement('canvas');
+                canvas.width = cw;
+                canvas.height = ch;
+                canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
+                dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+              } catch (err) { /* nos quedamos con la original */ }
+
+              updateBgUI(dataUrl);
+              if (Sonora.Themes && typeof Sonora.Themes.setCustomBg === 'function') {
+                Sonora.Themes.setCustomBg(dataUrl);
+              }
+              await setSetting('customBg', dataUrl);
+              showToast('Fondo personalizado aplicado');
+            };
+            img.onerror = async () => {
+              updateBgUI(original);
+              if (Sonora.Themes && typeof Sonora.Themes.setCustomBg === 'function') {
+                Sonora.Themes.setCustomBg(original);
+              }
+              await setSetting('customBg', original);
+              showToast('Fondo personalizado aplicado');
+            };
+            img.src = original;
           };
           reader.readAsDataURL(file);
         });
@@ -1388,7 +1447,7 @@
           if (Sonora.Themes && typeof Sonora.Themes.setCustomBg === 'function') {
             Sonora.Themes.setCustomBg(null);
           }
-          await setSetting('custom_bg', null);
+          await setSetting('customBg', null);
           showToast('Fondo personalizado eliminado');
         });
       }

@@ -19,7 +19,12 @@
   }
 
   function generateArtwork(id, title) {
-    var hue = ((id || 0) * 47) % 360;
+    // Los ids pueden ser texto ("yt_...", "device_..."): antes "id * 47" daba
+    // NaN, el color hsl era inválido y la carátula salía NEGRA.
+    var _seed = String(id == null ? '' : id);
+    var _hash = 0;
+    for (var _i = 0; _i < _seed.length; _i++) { _hash = (_hash * 31 + _seed.charCodeAt(_i)) % 100000; }
+    var hue = (_hash * 47) % 360;
     var label = title ? title.substring(0, 12) : '♪';
     return 'data:image/svg+xml,' + encodeURIComponent(
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">' +
@@ -937,16 +942,24 @@
     var mode = Sonora.Store.get('serverMode') || 'off';
     var latency = Sonora.Store.get('serverLatency') || 0;
     dot.className = 'server-dot';
-    dot.title = 'Servidor desconectado';
+    dot.title = 'Sin conexión con el servidor';
     if (mode === 'local' || mode === 'render') {
+      var who = mode === 'local' ? 'Servidor local' : 'Servidor en la nube';
       if (latency > 1000) {
+        // 🟠 Conectado pero muy lento
         dot.classList.add('server-dot--slow');
-        dot.title = 'Conectado pero lento (' + latency + ' ms)';
+        dot.title = who + ' · lento (' + latency + ' ms)';
+      } else if (latency > 0) {
+        // 🟢 Conectado
+        dot.classList.add('server-dot--connected');
+        dot.title = who + ' · ' + latency + ' ms';
       } else {
-        dot.classList.add(mode === 'local' ? 'server-dot--connected' : 'server-dot--render');
-        dot.title = (mode === 'local' ? 'Servidor local' : 'Servidor en la nube') + (latency ? ' · ' + latency + ' ms' : '');
+        // 🔴 Elegido pero sin respuesta
+        dot.classList.add('server-dot--offline');
+        dot.title = who + ' · sin respuesta';
       }
     } else {
+      // 🔴 Sin servidor
       dot.classList.add('server-dot--offline');
     }
   }
@@ -957,11 +970,13 @@
     if (mode !== 'local' && mode !== 'render') { updateServerStatus(); return; }
     if (!(Sonora.API && typeof Sonora.API.testConnection === 'function')) { updateServerStatus(); return; }
     var t0 = Date.now();
-    Sonora.API.testConnection(mode).then(function (res) {
+    Sonora.API.testConnection(mode, mode === 'render' ? 22000 : 9000).then(function (res) {
       var ms = (res && res.latency) ? res.latency : (Date.now() - t0);
       var ok = !!(res && (res.success || res.status === 200 || res.ok));
-      Sonora.Store.set('serverLatency', ok ? ms : 0);
-      if (!ok) Sonora.Store.set('serverMode', 'off');
+      // Si no responde NO borramos el servidor elegido (antes se ponía en
+      // "off" y la app se quedaba sin servidor para siempre): sólo lo
+      // marcamos en rojo y se reintenta en la siguiente comprobación.
+      Sonora.Store.set('serverLatency', ok ? Math.max(ms, 1) : 0);
       updateServerStatus();
     }).catch(function () {
       Sonora.Store.set('serverLatency', 0);

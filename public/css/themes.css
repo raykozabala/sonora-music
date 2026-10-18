@@ -245,20 +245,19 @@ body.light {
 
 /* ==========================================================================
    Font Size Scales
+   El tamaño real se aplica en <html> (thèmes.js) porque el texto de la app
+   usa "rem": cambiar sólo el tamaño de <body> no tenía ningún efecto.
    ========================================================================== */
 
 body.font-small {
   --base-font-size: 14px;
-  font-size: 14px;
 }
 
 body.font-medium,
 body:not(.font-small):not(.font-large) {
   --base-font-size: 16px;
-  font-size: 16px;
 }
 
 body.font-large {
   --base-font-size: 18px;
-  font-size: 18px;
 }

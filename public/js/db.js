@@ -61,12 +61,44 @@
     return reqP(tx(storeName).getAll());
   }
 
+  /**
+   * Las claves de IndexedDB pueden guardarse como número (ids del servidor) o
+   * como texto (ids externos "yt_...", "ext_...", "device_...") y, además,
+   * cualquier id que llega desde la ruta (#/playlists/12) es SIEMPRE texto.
+   * Antes esto hacía que una playlist recién creada saliera como "no
+   * encontrada": se buscaba "12" cuando estaba guardada como 12.
+   */
+  function idVariant(id) {
+    if (typeof id === 'number') return id;
+    var s = String(id == null ? '' : id).trim();
+    if (s !== '' && /^-?\d+$/.test(s)) return Number(s);
+    return s;
+  }
+
   function getByIdFromStore(storeName, id) {
-    return reqP(tx(storeName).get(typeof id === 'string' ? id : Number(id)));
+    var key = idVariant(id);
+    return reqP(tx(storeName).get(key)).then(function (found) {
+      if (found !== undefined && found !== null) return found;
+      // Segundo intento con el tipo contrario (número ↔ texto).
+      var alt = (typeof key === 'number')
+        ? String(key)
+        : (/^-?\d+$/.test(String(key)) ? Number(key) : null);
+      if (alt === null || alt === key) return found;
+      return reqP(tx(storeName).get(alt));
+    });
   }
 
   function putToStore(storeName, item) {
     return reqP(tx(storeName, 'readwrite').put(item));
+  }
+
+  /** "darkMode" ↔ "dark_mode" (para no duplicar preferencias). */
+  function alternateSettingKey(key) {
+    var k = String(key || '');
+    if (k.indexOf('_') !== -1) {
+      return k.replace(/_([a-z0-9])/g, function (m, c) { return c.toUpperCase(); });
+    }
+    return k.replace(/([A-Z])/g, function (m, c) { return '_' + c.toLowerCase(); });
   }
 
   function addToStore(storeName, item) {
@@ -74,7 +106,7 @@
   }
 
   function deleteFromStore(storeName, id) {
-    return reqP(tx(storeName, 'readwrite').delete(id));
+    return reqP(tx(storeName, 'readwrite').delete(idVariant(id)));
   }
 
   function getAllByIndex(storeName, indexName, value) {
@@ -451,28 +483,60 @@
     },
 
     history: {
-      add: function (trackId) {
-        return addToStore('history', { trackId: Number(trackId), playedAt: new Date().toISOString() }).catch(function (e) {
+      /**
+       * Registra una reproducción. Acepta tanto un id como el objeto
+       * { trackId, track, playedAt } que envía el reproductor.
+       * Antes se hacía Number(trackId): con los objetos daba NaN y con los
+       * ids externos ("yt_...") también, así que el historial quedaba vacío.
+       */
+      add: function (entry) {
+        var trackId = entry;
+        var snapshot = null;
+        if (entry && typeof entry === 'object') {
+          trackId = (entry.trackId !== undefined && entry.trackId !== null)
+            ? entry.trackId
+            : (entry.track && entry.track.id);
+          snapshot = entry.track || null;
+        }
+        if (trackId === undefined || trackId === null) return Promise.resolve();
+        if (typeof trackId === 'number' && isNaN(trackId)) return Promise.resolve();
+
+        return addToStore('history', {
+          trackId: String(trackId),
+          track: snapshot,
+          playedAt: new Date().toISOString()
+        }).catch(function (e) {
           console.error('[DB] History add error:', e);
         });
+      },
+      getAll: function () {
+        return getAllFromStore('history').catch(function () { return []; });
       },
       getRecent: function (limit) {
         return getAllFromStore('history').then(function (all) {
           all.sort(function (a, b) { return new Date(b.playedAt) - new Date(a.playedAt); });
-          var recent = all.slice(0, limit || 20);
+          return all.slice(0, limit || 20);
+        }).then(function (recent) {
           var promises = recent.map(function (h) {
+            // Si guardamos la copia de la canción, la usamos directamente
+            // (así también aparecen las de YouTube/SoundCloud).
+            if (h.track && h.track.title) {
+              var copy = h.track;
+              copy._playedAt = h.playedAt;
+              return Promise.resolve(copy);
+            }
             return getByIdFromStore('tracks', h.trackId).then(function (track) {
               if (track) track._playedAt = h.playedAt;
-              return track;
-            });
+              return track || null;
+            }).catch(function () { return null; });
           });
           return Promise.all(promises).then(function (tracks) {
             return tracks.filter(function (t) { return t !== null && t !== undefined; });
           });
-        });
+        }).catch(function () { return []; });
       },
       getCount: function () {
-        return getAllFromStore('history').then(function (all) { return all.length; });
+        return getAllFromStore('history').then(function (all) { return all.length; }).catch(function () { return 0; });
       },
       clear: function () {
         return new Promise(function (resolve, reject) {
@@ -537,9 +601,20 @@
     },
 
     settings: {
+      /*
+       * Las distintas páginas guardaban las mismas preferencias con nombres
+       * diferentes ("darkMode" vs "dark_mode", "fontSize" vs "font_size"...),
+       * así que al reiniciar la app no se recuperaban. Ahora se aceptan las dos
+       * formas y siempre se escribe la canónica (la que se pidió).
+       */
       get: function (key) {
         return getByIdFromStore('settings', key).then(function (s) {
-          return s ? s.value : null;
+          if (s) return s.value;
+          var alt = alternateSettingKey(key);
+          if (alt === key) return null;
+          return getByIdFromStore('settings', alt).then(function (s2) {
+            return s2 ? s2.value : null;
+          });
         }).catch(function () { return null; });
       },
       set: function (key, value) {

@@ -372,10 +372,24 @@
     try {
       var recs = [];
       if (Sonora.API && typeof Sonora.API.getRecommendations === 'function') {
-        recs = await Sonora.API.getRecommendations(track.artist || '', track.title || '');
+        // Enviamos también el género y lo que ya está en la cola para que no
+        // recomiende cosas que no tienen nada que ver ni repita canciones.
+        var exclude = [];
+        try {
+          exclude = (_queue || []).slice(-30).map(function (q) { return q && q.title ? q.title : ''; }).filter(Boolean);
+        } catch (e) { exclude = []; }
+        recs = await Sonora.API.getRecommendations(
+          track.artist || '',
+          track.title || '',
+          track.genre || '',
+          exclude
+        );
       }
       if (!recs || recs.length === 0) return [];
       var nextRec = recs.find(function (r) {
+        if (!r) return false;
+        if (!r.title) return false;
+        if (r.title === track.title && r.artist === track.artist) return false;
         return !_queue.some(function (q) { return q.title === r.title; });
       }) || recs[0];
       return nextRec ? [nextRec] : [];

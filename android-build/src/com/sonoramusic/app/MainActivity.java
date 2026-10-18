@@ -551,6 +551,62 @@ public class MainActivity extends Activity {
             }
             return arr.toString();
         }
+
+        /**
+         * Devuelve la carátula del álbum como data URL (PNG en base64) para
+         * que el WebView pueda mostrarla. Antes las canciones del teléfono
+         * salían sin foto porque el WebView no puede leer content://albumart.
+         * Devuelve "" si no hay carátula.
+         */
+        @android.webkit.JavascriptInterface
+        public String getAlbumArtwork(String albumId, int size) {
+            if (!activity.hasAudioPermission()) return "";
+            if (albumId == null || albumId.isEmpty()) return "";
+            int px = size > 0 ? size : 160;
+            if (px > 512) px = 512;
+
+            try {
+                long id = Long.parseLong(albumId.trim());
+                Uri artUri = ContentUris.withAppendedId(
+                    Uri.parse("content://media/external/audio/albumart"), id);
+
+                android.graphics.Bitmap bmp = null;
+
+                if (Build.VERSION.SDK_INT >= 29) {
+                    try {
+                        android.util.Size s = new android.util.Size(px, px);
+                        bmp = activity.getContentResolver().loadThumbnail(artUri, s, null);
+                    } catch (Exception ignored) {}
+                }
+
+                if (bmp == null) {
+                    // Alternativa para Android 9 y anteriores
+                    try (java.io.InputStream in = activity.getContentResolver().openInputStream(artUri)) {
+                        if (in != null) {
+                            bmp = android.graphics.BitmapFactory.decodeStream(in);
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                if (bmp == null) return "";
+
+                // Reducimos para no llenar la base de datos
+                int w = bmp.getWidth(), h = bmp.getHeight();
+                if (w > px || h > px) {
+                    float scale = Math.min((float) px / w, (float) px / h);
+                    bmp = android.graphics.Bitmap.createScaledBitmap(
+                        bmp, Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale)), true);
+                }
+
+                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out);
+                String b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+                return "data:image/jpeg;base64," + b64;
+            } catch (Exception e) {
+                Log.w(TAG, "getAlbumArtwork error: " + e.getMessage());
+                return "";
+            }
+        }
     }
 
     public static class SonoraWebViewClient extends WebViewClient {

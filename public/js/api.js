@@ -99,13 +99,46 @@
     /**
      * Get related music recommendations for continuous autoplay
      */
-    getRecommendations: function (artist, title) {
+    /**
+     * Recomendaciones de música similar. Se envían artista, título y género
+     * para que el servidor busque cosas parecidas de verdad, y una lista de
+     * títulos ya escuchados para no repetir.
+     */
+    getRecommendations: function (artist, title, genre, excludeTitles) {
       var base = this.getActiveUrl();
-      var url = base + '/api/recommendations?artist=' + encodeURIComponent(artist || '') + '&title=' + encodeURIComponent(title || '');
-      return fetchWithTimeout(url, {}, 6000)
+      var url = base + '/api/recommendations'
+        + '?artist=' + encodeURIComponent(artist || '')
+        + '&title=' + encodeURIComponent(title || '')
+        + '&genre=' + encodeURIComponent(genre || '')
+        + '&exclude=' + encodeURIComponent((excludeTitles || []).join('|'));
+      return fetchWithTimeout(url, {}, 12000)
         .then(function (res) {
           if (!res.ok) return [];
           return res.json();
+        })
+        .then(function (list) {
+          if (!Array.isArray(list)) return [];
+          // Normalizamos al formato de canción que usa la app (la miniatura
+          // de YouTube pasa a ser la carátula y se deja una URL de stream).
+          return list.map(function (x) {
+            if (!x) return null;
+            var url2 = x.url || x.sourceUrl || '';
+            return {
+              id: x.id || ('yt_' + (x.videoId || '')),
+              videoId: x.videoId || '',
+              title: x.title || 'Pista',
+              artist: x.artist || '',
+              album: x.platform === 'soundcloud' ? 'SoundCloud' : 'YouTube Music',
+              duration: x.duration || 0,
+              artworkUrl: x.artworkUrl || x.thumbnail || x.image || '',
+              sourceUrl: url2,
+              streamUrl: url2
+                ? (base.replace(/\/+$/, '') + '/api/stream/external?url=' + encodeURIComponent(url2))
+                : (x.streamUrl || ''),
+              platform: x.platform || 'youtube',
+              isRecommendation: 1
+            };
+          }).filter(function (t) { return t && t.title; });
         })
         .catch(function () { return []; });
     },

@@ -229,6 +229,15 @@ body.light ::-webkit-scrollbar-thumb {
   background-color: var(--color-background);
 }
 
+/* ── Fondo personalizado ──
+   La foto vive en el fondo de #app (con un velo del color del tema), así que
+   las páginas tienen que dejar verla: antes eran opacas y la tapaban. */
+#app.has-custom-bg #main-content,
+#app.has-custom-bg .page {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
 /* ==========================================================================
    Header (Sticky Glassmorphic)
    ========================================================================== */
@@ -1113,7 +1122,7 @@ body.light .btn--icon:hover {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  background: linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.85), #1a1a2e);
+  background: linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.85), var(--color-surface));
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
 }
 
@@ -2007,23 +2016,19 @@ body.light .skeleton {
 }
 
 /* 🔵 Servidor local conectado */
+/* 🟢 Conectado (local o nube) */
 .server-dot.connected-local,
-.server-dot.server-dot--connected {
-  background: #2F80FF;
-  box-shadow: 0 0 9px rgba(47, 128, 255, 0.9);
-}
-
-/* 🟢 Servidor en la nube (Render) conectado */
 .server-dot.connected-render,
+.server-dot.server-dot--connected,
 .server-dot.server-dot--render {
   background: #22c55e;
   box-shadow: 0 0 9px rgba(34, 197, 94, 0.85);
 }
 
-/* 🟡 Conectado pero lento (> 1 s) */
+/* 🟠 Conectado pero muy lento (> 1 s) */
 .server-dot.server-dot--slow {
-  background: #FFC107;
-  box-shadow: 0 0 9px rgba(255, 193, 7, 0.9);
+  background: #FB8C00;
+  box-shadow: 0 0 9px rgba(251, 140, 0, 0.9);
 }
 
 /* 🔴 Desconectado */

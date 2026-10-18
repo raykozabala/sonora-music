@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.7.0
+ * Sonora Music Server v7.8.0
  * Dual-mode backend server (Local PC & Render.com compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -634,7 +634,7 @@ app.get('/api/health', (req, res) => {
       status: 'ok',
       server: isRender ? 'render' : 'local',
       uptime: Math.floor(process.uptime()),
-      version: '7.7.0'
+      version: '7.8.0'
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
@@ -1120,7 +1120,7 @@ app.get('/api/system', (req, res) => {
     mode: isRender ? 'render' : 'local',
     node: process.version,
     platform: process.platform,
-    version: '7.7.0',
+    version: '7.8.0',
     ytdlp: {
       path: YTDLP_BIN,
       available: !!ytdlpVersion,
@@ -1217,7 +1217,7 @@ const lyricsCache = new Map();
 async function fetchLrclib(url) {
   const resp = await fetch(url, {
     headers: {
-      'User-Agent': 'SonoraMusic/7.7.0 (+https://github.com/raykozabala/sonora-music)'
+      'User-Agent': 'SonoraMusic/7.8.0 (+https://github.com/raykozabala/sonora-music)'
     }
   });
   if (resp.status === 404) return null;
@@ -1581,7 +1581,7 @@ async function resolveViaInvidious(videoId) {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 12000);
       const r = await fetch(base + '/api/v1/videos/' + videoId, {
-        headers: { 'User-Agent': 'SonoraMusic/7.7.0' },
+        headers: { 'User-Agent': 'SonoraMusic/7.8.0' },
         signal: ctrl.signal
       });
       clearTimeout(t);
@@ -1792,26 +1792,84 @@ app.get('/api/recommendations', async (req, res) => {
   try {
     const artist = (req.query.artist || '').trim();
     const title = (req.query.title || '').trim();
-    const query = artist ? `${artist} top songs` : (title ? `${title} related songs` : 'rock pop hits');
+    const genre = (req.query.genre || '').trim();
+    const exclude = (req.query.exclude || '')
+      .split('|')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+
+    // 1) Varias búsquedas en paralelo: canciones del mismo artista, parecidas
+    //    y del mismo género. Así la recomendación tiene que ver con lo que
+    //    se está escuchando (antes sólo se pedía "<artista> top songs").
+    const queries = [];
+    if (artist) queries.push(`${artist} songs`);
+    if (artist && title) queries.push(`${artist} ${title} similar songs`);
+    if (artist) queries.push(`artists similar to ${artist}`);
+    if (genre) queries.push(`${genre} songs playlist`);
+    if (!queries.length && title) queries.push(`${title} related songs`);
+    if (!queries.length) queries.push('music hits');
 
     const yts = require('yt-search');
-    const r = await yts(query);
-    const items = [];
-    if (r && r.videos && r.videos.length > 0) {
-      for (const v of r.videos.slice(0, 8)) {
-        items.push({
-          id: 'yt_' + v.videoId,
-          videoId: v.videoId,
-          title: v.title,
-          artist: v.author ? v.author.name : (artist || 'Música recomendada'),
-          duration: v.seconds || 210,
-          durationText: v.timestamp || '3:30',
-          thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-          platform: 'youtube',
-          url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`
-        });
-      }
-    }
+    const results = await Promise.allSettled(
+      queries.slice(0, 4).map((q) => yts(q))
+    );
+
+    const seen = new Set();
+    const pool = [];
+    results.forEach((r) => {
+      if (!r || r.status !== 'fulfilled' || !r.value || !r.value.videos) return;
+      r.value.videos.forEach((v) => {
+        if (!v || !v.videoId || seen.has(v.videoId)) return;
+        seen.add(v.videoId);
+        pool.push(v);
+      });
+    });
+
+    // 2) Puntuamos para quedarnos con canciones parecidas y descartar
+    //    recopilaciones ("1 hour mix", "best of", "top 100"...).
+    const JUNK = /(full album|\bplaylist\b|\bmix\b|compilation|recopilaci|\d+\s*hours?|1 hour|2 hour|3 hour|top \d+|best of|non-?stop|megamix|mashup|live stream|radio 24)/i;
+    const artistLower = artist.toLowerCase();
+
+    const scored = pool.map((v) => {
+      const t = (v.title || '').toLowerCase();
+      const a = v.author && v.author.name ? v.author.name.toLowerCase() : '';
+      const secs = v.seconds || 0;
+      let score = 0;
+
+      if (artistLower && (a.includes(artistLower) || t.includes(artistLower))) score += 60;
+      if (genre && t.includes(genre.toLowerCase())) score += 14;
+      if (/topic$/i.test(a)) score += 12;                    // canal de audio oficial
+      if (/(official|audio|lyric|letra)/i.test(v.title || '')) score += 8;
+
+      if (secs >= 75 && secs <= 600) score += 25;            // duración de canción
+      else if (secs > 1200) score -= 90;                     // 20 min+: colección
+      else if (secs > 900) score -= 50;
+      else if (secs > 0) score += 5;
+
+      if (JUNK.test(v.title || '')) score -= 120;
+      if (exclude.some((x) => x && t.includes(x))) score -= 200;
+
+      return { v, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+
+    const items = scored
+      .filter((s) => s.score > -40)
+      .slice(0, 12)
+      .map(({ v }) => ({
+        id: 'yt_' + v.videoId,
+        videoId: v.videoId,
+        title: v.title,
+        artist: v.author ? v.author.name : (artist || 'Música recomendada'),
+        duration: v.seconds || 210,
+        durationText: v.timestamp || '',
+        thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+        artworkUrl: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+        platform: 'youtube',
+        url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`
+      }));
+
     res.json(items);
   } catch (err) {
     console.warn('[Recommendations] error:', err.message);
@@ -2825,7 +2883,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('----------------------------------------------------');
-  console.log('🎵 Sonora Music Server v7.7.0');
+  console.log('🎵 Sonora Music Server v7.8.0');
   console.log(`📡 Mode: ${isRender ? 'Render' : 'Local'}`);
   console.log(`🌐 Port: ${PORT}`);
   console.log(`📁 Music directory: ${musicDir}`);

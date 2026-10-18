@@ -331,7 +331,7 @@
           albumId: t.albumId || 1,
           artistId: 1,
           duration: t.duration || 180,
-          artworkUrl: '',
+          artworkUrl: t.artworkUrl || deviceArtworkCache[String(t.albumId || '')] || '',
           filePath: t.filePath,
           rawPath: t.rawPath || '',
           sourceUrl: '',
@@ -377,6 +377,14 @@
       } else {
         deviceNeedsPermission = false;
         deviceTracks = Array.isArray(parsed) ? parsed : [];
+        // Portadas: primero las ya guardadas y después las que falten.
+        await mergeStoredArtwork(deviceTracks);
+        deviceTracks.forEach(function (t) {
+          if (t && !t.artworkUrl) {
+            const c = deviceArtworkCache[String(t.albumId || '')];
+            if (c) t.artworkUrl = c;
+          }
+        });
         await persistDeviceTracks(deviceTracks);
       }
     } catch (e) {
@@ -386,6 +394,143 @@
       deviceLoading = false;
       deviceLoadedOnce = true;
       renderCurrentView();
+      // Sin bloquear: las carátulas se van rellenando en segundo plano.
+      fillDeviceArtwork();
+    }
+  }
+
+  // ── Carátulas de las canciones del teléfono ────────────────────────────────
+  // El WebView no puede leer content://media/.../albumart directamente, así
+  // que Android nos devuelve la portada en base64. Se cachea por álbum y se
+  // guarda en la base de datos para no repetir el trabajo en cada arranque.
+  const deviceArtworkCache = {};
+  let _artworkFilling = false;
+
+  function deviceArtworkBridgeAvailable() {
+    return !!(window.SonoraNative && typeof window.SonoraNative.getAlbumArtwork === 'function');
+  }
+
+  /** Recupera las portadas ya guardadas (para que no salgan sin foto). */
+  async function mergeStoredArtwork(list) {
+    if (!Sonora.DB || !Sonora.DB.tracks || typeof Sonora.DB.tracks.getAll !== 'function') return;
+    try {
+      const all = (await Sonora.DB.tracks.getAll()) || [];
+      const byAlbum = {};
+      const byId = {};
+      all.forEach(function (t) {
+        if (!t) return;
+        if (t.id !== undefined && t.id !== null) byId[String(t.id)] = t;
+        if (t.isDeviceTrack && t.artworkUrl) {
+          const key = String(t.albumId || '');
+          if (key) {
+            byAlbum[key] = t.artworkUrl;
+            deviceArtworkCache[key] = t.artworkUrl;
+          }
+        }
+      });
+      (list || []).forEach(function (t) {
+        if (!t || t.artworkUrl) return;
+        const stored = byId[String(t.id)];
+        if (stored && stored.artworkUrl) { t.artworkUrl = stored.artworkUrl; return; }
+        const byAl = byAlbum[String(t.albumId || '')];
+        if (byAl) t.artworkUrl = byAl;
+      });
+    } catch (e) {
+      console.warn('[Library] No se pudieron recuperar las carátulas guardadas:', e);
+    }
+  }
+
+  /** Repinta las carátulas visibles sin volver a montar toda la vista. */
+  function refreshVisibleArtwork() {
+    const map = {};
+    (deviceTracks || []).forEach(function (t) {
+      if (t && t.artworkUrl) map[String(t.id)] = t.artworkUrl;
+    });
+
+    try {
+      document.querySelectorAll('img.lib-track-art').forEach(function (img) {
+        const item = img.closest('[data-track-id]');
+        const id = item && item.getAttribute('data-track-id');
+        if (id && map[String(id)]) img.src = map[String(id)];
+      });
+      document.querySelectorAll('img.sheet-art').forEach(function (img) {
+        const panel = img.closest('.sheet-panel');
+        if (!panel) return;
+        const id = panel.getAttribute('data-track-id');
+        if (id && map[String(id)]) img.src = map[String(id)];
+      });
+    } catch (e) {}
+
+    // Si está sonando una canción del teléfono, actualizamos el reproductor.
+    try {
+      const cur = Sonora.Player && Sonora.Player.getCurrentTrack && Sonora.Player.getCurrentTrack();
+      if (cur && cur.isDeviceTrack) {
+        const art = map[String(cur.id)] || cur.artworkUrl;
+        if (art) {
+          cur.artworkUrl = art;
+          const artImg = document.getElementById('player-artwork-img');
+          if (artImg) artImg.src = art;
+          const blur = document.getElementById('player-bg-blur');
+          if (blur) blur.style.backgroundImage = 'url("' + art + '")';
+        }
+      }
+    } catch (e) {}
+  }
+
+  /** Guarda las portadas en la base de datos (para que salgan al instante). */
+  async function persistDeviceArtwork(list) {
+    if (!Sonora.DB || !Sonora.DB.tracks || typeof Sonora.DB.tracks.update !== 'function') return;
+    try {
+      const withArt = (list || []).filter(function (t) { return t && t.artworkUrl && t.isDeviceTrack; });
+      for (let i = 0; i < withArt.length; i++) {
+        const t = withArt[i];
+        const stored = await Sonora.DB.tracks.getById(t.id);
+        if (!stored || stored.artworkUrl === t.artworkUrl) continue;
+        stored.artworkUrl = t.artworkUrl;
+        await Sonora.DB.tracks.update(stored);
+      }
+    } catch (e) {
+      console.warn('[Library] No se pudieron guardar las carátulas:', e);
+    }
+  }
+
+  /** Pide a Android las portadas que falten y las va mostrando. */
+  async function fillDeviceArtwork() {
+    if (_artworkFilling || !deviceArtworkBridgeAvailable()) return;
+    if (!(deviceTracks && deviceTracks.length)) return;
+    _artworkFilling = true;
+    try {
+      const pending = [];
+      for (let i = 0; i < deviceTracks.length && pending.length < 220; i++) {
+        const t = deviceTracks[i];
+        if (!t || t.artworkUrl) continue;
+        const key = String(t.albumId || '');
+        if (!key || key === '0') continue;
+        if (deviceArtworkCache[key] === undefined && pending.indexOf(key) === -1) pending.push(key);
+      }
+
+      let changed = 0;
+      for (let i = 0; i < pending.length; i++) {
+        const key = pending[i];
+        let url = '';
+        try { url = window.SonoraNative.getAlbumArtwork(key, 160) || ''; } catch (e) { url = ''; }
+        deviceArtworkCache[key] = url;
+        if (url) {
+          deviceTracks.forEach(function (t) { if (String(t.albumId || '') === key) t.artworkUrl = url; });
+          changed++;
+        }
+        if (i % 5 === 4) {
+          if (changed) refreshVisibleArtwork();
+          await new Promise(function (r) { setTimeout(r, 0); });
+        }
+      }
+
+      if (changed) {
+        refreshVisibleArtwork();
+        await persistDeviceArtwork(deviceTracks);
+      }
+    } finally {
+      _artworkFilling = false;
     }
   }
 
@@ -691,8 +836,8 @@
             .page-library {
               padding-bottom: 96px;
               min-height: 100vh;
-              color: var(--text-color, #ffffff);
-              background: var(--bg-color, #121212);
+              color: var(--color-text-primary);
+              background: var(--color-background);
               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
               user-select: none;
               -webkit-user-select: none;
@@ -1251,7 +1396,7 @@
               bottom: 84px;
               left: 50%;
               transform: translateX(-50%) translateY(20px);
-              background: rgba(30, 30, 40, 0.95);
+              background: var(--color-surface);
               color: var(--color-text-primary);
               border: 1px solid rgba(255, 255, 255, 0.15);
               backdrop-filter: blur(8px);

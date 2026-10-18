@@ -92,15 +92,36 @@
   function rgbStr(rgb) { return 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')'; }
 
   /**
+   * Color del velo que se pone encima del fondo personalizado: mezcla el color
+   * del tema con el fondo (oscuro o claro) y se deja semitransparente para que
+   * la foto se siga viendo y combine con la apariencia elegida.
+   */
+  function customBgTint() {
+    var body = document.body;
+    var light = body.classList.contains('light');
+    var themeObj = THEMES.find(function (t) { return t.id === _currentTheme; });
+    if (!themeObj || _currentTheme === 'system') {
+      // Sin color de tema: velo neutro
+      return light ? 'rgba(255,255,255,0.45)' : 'rgba(10,10,12,0.55)';
+    }
+    var primary = hexToRgb(themeObj.color);
+    var base = light ? [255, 255, 255] : [11, 11, 13];
+    var tint = mixWith(primary, base, light ? 0.82 : 0.74);
+    // En claro el velo es más suave (la foto se ve más "brillante").
+    var alpha = light ? 0.42 : 0.52;
+    return 'rgba(' + tint[0] + ',' + tint[1] + ',' + tint[2] + ',' + alpha + ')';
+  }
+
+  /**
    * Tinta TODA la aplicación con el color del tema: el fondo, las tarjetas y
    * la barra superior dejan de ser grises y pasan a combinar con el acento.
-   * Con el tema "Sistema" (o con fondo personalizado) se usa el aspecto neutro.
+   * Con el tema "Sistema" se usa el aspecto neutro.
    */
   function applyTintedBackground() {
     var body = document.body;
 
-    // Tema Sistema o fondo propio → colores neutros originales
-    if (_currentTheme === 'system' || _customBg) {
+    // Tema Sistema → colores neutros originales
+    if (_currentTheme === 'system') {
       ['--color-background', '--color-surface', '--color-surface-elevated', '--color-surface-glass', '--color-surface-glass-border']
         .forEach(function (p) { body.style.removeProperty(p); });
       return;
@@ -138,7 +159,10 @@
       body.classList.add(_currentDarkMode);
     }
 
-    // Font size
+    // Font size — el texto usa "rem" (relativo a la RAÍZ). Antes se cambiaba
+    // sólo <body>, así que los botones S/M/L no hacían nada.
+    var rootPx = _currentFontSize === 'small' ? 14 : (_currentFontSize === 'large' ? 18 : 16);
+    try { document.documentElement.style.fontSize = rootPx + 'px'; } catch (e) {}
     body.classList.remove('font-small', 'font-medium', 'font-large');
     body.classList.add('font-' + _currentFontSize);
 
@@ -146,10 +170,19 @@
     var app = document.getElementById('app');
     if (app) {
       if (_customBg) {
-        app.style.backgroundImage = 'url(' + _customBg + ')';
+        // La foto se ve "medio transparente" y teñida con el color del tema:
+        // una capa de color translúcido ENCIMA de la imagen (en CSS la primera
+        // capa de background-image es la que queda arriba).
+        var tint = customBgTint();
+        app.style.backgroundImage = 'linear-gradient(' + tint + ', ' + tint + '), url("' + _customBg + '")';
+        app.style.backgroundSize = 'cover';
+        app.style.backgroundPosition = 'center';
+        app.style.backgroundRepeat = 'no-repeat';
         app.classList.add('has-custom-bg');
       } else {
         app.style.backgroundImage = '';
+        app.style.backgroundSize = '';
+        app.style.backgroundPosition = '';
         app.classList.remove('has-custom-bg');
       }
     }
@@ -222,11 +255,12 @@
     setCustomBg: function (imageUrl) {
       _customBg = imageUrl || null;
       applyThemeToDOM();
-      Sonora.Store.set('customBg', _customBg);
-      // Don't save large data URLs to settings DB
-      if (_customBg && _customBg.length < 50000) {
-        Sonora.DB.settings.set('customBg', _customBg);
-      }
+      // localStorage puede quedarse sin espacio con fotos grandes: no es
+      // crítico porque la imagen también se guarda en IndexedDB.
+      try { Sonora.Store.set('customBg', _customBg); } catch (e) {}
+      try {
+        Sonora.DB.settings.set('customBg', _customBg || '');
+      } catch (e) {}
     },
 
     /**
@@ -240,8 +274,8 @@
     removeCustomBg: function () {
       _customBg = null;
       applyThemeToDOM();
-      Sonora.Store.set('customBg', null);
-      Sonora.DB.settings.set('customBg', '');
+      try { Sonora.Store.set('customBg', null); } catch (e) {}
+      try { Sonora.DB.settings.set('customBg', ''); } catch (e) {}
     },
 
     /**

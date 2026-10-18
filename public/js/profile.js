@@ -182,7 +182,7 @@
               flex-direction: column;
               align-items: center;
               text-align: center;
-              background: linear-gradient(180deg, var(--color-surface, #1a1a2e) 0%, rgba(26,26,46,0.5) 100%);
+              background: linear-gradient(180deg, var(--color-surface, #1a1a2e) 0%, rgba(0,0,0,0) 100%);
               border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.08));
               border-radius: var(--radius-xl, 24px);
               padding: 28px 20px 22px 20px;
@@ -588,7 +588,7 @@
               bottom: 84px;
               left: 50%;
               transform: translateX(-50%) translateY(20px);
-              background: rgba(26, 26, 46, 0.95);
+              background: var(--color-surface);
               border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.15));
               color: var(--color-text-primary);
               padding: 10px 20px;
@@ -950,7 +950,7 @@
       historyListEl.innerHTML = historyItems.map(item => {
         const track = item.track || item;
         const artwork = track.artworkUrl || generateArtwork(track.id, track.title);
-        const playedAtStr = formatRelativeTime(item.timestamp || item.lastPlayed || item.playedAt);
+        const playedAtStr = formatRelativeTime(item.playedAt || item._playedAt || item.timestamp || item.lastPlayed);
 
         return `
           <div class="history-item" data-track-id="${escapeHtml(track.id)}">

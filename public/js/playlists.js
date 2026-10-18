@@ -60,6 +60,11 @@
 
   // Active event listener cleanup tracker
   let _listeners = [];
+  // Cuando se elige "Editar" desde la lista, se navega al detalle y se abre
+  // automáticamente el panel de edición (nombre + foto).
+  let _pendingOpenEdit = false;
+  // Playlist recién creada sin canciones → abrir "Añadir canciones" al entrar.
+  let _pendingOpenAdd = false;
   function addTrackedListener(el, event, handler, options) {
     if (!el) return;
     try {
@@ -399,6 +404,77 @@
       });
     }
     return localPl;
+  }
+
+  /**
+   * Abre el selector de fotos del teléfono y devuelve la imagen ya reducida
+   * como data URL (para no llenar la base de datos con fotos enormes).
+   */
+  function pickImageAsDataUrl(maxSize, onDone) {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+
+    input.addEventListener('change', function () {
+      var file = input.files && input.files[0];
+      if (!file) { input.remove(); return; }
+      var reader = new FileReader();
+      reader.onload = function () {
+        var img = new Image();
+        img.onload = function () {
+          try {
+            var max = maxSize || 512;
+            var scale = Math.min(1, max / Math.max(img.width || max, img.height || max));
+            var cw = Math.max(1, Math.round((img.width || max) * scale));
+            var ch = Math.max(1, Math.round((img.height || max) * scale));
+            var canvas = document.createElement('canvas');
+            canvas.width = cw;
+            canvas.height = ch;
+            var ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, cw, ch);
+            onDone(canvas.toDataURL('image/jpeg', 0.85));
+          } catch (e) {
+            onDone(reader.result);
+          }
+          input.remove();
+        };
+        img.onerror = function () { onDone(reader.result); input.remove(); };
+        img.src = reader.result;
+      };
+      reader.onerror = function () { input.remove(); };
+      reader.readAsDataURL(file);
+    });
+
+    input.click();
+  }
+
+  /** Muestra el código de una playlist colaborativa con opciones de copiar. */
+  function showPlaylistCode(pl) {
+    var code = String(pl.code || '').toUpperCase();
+    if (!code) {
+      showToast('Esta playlist no es colaborativa', 'info');
+      return;
+    }
+    var link = buildJoinLink(code);
+    openActionSheet({
+      title: '🔑 Código: ' + code,
+      subtitle: pl.name,
+      actions: [
+        { icon: '📋', label: 'Copiar solo el código', onSelect: function () {
+            copyPlainText(code).then(function (ok) {
+              showToast(ok ? 'Código copiado: ' + code : 'No se pudo copiar', ok ? 'success' : 'error');
+            });
+          } },
+        { icon: '🔗', label: 'Copiar enlace de invitación', onSelect: function () {
+            copyPlainText(link).then(function (ok) {
+              showToast(ok ? 'Enlace copiado' : 'No se pudo copiar', ok ? 'success' : 'error');
+            });
+          } },
+        { icon: '📤', label: 'Compartir invitación', onSelect: function () { sharePlaylist(pl); } }
+      ]
+    });
   }
 
   function showPlaylistInfo(pl) {    var isCollab = !!(pl.isCollaborative || pl.code);
@@ -1052,7 +1128,7 @@
               bottom: 84px;
               left: 50%;
               transform: translateX(-50%) translateY(20px);
-              background: rgba(26, 26, 46, 0.95);
+              background: var(--color-surface);
               border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.15));
               color: var(--color-text-primary);
               padding: 10px 20px;
@@ -1370,6 +1446,25 @@
             </div>
             <div class="modal-body">
               <div class="form-group">
+                <label>Foto de la playlist</label>
+                <div style="display:flex;align-items:center;gap:14px;">
+                  <img id="edit-playlist-art-preview" alt="Portada"
+                       src=""
+                       style="width:86px;height:86px;border-radius:16px;object-fit:cover;background:var(--color-surface-elevated);box-shadow:0 6px 18px rgba(0,0,0,.35);" />
+                  <div style="display:flex;flex-direction:column;gap:8px;">
+                    <button type="button" class="btn-action btn-action--secondary" id="btn-pick-playlist-art">🖼️ Elegir foto</button>
+                    <button type="button" class="btn-action btn-action--secondary" id="btn-clear-playlist-art">Quitar foto</button>
+                  </div>
+                </div>
+              </div>
+              <div class="form-group" id="edit-playlist-code-group" style="display:none;">
+                <label>Código para invitar (playlist colaborativa)</label>
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <input type="text" id="edit-playlist-code" class="form-input" readonly />
+                  <button type="button" class="btn-action btn-action--secondary" id="btn-copy-edit-code">Copiar</button>
+                </div>
+              </div>
+              <div class="form-group">
                 <label for="edit-playlist-name">Nombre</label>
                 <input type="text" id="edit-playlist-name" class="form-input" required />
               </div>
@@ -1504,26 +1599,25 @@
           subtitle: `${count} ${count === 1 ? 'canción' : 'canciones'}${isCollab ? ' · Colaborativa' : ''}`,
           actions: [
             { icon: '▶️', label: 'Reproducir', onSelect: () => navigateDetail(pl.id) },
-            { icon: '🔗', label: isCollab ? 'Compartir e invitar' : 'Compartir', onSelect: () => sharePlaylist(pl) },
-            { icon: '✏️', label: 'Cambiar nombre', onSelect: () => openInputDialog({
-                title: 'Cambiar nombre',
-                value: pl.name,
-                confirmLabel: 'Guardar',
-                required: true,
-                onConfirm: async (name) => {
-                  try {
-                    await Sonora.DB.playlists.update({ ...pl, name, userCreated: 1 });
-                    await syncCollabPlaylistToServer({ ...pl, name, userCreated: 1 });
-                    showToast('Nombre actualizado');
-                    await this.initMainView();
-                  } catch (e) { showToast('No se pudo actualizar', 'error'); }
-                }
-              }) },
+            isCollab ? {
+              icon: '🔑',
+              label: 'Ver y copiar código: ' + String(pl.code || '').toUpperCase(),
+              onSelect: () => showPlaylistCode(pl)
+            } : null,
+            {
+              icon: '✏️',
+              label: 'Editar (nombre y foto)',
+              onSelect: () => {
+                _pendingOpenEdit = true;
+                navigateDetail(pl.id);
+              }
+            },
+            { icon: '📤', label: isCollab ? 'Compartir e invitar' : 'Compartir', onSelect: () => sharePlaylist(pl) },
             { icon: 'ℹ️', label: 'Información', onSelect: () => showPlaylistInfo(pl) },
             { icon: '🗑️', label: 'Eliminar playlist', danger: true, onSelect: () => confirmDialog({
                 title: 'Eliminar playlist',
-                message: `¿Eliminar "${pl.name}"? Esta acción no se puede deshacer.`,
-                confirmLabel: 'Eliminar',
+                message: `¿Estás segura de que quieres eliminar "${pl.name}"? Esta acción no se puede deshacer.`,
+                confirmLabel: 'Sí, eliminar',
                 danger: true,
                 onConfirm: async () => {
                   try {
@@ -1571,6 +1665,9 @@
                   <div class="playlist-card__title" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
                   <div class="playlist-card__meta">${metaText}</div>
                   ${p.code ? `<div class="playlist-card__code" title="Código para unirse">#️⃣ ${escapeHtml(p.code)}</div>` : ''}
+                  <button type="button" class="playlist-card__more" data-playlist-id="${escapeHtml(p.id)}"
+                          aria-label="Opciones de la playlist"
+                          style="position:absolute;top:8px;right:8px;width:34px;height:34px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;line-height:1;cursor:pointer;background:rgba(0,0,0,.45);color:#fff;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:3;">⋯</button>
                 </div>
               </div>
             `;
@@ -1608,6 +1705,19 @@
               if (didLongPress) { didLongPress = false; e.preventDefault(); e.stopPropagation(); return; }
               navigateDetail(pid);
             });
+
+            // Botón ⋯ → mismas acciones que la pulsación larga
+            const moreBtn = $('.playlist-card__more', card);
+            if (moreBtn) {
+              addTrackedListener(moreBtn, 'click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+                card.classList.remove('playlist-card--holding');
+                const pl = allPlaylists.find(x => String(x.id) === String(pid));
+                if (pl) openPlaylistActions(pl);
+              });
+            }
           });
         }
       }
@@ -1681,8 +1791,14 @@
               ? 'Playlist colaborativa creada · código ' + (created && created.code || '')
               : 'Playlist creada correctamente');
             closeCreateModal();
-            // Refresh view
-            await this.initMainView();
+            // Entramos directo a la playlist nueva y abrimos el buscador para
+            // añadir canciones de la biblioteca enseguida.
+            if (created && created.id !== undefined) {
+              _pendingOpenAdd = true;
+              navigateDetail(created.id);
+            } else {
+              await this.initMainView();
+            }
           } catch (err) {
             console.error('[Playlists] Create failed', err);
             showToast('Error al crear la playlist', 'error');
@@ -1790,7 +1906,9 @@
           if (Sonora.DB && Sonora.DB.history) {
             recentHistory = (await Sonora.DB.history.getRecent(50)) || [];
           }
-          const recentTrackIds = recentHistory.map(h => h.trackId || (h.track && h.track.id)).filter(Boolean);
+          const recentTrackIds = recentHistory
+            .map(h => h && (h.trackId || (h.track && h.track.id) || h.id))
+            .filter(Boolean);
           const uniqueIds = Array.from(new Set(recentTrackIds));
           playlist = {
             id: 'recent',
@@ -1810,6 +1928,12 @@
           };
         } else if (Sonora.DB && Sonora.DB.playlists) {
           playlist = await Sonora.DB.playlists.getById(playlistId);
+          // Red de seguridad: si no aparece por id exacto, buscamos comparando
+          // como texto (por si la clave se guardó con otro tipo).
+          if (!playlist && typeof Sonora.DB.playlists.getAll === 'function') {
+            const list = (await Sonora.DB.playlists.getAll()) || [];
+            playlist = list.find(p => p && String(p.id) === String(playlistId)) || null;
+          }
         }
       } catch (e) {
         console.warn('[Playlists] Error loading detail', e);
@@ -2179,6 +2303,14 @@
       const btnCancelEdit = $('#btn-cancel-edit');
       const btnSubmitEdit = $('#btn-submit-edit');
 
+      // Foto pendiente (se aplica al guardar)
+      let pendingArtwork = playlist.artworkUrl || '';
+      const artPreview = $('#edit-playlist-art-preview');
+      const setArtPreview = (url) => {
+        if (!artPreview) return;
+        artPreview.src = (url && url.trim()) ? url : generateArtwork(playlist.id || 1, playlist.name || 'Playlist');
+      };
+
       const openEditModal = () => {
         if (modalEdit) {
           const nameIn = $('#edit-playlist-name');
@@ -2187,10 +2319,47 @@
           if (nameIn) nameIn.value = playlist.name || '';
           if (descIn) descIn.value = playlist.description || '';
           if (collabIn) collabIn.checked = !!playlist.isCollaborative;
+
+          // Código de invitación visible (si ya es colaborativa)
+          pendingArtwork = playlist.artworkUrl || '';
+          setArtPreview(pendingArtwork);
+          const codeGroup = $('#edit-playlist-code-group');
+          const codeInput = $('#edit-playlist-code');
+          if (codeGroup && codeInput) {
+            if (playlist.code) {
+              codeGroup.style.display = 'block';
+              codeInput.value = playlist.code;
+            } else {
+              codeGroup.style.display = 'none';
+              codeInput.value = '';
+            }
+          }
+
           modalEdit.classList.add('active');
           setTimeout(() => nameIn && nameIn.focus(), 150);
         }
       };
+
+      const btnPickArt = $('#btn-pick-playlist-art');
+      const btnClearArt = $('#btn-clear-playlist-art');
+      const btnCopyEditCode = $('#btn-copy-edit-code');
+      if (btnPickArt) addTrackedListener(btnPickArt, 'click', () => {
+        pickImageAsDataUrl(640, (dataUrl) => {
+          pendingArtwork = dataUrl;
+          setArtPreview(dataUrl);
+        });
+      });
+      if (btnClearArt) addTrackedListener(btnClearArt, 'click', () => {
+        pendingArtwork = '';
+        setArtPreview('');
+        showToast('Foto quitada · no olvides guardar', 'info');
+      });
+      if (btnCopyEditCode) addTrackedListener(btnCopyEditCode, 'click', () => {
+        const codeInput = $('#edit-playlist-code');
+        copyPlainText(codeInput ? codeInput.value : '').then((ok) => {
+          showToast(ok ? 'Código copiado' : 'No se pudo copiar', ok ? 'success' : 'error');
+        });
+      });
 
       const closeEditModal = () => {
         if (modalEdit) modalEdit.classList.remove('active');
@@ -2218,9 +2387,17 @@
           playlist.description = newDesc;
           playlist.isCollaborative = newCollab ? 1 : 0;
           playlist.userCreated = playlist.userCreated || 1;
+          // Foto elegida por el usuario ('' = sin foto propia).
+          if (pendingArtwork !== undefined && pendingArtwork !== null) {
+            playlist.artworkUrl = String(pendingArtwork).trim();
+          }
           // Si se activa la colaboración y aún no tiene código, se genera uno.
           if (newCollab && !playlist.code) {
             playlist.code = genCollabCode();
+          }
+          if (!newCollab) {
+            // Al desactivarla se quita el código para no compartir de más.
+            playlist.code = '';
           }
           playlist.updatedAt = new Date().toISOString();
 
@@ -2417,6 +2594,18 @@
           if (_debounceTimer) clearTimeout(_debounceTimer);
           _debounceTimer = setTimeout(() => searchOnlineTracks(val), 550);
         });
+      }
+
+      // Al elegir "Editar" desde la lista se abre el panel automáticamente.
+      if (_pendingOpenEdit) {
+        _pendingOpenEdit = false;
+        setTimeout(() => { try { openEditModal(); } catch (e) {} }, 240);
+      }
+
+      // Playlist recién creada → invitamos a añadir canciones de la biblioteca.
+      if (_pendingOpenAdd && !(playlist.trackIds || []).length) {
+        _pendingOpenAdd = false;
+        setTimeout(() => { try { openAddModal(); } catch (e) {} }, 380);
       }
     },
 
