@@ -1,4 +1,4 @@
-# 🎵 Sonora Music v7.6
+# 🎵 Sonora Music v7.6.1
 
 Reproductor de música para Android + aplicación web **PWA**, con un servidor
 **dual** (tu computadora en la misma WiFi **o** la nube en Render).
@@ -128,10 +128,10 @@ La app intenta, en este orden: **Local → Render → Offline**.
 
 ```bash
 cd android-build
-VERSION=7.6 ./build_apk.sh   # requiere Android SDK + JDK
+VERSION=7.6.1 ./build_apk.sh   # requiere Android SDK + JDK
 ```
 
-Genera `SonoraMusic_v7.6.apk` en la raíz y lo copia a `public/`.
+Genera `SonoraMusic_v7.6.1.apk` en la raíz y lo copia a `public/`.
 
 ---
 

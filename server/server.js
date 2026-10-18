@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.6.0
+ * Sonora Music Server v7.6.1
  * Dual-mode backend server (Local PC & Render.com compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -624,7 +624,7 @@ app.get('/api/health', (req, res) => {
       status: 'ok',
       server: isRender ? 'render' : 'local',
       uptime: Math.floor(process.uptime()),
-      version: '7.6.0'
+      version: '7.6.1'
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
@@ -943,7 +943,7 @@ app.get('/api/system', (req, res) => {
     mode: isRender ? 'render' : 'local',
     node: process.version,
     platform: process.platform,
-    version: '7.6.0',
+    version: '7.6.1',
     ytdlp: {
       path: YTDLP_BIN,
       available: !!ytdlpVersion,
@@ -1040,7 +1040,7 @@ const lyricsCache = new Map();
 async function fetchLrclib(url) {
   const resp = await fetch(url, {
     headers: {
-      'User-Agent': 'SonoraMusic/7.6 (+https://github.com/raykozabala/sonora-music)'
+      'User-Agent': 'SonoraMusic/7.6.1 (+https://github.com/raykozabala/sonora-music)'
     }
   });
   if (resp.status === 404) return null;
@@ -1365,7 +1365,7 @@ async function resolveViaInvidious(videoId) {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 12000);
       const r = await fetch(base + '/api/v1/videos/' + videoId, {
-        headers: { 'User-Agent': 'SonoraMusic/7.6' },
+        headers: { 'User-Agent': 'SonoraMusic/7.6.1' },
         signal: ctrl.signal
       });
       clearTimeout(t);
@@ -2549,7 +2549,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('----------------------------------------------------');
-  console.log('🎵 Sonora Music Server v7.6.0');
+  console.log('🎵 Sonora Music Server v7.6.1');
   console.log(`📡 Mode: ${isRender ? 'Render' : 'Local'}`);
   console.log(`🌐 Port: ${PORT}`);
   console.log(`📁 Music directory: ${musicDir}`);
