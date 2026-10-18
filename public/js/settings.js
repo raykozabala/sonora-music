@@ -127,6 +127,28 @@
     } catch (e) {}
   }
 
+  // Presets del ecualizador (espejo de player.js, por si aún no está listo).
+  const EQ_PRESETS_GAINS = {
+    flat: [0, 0, 0, 0, 0],
+    bass: [9, 6, 1, -1, -2],
+    voice: [-3, 2, 4, 4, 1],
+    rock: [5, 3, -1, 3, 5],
+    electro: [7, 4, 0, 3, 6],
+    party: [10, 7, 2, 4, 8],
+    lofi: [4, 0, -3, -2, -6]
+  };
+
+  function getEqPresetGains(key) {
+    try {
+      if (Sonora.Player && typeof Sonora.Player.getEQPresets === 'function') {
+        const list = Sonora.Player.getEQPresets() || [];
+        const found = list.find(p => p.key === key);
+        if (found && Array.isArray(found.gains)) return found.gains.slice();
+      }
+    } catch (e) {}
+    return EQ_PRESETS_GAINS[key] ? EQ_PRESETS_GAINS[key].slice() : null;
+  }
+
   // Theme definition palette
   const THEMES_LIST = [
     { id: 'system', name: 'Sistema', color: 'linear-gradient(135deg, #FF4757, #4FC3F7)' },
@@ -806,6 +828,56 @@
               </div>
             </div>
 
+            <!-- Ecualizador de 5 bandas + presets (incluye Bass Boost y Fiesta) -->
+            <div class="setting-item-row" style="flex-direction:column; align-items:stretch; gap:8px;">
+              <div class="setting-label-box" style="display:flex; justify-content:space-between; align-items:baseline; width:100%;">
+                <span class="setting-label-title">🎚️ Ecualizador</span>
+                <span class="setting-label-sub" id="eq-preset-label" style="margin:0;">Plano</span>
+              </div>
+
+              <div class="segmented-control" id="control-eq-preset" style="flex-wrap:wrap; gap:6px;">
+                <button class="segmented-btn active" data-eq-preset="flat">Plano</button>
+                <button class="segmented-btn" data-eq-preset="bass">🔊 Bass Boost</button>
+                <button class="segmented-btn" data-eq-preset="voice">🎙️ Voz</button>
+                <button class="segmented-btn" data-eq-preset="rock">🎸 Rock</button>
+                <button class="segmented-btn" data-eq-preset="electro">🎧 Electrónica</button>
+                <button class="segmented-btn" data-eq-preset="party">🎉 Fiesta</button>
+                <button class="segmented-btn" data-eq-preset="lofi">🌙 Suave</button>
+              </div>
+
+              <div id="eq-sliders" style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
+                <div class="eq-band" style="display:grid; grid-template-columns:62px 1fr 54px; align-items:center; gap:10px;">
+                  <span style="font-size:11.5px;font-weight:700;color:var(--color-text-secondary);">60 Hz</span>
+                  <input type="range" min="-12" max="12" step="1" value="0" data-eq-band="0" style="width:100%;accent-color:var(--color-primary,#FF4757);" />
+                  <span class="eq-band-value" style="font-size:11.5px;font-weight:800;text-align:right;color:var(--color-text-primary);">0 dB</span>
+                </div>
+                <div class="eq-band" style="display:grid; grid-template-columns:62px 1fr 54px; align-items:center; gap:10px;">
+                  <span style="font-size:11.5px;font-weight:700;color:var(--color-text-secondary);">230 Hz</span>
+                  <input type="range" min="-12" max="12" step="1" value="0" data-eq-band="1" style="width:100%;accent-color:var(--color-primary,#FF4757);" />
+                  <span class="eq-band-value" style="font-size:11.5px;font-weight:800;text-align:right;color:var(--color-text-primary);">0 dB</span>
+                </div>
+                <div class="eq-band" style="display:grid; grid-template-columns:62px 1fr 54px; align-items:center; gap:10px;">
+                  <span style="font-size:11.5px;font-weight:700;color:var(--color-text-secondary);">910 Hz</span>
+                  <input type="range" min="-12" max="12" step="1" value="0" data-eq-band="2" style="width:100%;accent-color:var(--color-primary,#FF4757);" />
+                  <span class="eq-band-value" style="font-size:11.5px;font-weight:800;text-align:right;color:var(--color-text-primary);">0 dB</span>
+                </div>
+                <div class="eq-band" style="display:grid; grid-template-columns:62px 1fr 54px; align-items:center; gap:10px;">
+                  <span style="font-size:11.5px;font-weight:700;color:var(--color-text-secondary);">3.6 kHz</span>
+                  <input type="range" min="-12" max="12" step="1" value="0" data-eq-band="3" style="width:100%;accent-color:var(--color-primary,#FF4757);" />
+                  <span class="eq-band-value" style="font-size:11.5px;font-weight:800;text-align:right;color:var(--color-text-primary);">0 dB</span>
+                </div>
+                <div class="eq-band" style="display:grid; grid-template-columns:62px 1fr 54px; align-items:center; gap:10px;">
+                  <span style="font-size:11.5px;font-weight:700;color:var(--color-text-secondary);">14 kHz</span>
+                  <input type="range" min="-12" max="12" step="1" value="0" data-eq-band="4" style="width:100%;accent-color:var(--color-primary,#FF4757);" />
+                  <span class="eq-band-value" style="font-size:11.5px;font-weight:800;text-align:right;color:var(--color-text-primary);">0 dB</span>
+                </div>
+              </div>
+
+              <button class="btn-pill btn-pill--secondary" id="btn-eq-reset" style="align-self:flex-start; margin-top:12px;">
+                Restablecer ecualizador
+              </button>
+            </div>
+
             <div class="setting-item-row">
               <div class="setting-label-box">
                 <span class="setting-label-title" data-i18n="settings.speed">Velocidad de reproducción</span>
@@ -1468,22 +1540,120 @@
           crossfadeLabel.textContent = Number(sec) === 0 ? '0 segundos (Desactivado)' : `${sec} segundos de fundido`;
         }
       };
-      updateCrossfadeLabel(savedCrossfade);
 
+      // Aplica el fundido en segundos (el reproductor trabaja en milisegundos).
+      const applyCrossfade = async (sec, silent) => {
+        sec = Number(sec) || 0;
+        updateCrossfadeLabel(sec);
+        crossfadeBtns.forEach(b => b.classList.toggle('active', Number(b.getAttribute('data-crossfade')) === sec));
+        if (Sonora.Player && typeof Sonora.Player.setCrossfade === 'function') {
+          Sonora.Player.setCrossfade(sec * 1000);
+        }
+        await setSetting('playback_crossfade', sec);
+        if (!silent) showToast(sec === 0 ? 'Crossfade desactivado' : `Crossfade: ${sec}s`);
+      };
+
+      updateCrossfadeLabel(savedCrossfade);
       crossfadeBtns.forEach(btn => {
         btn.classList.toggle('active', Number(btn.getAttribute('data-crossfade')) === Number(savedCrossfade));
-        addTrackedListener(btn, 'click', async () => {
-          crossfadeBtns.forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          const sec = Number(btn.getAttribute('data-crossfade'));
-          updateCrossfadeLabel(sec);
-          if (Sonora.Player && typeof Sonora.Player.setCrossfade === 'function') {
-            Sonora.Player.setCrossfade(sec);
-          }
-          await setSetting('playback_crossfade', sec);
-          showToast(`Crossfade: ${sec}s`);
+        addTrackedListener(btn, 'click', () => applyCrossfade(btn.getAttribute('data-crossfade')));
+      });
+
+      // 1b. Ecualizador (5 bandas + presets: Bass Boost, Voz, Rock, Electrónica, Fiesta…)
+      const EQ_PRESET_NAMES = {
+        flat: 'Plano', bass: 'Bass Boost', voice: 'Voz', rock: 'Rock',
+        electro: 'Electrónica', party: 'Fiesta 🎉', lofi: 'Suave', custom: 'Personalizado'
+      };
+      const eqPresetBtns = $$('#control-eq-preset .segmented-btn');
+      const eqSliders = $$('#eq-sliders input[data-eq-band]');
+      const eqPresetLabel = $('#eq-preset-label');
+
+      const markEqPreset = (key) => {
+        eqPresetBtns.forEach(b => b.classList.toggle('active', b.getAttribute('data-eq-preset') === key));
+        if (eqPresetLabel) eqPresetLabel.textContent = EQ_PRESET_NAMES[key] || 'Personalizado';
+      };
+
+      const refreshEqSliders = () => {
+        for (let i = 0; i < eqSliders.length; i++) {
+          const g = Number(eqSliders[i].value) || 0;
+          const out = eqSliders[i].parentElement.querySelector('.eq-band-value');
+          if (out) out.textContent = (g > 0 ? '+' : '') + g + ' dB';
+        }
+      };
+
+      const applyEq = async (gains, presetKey, silent) => {
+        const arr = [];
+        for (let i = 0; i < 5; i++) {
+          const g = Math.max(-12, Math.min(12, Number(gains && gains[i]) || 0));
+          arr.push(g);
+          if (Sonora.Player && typeof Sonora.Player.setEQ === 'function') Sonora.Player.setEQ(i, g);
+          if (eqSliders[i]) eqSliders[i].value = g;
+        }
+        refreshEqSliders();
+        markEqPreset(presetKey || 'custom');
+        await setSetting('eqGains', arr);
+        await setSetting('eqPreset', presetKey || 'custom');
+
+        // El preset "Fiesta" además activa un fundido de 5 s entre canciones.
+        if (presetKey === 'party') {
+          await applyCrossfade(5, true);
+          if (!silent) showToast('🎉 Modo fiesta: graves realzados + fundido de 5s');
+        } else if (!silent) {
+          showToast(`Ecualizador: ${EQ_PRESET_NAMES[presetKey] || 'Personalizado'}`);
+        }
+      };
+
+      const savedEqPreset = await getSetting('eqPreset', 'flat');
+      let savedEqGains = await getSetting('eqGains', null);
+      if (!Array.isArray(savedEqGains)) savedEqGains = null;
+
+      if (savedEqGains) {
+        for (let i = 0; i < eqSliders.length && i < savedEqGains.length; i++) {
+          eqSliders[i].value = Math.max(-12, Math.min(12, Number(savedEqGains[i]) || 0));
+        }
+      } else {
+        const preset = getEqPresetGains(savedEqPreset);
+        for (let i = 0; i < eqSliders.length && preset && i < preset.length; i++) {
+          eqSliders[i].value = preset[i];
+        }
+      }
+      refreshEqSliders();
+      markEqPreset(savedEqPreset);
+      // Se aplica al reproductor sin volver a guardar ni avisar.
+      for (let i = 0; i < eqSliders.length; i++) {
+        if (Sonora.Player && typeof Sonora.Player.setEQ === 'function') {
+          Sonora.Player.setEQ(i, Number(eqSliders[i].value) || 0);
+        }
+      }
+
+      eqPresetBtns.forEach(btn => {
+        addTrackedListener(btn, 'click', () => {
+          const key = btn.getAttribute('data-eq-preset');
+          const gains = getEqPresetGains(key);
+          if (gains) applyEq(gains, key);
         });
       });
+
+      eqSliders.forEach(slider => {
+        addTrackedListener(slider, 'input', () => {
+          const i = Number(slider.getAttribute('data-eq-band'));
+          const g = Number(slider.value) || 0;
+          if (Sonora.Player && typeof Sonora.Player.setEQ === 'function') Sonora.Player.setEQ(i, g);
+          const out = slider.parentElement.querySelector('.eq-band-value');
+          if (out) out.textContent = (g > 0 ? '+' : '') + g + ' dB';
+          markEqPreset('custom');
+        });
+        addTrackedListener(slider, 'change', () => {
+          const gains = eqSliders.map(s => Number(s.value) || 0);
+          setSetting('eqGains', gains);
+          setSetting('eqPreset', 'custom');
+        });
+      });
+
+      const eqResetBtn = $('#btn-eq-reset');
+      if (eqResetBtn) {
+        addTrackedListener(eqResetBtn, 'click', () => applyEq([0, 0, 0, 0, 0], 'flat'));
+      }
 
       // 2. Playback Speed
       const savedSpeed = await getSetting('playback_speed', 1.0);

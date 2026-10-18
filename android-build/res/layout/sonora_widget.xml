@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Widget de pantalla de inicio de Sonora Music.
+  Muestra la carátula, el título y el artista de la canción que suena, con
+  controles de anterior / play-pausa / siguiente.
+  OJO: sólo se pueden usar vistas compatibles con RemoteViews.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:padding="12dp"
+    android:background="@drawable/sonora_widget_bg">
+
+    <ImageView
+        android:id="@+id/widget_art"
+        android:layout_width="54dp"
+        android:layout_height="54dp"
+        android:scaleType="centerCrop"
+        android:src="@mipmap/ic_launcher"
+        android:contentDescription="Carátula" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginLeft="10dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginRight="8dp"
+        android:layout_marginEnd="8dp">
+
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFFFF"
+            android:text="Sonora Music" />
+
+        <TextView
+            android:id="@+id/widget_artist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textSize="11sp"
+            android:textColor="#B3FFFFFF"
+            android:text="Toca para abrir" />
+    </LinearLayout>
+
+    <ImageButton
+        android:id="@+id/widget_prev"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:padding="7dp"
+        android:scaleType="fitCenter"
+        android:background="@android:color/transparent"
+        android:src="@android:drawable/ic_media_previous"
+        android:contentDescription="Anterior" />
+
+    <ImageButton
+        android:id="@+id/widget_toggle"
+        android:layout_width="42dp"
+        android:layout_height="42dp"
+        android:padding="7dp"
+        android:scaleType="fitCenter"
+        android:background="@android:color/transparent"
+        android:src="@android:drawable/ic_media_play"
+        android:contentDescription="Reproducir o pausar" />
+
+    <ImageButton
+        android:id="@+id/widget_next"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:padding="7dp"
+        android:scaleType="fitCenter"
+        android:background="@android:color/transparent"
+        android:src="@android:drawable/ic_media_next"
+        android:contentDescription="Siguiente" />
+</LinearLayout>

@@ -63,7 +63,48 @@
   let debounceTimeout = null;
   let currentExternalResults = [];
   let currentFilter = 'all'; // 'all' | 'youtube' | 'soundcloud'
+  // Filtros de contenido (independientes de la plataforma)
+  let contentFilters = { covers: false, noCover: false, spanish: false };
+  let durationFilter = 'any'; // 'any' | 'short' | 'mid' | 'long'
   let activeModalTrack = null;
+
+  const COVER_WORDS = ['cover', 'covers', 'versión', 'version', 'tribute', 'reimagined', 'rendition', 'karaoke', 'instrumental', 'remix', 'fanmade', 'fan made'];
+  const SPANISH_WORDS = ['español', 'espanol', 'esp.', 'latino', 'latina', 'castellano', 'subtitulado', 'sub español', 'traducida', 'traducido', 'en español'];
+
+  function hasAnyWord(title, artist, words) {
+    const hay = ((title || '') + ' ' + (artist || '')).toLowerCase();
+    for (let i = 0; i < words.length; i++) {
+      if (hay.indexOf(words[i]) !== -1) return true;
+    }
+    return false;
+  }
+
+  function isCoverResult(r) {
+    return hasAnyWord(r.title, r.artist, COVER_WORDS);
+  }
+
+  function isSpanishResult(r) {
+    return hasAnyWord(r.title || '', r.artist || '', SPANISH_WORDS);
+  }
+
+  /** Aplica los filtros de contenido/duración elegidos por el usuario. */
+  function applyContentFilters(list) {
+    return (list || []).filter(r => {
+      if (contentFilters.covers && !isCoverResult(r)) return false;
+      if (contentFilters.noCover && isCoverResult(r)) return false;
+      if (contentFilters.spanish && !isSpanishResult(r)) return false;
+
+      const d = Number(r.duration) || 0;
+      if (durationFilter === 'short' && !(d > 0 && d <= 300)) return false;
+      if (durationFilter === 'mid' && !(d > 300 && d <= 1200)) return false;
+      if (durationFilter === 'long' && !(d > 1200)) return false;
+      return true;
+    });
+  }
+
+  function hasActiveContentFilters() {
+    return !!(contentFilters.covers || contentFilters.noCover || contentFilters.spanish) || durationFilter !== 'any';
+  }
 
   // History helpers
   function getSearchHistory() {
@@ -161,24 +202,48 @@
         <button type="button" class="filter-pill ${currentFilter === 'youtube' ? 'active' : ''}" data-filter="youtube">🔴 YouTube</button>
         <button type="button" class="filter-pill ${currentFilter === 'soundcloud' ? 'active' : ''}" data-filter="soundcloud">🟠 SoundCloud</button>
       </div>
+      <div class="search-filter-pills" style="padding-top:0;">
+        <button type="button" class="filter-pill ${contentFilters.covers ? 'active' : ''}" data-cfilter="covers">🎤 Covers</button>
+        <button type="button" class="filter-pill ${contentFilters.noCover ? 'active' : ''}" data-cfilter="noCover">🎧 Sin covers</button>
+        <button type="button" class="filter-pill ${contentFilters.spanish ? 'active' : ''}" data-cfilter="spanish">🇪🇸 Español</button>
+        <select id="search-duration-select" title="Filtrar por duración" style="background:var(--color-surface-elevated);color:var(--color-text-primary);border:1px solid var(--color-card-border, rgba(255,255,255,0.08));border-radius:20px;padding:6px 12px;font-size:12px;font-weight:600;white-space:nowrap;">
+          <option value="any" ${durationFilter === 'any' ? 'selected' : ''}>⏱️ Cualquier duración</option>
+          <option value="short" ${durationFilter === 'short' ? 'selected' : ''}>≤ 5 min</option>
+          <option value="mid" ${durationFilter === 'mid' ? 'selected' : ''}>5 – 20 min</option>
+          <option value="long" ${durationFilter === 'long' ? 'selected' : ''}>+ 20 min (completas)</option>
+        </select>
+        ${hasActiveContentFilters() ? `<button type="button" class="filter-pill" data-cfilter="clear">✕ Quitar filtros</button>` : ''}
+      </div>
     `;
   }
 
+  function reRenderResults() {
+    if (!contentContainer) return;
+    const query = ((searchInput && searchInput.value) || '').trim();
+    contentContainer.innerHTML = renderSearchResults(currentExternalResults, query);
+  }
+
   function renderSearchResults(results, query) {
-    let filtered = results;
-    if (currentFilter === 'youtube') {
-      filtered = results.filter(r => r.platform === 'youtube');
-    } else if (currentFilter === 'soundcloud') {
-      filtered = results.filter(r => r.platform === 'soundcloud');
-    }
+    const total = (results || []).length;
+    let filtered = (results || []).filter(r => {
+      if (currentFilter === 'youtube' && r.platform !== 'youtube') return false;
+      if (currentFilter === 'soundcloud' && r.platform !== 'soundcloud') return false;
+      return true;
+    });
+
+    // Filtros de contenido: covers, español y duración.
+    filtered = applyContentFilters(filtered);
 
     if (!filtered || filtered.length === 0) {
+      const filtMsg = hasActiveContentFilters() && total > 0
+        ? 'Ningún resultado con esos filtros. Prueba a quitarlos.'
+        : `No pudimos encontrar nada para "${escapeHtml(query)}". Intenta con otra palabra clave o nombre de artista.`;
       return `
         ${renderFilterPills()}
         <div class="search-empty-state">
           <div class="search-empty-icon">🔍</div>
-          <h3 class="search-empty-title">Sin resultados online</h3>
-          <p class="search-empty-desc">No pudimos encontrar nada para "${escapeHtml(query)}". Intenta con otra palabra clave o nombre de artista.</p>
+          <h3 class="search-empty-title">${hasActiveContentFilters() && total > 0 ? 'Sin resultados con esos filtros' : 'Sin resultados online'}</h3>
+          <p class="search-empty-desc">${filtMsg}</p>
         </div>
       `;
     }
@@ -187,7 +252,7 @@
       ${renderFilterPills()}
       <div class="results-group" style="padding: 0 16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
-          <h2 class="search-section-title" style="margin:0;">Resultados (${filtered.length})</h2>
+          <h2 class="search-section-title" style="margin:0;">Resultados (${filtered.length}${filtered.length !== total ? ' de ' + total : ''})</h2>
           <span style="font-size:11px; color:#aaa; font-weight:600;">YouTube &amp; SoundCloud</span>
         </div>
         <div class="tracks-list-external">
@@ -1026,9 +1091,19 @@
           if (historyContainer) historyContainer.innerHTML = renderHistoryChips();
           contentContainer.innerHTML = renderGenreGrid();
           currentExternalResults = [];
+          contentFilters = { covers: false, noCover: false, spanish: false };
+          durationFilter = 'any';
           searchInput.focus();
         });
       }
+
+      // Filtro por duración (selector desplegable)
+      rootElement.addEventListener('change', (e) => {
+        const sel = e.target && e.target.closest ? e.target.closest('#search-duration-select') : null;
+        if (!sel) return;
+        durationFilter = sel.value || 'any';
+        reRenderResults();
+      });
 
       // Direct URL toggle
       const directToggle = $('#btn-toggle-direct-url', rootElement);
@@ -1144,10 +1219,27 @@
           const filterPill = target.closest('[data-filter]');
           if (filterPill) {
             currentFilter = filterPill.getAttribute('data-filter');
-            const query = (searchInput.value || '').trim();
-            if (contentContainer) {
-              contentContainer.innerHTML = renderSearchResults(currentExternalResults, query);
+            reRenderResults();
+            return;
+          }
+
+          // 4b. Filtros de contenido: covers, sin covers, español, duración
+          const cFilterBtn = target.closest('[data-cfilter]');
+          if (cFilterBtn) {
+            const key = cFilterBtn.getAttribute('data-cfilter');
+            if (key === 'clear') {
+              contentFilters = { covers: false, noCover: false, spanish: false };
+              durationFilter = 'any';
+            } else if (key === 'covers') {
+              contentFilters.covers = !contentFilters.covers;
+              if (contentFilters.covers) contentFilters.noCover = false;
+            } else if (key === 'noCover') {
+              contentFilters.noCover = !contentFilters.noCover;
+              if (contentFilters.noCover) contentFilters.covers = false;
+            } else if (key === 'spanish') {
+              contentFilters.spanish = !contentFilters.spanish;
             }
+            reRenderResults();
             return;
           }
 
@@ -1234,7 +1326,7 @@
 
     // 1. Try active server (Local or Render)
     try {
-      const resp = await fetch(`${serverBase}/api/search/external?q=${encodeURIComponent(q)}`, {
+      const resp = await fetch(`${serverBase}/api/search/external?q=${encodeURIComponent(q)}&limit=60`, {
         headers: { 'Accept': 'application/json' }
       });
       if (resp.ok) {

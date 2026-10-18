@@ -406,9 +406,12 @@ public class MainActivity extends Activity {
 
                 if (PlaybackService.sTitle.isEmpty()) {
                     PlaybackService.shutdown(activity);
+                    SonoraWidgetProvider.refresh(activity);
                     return "stopped";
                 }
                 PlaybackService.push(activity);
+                // El widget de la pantalla de inicio se mantiene al día.
+                SonoraWidgetProvider.refresh(activity);
                 return "ok";
             } catch (Exception e) {
                 Log.e(TAG, "updatePlaybackInfo: " + e.getMessage());

@@ -1391,6 +1391,9 @@
             <button class="btn-action btn-action--secondary" id="btn-open-add-tracks">
               + Añadir canciones
             </button>
+            <button class="btn-action btn-action--secondary" id="btn-download-playlist">
+              ⬇ Descargar
+            </button>
             <button class="btn-action btn-action--secondary" id="btn-edit-playlist">
               Editar
             </button>
@@ -2266,6 +2269,62 @@
       if (btnShare) {
         addTrackedListener(btnShare, 'click', () => {
           sharePlaylist(playlist);
+        });
+      }
+
+      // Descargar la playlist completa (cola con progreso)
+      const btnDownloadPl = $('#btn-download-playlist');
+      if (btnDownloadPl) {
+        addTrackedListener(btnDownloadPl, 'click', () => {
+          const downloadable = currentTracks.filter(t => t && !t.isDeviceTrack);
+          if (!currentTracks.length) {
+            showToast('Esta playlist no tiene canciones', 'error');
+            return;
+          }
+          if (!downloadable.length) {
+            showToast('Las canciones de esta playlist son de tu teléfono', 'error');
+            return;
+          }
+
+          const overlay = document.createElement('div');
+          overlay.className = 'sonora-modal-overlay active';
+          overlay.style.zIndex = '9999';
+          overlay.innerHTML = `
+            <div class="sonora-modal-card" style="max-width:430px;">
+              <div class="modal-header">
+                <h3>⬇️ Descargar playlist</h3>
+                <button class="btn-close-modal" data-dl-close>&times;</button>
+              </div>
+              <div class="modal-body" style="display:flex;flex-direction:column;gap:10px;">
+                <p style="margin:0;font-size:13px;color:var(--color-text-secondary);">
+                  <strong style="color:var(--color-text-primary);">${escapeHtml(playlist.name)}</strong> —
+                  ${downloadable.length} ${downloadable.length === 1 ? 'canción' : 'canciones'}.
+                  Se descargan una detrás de otra.
+                </p>
+                <button class="btn-action btn-action--primary" data-dl-mode="sonora">📲 En la app (sin internet)</button>
+                <button class="btn-action btn-action--secondary" data-dl-mode="device">💾 En el teléfono (archivos MP3)</button>
+                <button class="btn-action btn-action--secondary" data-dl-mode="both">🔁 En los dos sitios</button>
+              </div>
+            </div>`;
+
+          document.body.appendChild(overlay);
+          const closeOverlay = () => { try { overlay.remove(); } catch (e) {} };
+
+          overlay.addEventListener('click', (e) => {
+            if (e.target === overlay || (e.target.closest && e.target.closest('[data-dl-close]'))) {
+              closeOverlay();
+              return;
+            }
+            const modeBtn = e.target.closest ? e.target.closest('[data-dl-mode]') : null;
+            if (!modeBtn) return;
+            const mode = modeBtn.getAttribute('data-dl-mode');
+            closeOverlay();
+            if (Sonora.Download && typeof Sonora.Download.downloadPlaylist === 'function') {
+              Sonora.Download.downloadPlaylist(downloadable, playlist.name, mode);
+            } else {
+              showToast('El gestor de descargas no está disponible', 'error');
+            }
+          });
         });
       }
 

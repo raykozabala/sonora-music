@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.9.0
+ * Sonora Music Server v7.10.0
  * Dual-mode backend server (Local PC & Render.com compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -634,7 +634,7 @@ app.get('/api/health', (req, res) => {
       status: 'ok',
       server: isRender ? 'render' : 'local',
       uptime: Math.floor(process.uptime()),
-      version: '7.9.0'
+      version: '7.10.0'
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
@@ -1120,7 +1120,7 @@ app.get('/api/system', (req, res) => {
     mode: isRender ? 'render' : 'local',
     node: process.version,
     platform: process.platform,
-    version: '7.9.0',
+    version: '7.10.0',
     ytdlp: {
       path: YTDLP_BIN,
       available: !!ytdlpVersion,
@@ -1217,7 +1217,7 @@ const lyricsCache = new Map();
 async function fetchLrclib(url) {
   const resp = await fetch(url, {
     headers: {
-      'User-Agent': 'SonoraMusic/7.9.0 (+https://github.com/raykozabala/sonora-music)'
+      'User-Agent': 'SonoraMusic/7.10.0 (+https://github.com/raykozabala/sonora-music)'
     }
   });
   if (resp.status === 404) return null;
@@ -1288,6 +1288,11 @@ app.get('/api/search/external', async (req, res) => {
     const q = (req.query.q || '').trim();
     if (!q) return res.json([]);
 
+    // Cuántos resultados devolver (el cliente pide más cuando usa filtros).
+    let maxResults = parseInt(req.query.limit, 10);
+    if (!maxResults || maxResults < 10) maxResults = 44;
+    if (maxResults > 90) maxResults = 90;
+
     const results = [];
 
     // 1. YouTube & YouTube Music — buscamos varias variantes y las mezclamos
@@ -1326,14 +1331,16 @@ app.get('/api/search/external', async (req, res) => {
       // los 18 primeros de una única consulta.
       const merged = [];
       const seen = new Set();
+      // Reservamos un par de huecos para los resultados de SoundCloud.
+      const ytLimit = Math.max(10, maxResults - 4);
       const maxLen = lists.reduce((m, l) => Math.max(m, l.length), 0);
-      for (let round = 0; round < maxLen && merged.length < 44; round++) {
+      for (let round = 0; round < maxLen && merged.length < ytLimit; round++) {
         for (const list of lists) {
           const v = list[round];
           if (!v || !v.videoId || seen.has(v.videoId)) continue;
           seen.add(v.videoId);
           merged.push(v);
-          if (merged.length >= 44) break;
+          if (merged.length >= ytLimit) break;
         }
       }
 
@@ -1391,7 +1398,7 @@ app.get('/api/search/external', async (req, res) => {
       console.warn('[Search] SoundCloud error:', err.message);
     }
 
-    res.json(results);
+    res.json(results.slice(0, maxResults));
   } catch (err) {
     console.error('Error in external search:', err);
     res.status(500).json({ error: 'External search failed', message: err.message });
@@ -1622,7 +1629,7 @@ async function resolveViaInvidious(videoId) {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 12000);
       const r = await fetch(base + '/api/v1/videos/' + videoId, {
-        headers: { 'User-Agent': 'SonoraMusic/7.9.0' },
+        headers: { 'User-Agent': 'SonoraMusic/7.10.0' },
         signal: ctrl.signal
       });
       clearTimeout(t);
@@ -2924,7 +2931,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('----------------------------------------------------');
-  console.log('🎵 Sonora Music Server v7.9.0');
+  console.log('🎵 Sonora Music Server v7.10.0');
   console.log(`📡 Mode: ${isRender ? 'Render' : 'Local'}`);
   console.log(`🌐 Port: ${PORT}`);
   console.log(`📁 Music directory: ${musicDir}`);

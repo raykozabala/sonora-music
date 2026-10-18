@@ -11,6 +11,88 @@
   var _completedHistory = [];
   var _modalRefreshTimer = null;
 
+  // Cola de "descargar playlist completa"
+  // { name, mode, total, done, failed, skipped, running, cancelled, current }
+  var _playlistBatch = null;
+  var _batchHideTimer = null;
+
+  function escHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  /** Tarjeta flotante con el progreso del lote (visible en cualquier página). */
+  function renderBatchCard() {
+    var b = _playlistBatch;
+    var el = document.getElementById('sonora-dl-batch-card');
+
+    if (!b) {
+      if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+      return;
+    }
+
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'sonora-dl-batch-card';
+      el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:100px;z-index:9998;width:min(92vw,460px);display:none;';
+      document.body.appendChild(el);
+    }
+
+    var pct = b.total ? Math.round((b.done / b.total) * 100) : 0;
+    var heading = b.running ? '⬇️ Descargando playlist' : (b.cancelled ? '⏹ Descarga cancelada' : '✅ Playlist descargada');
+    el.innerHTML = `
+      <div style="background:var(--color-surface, #1c1c1e);border:1px solid rgba(255,255,255,0.12);border-radius:16px;padding:12px 14px;box-shadow:0 10px 30px rgba(0,0,0,0.45);display:flex;gap:12px;align-items:flex-start;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:800;color:var(--color-text-primary, #fff);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            ${heading} · ${escHtml(b.name)}
+          </div>
+          <div style="font-size:11.5px;color:var(--color-text-secondary, #aaa);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            ${b.done}/${b.total}${b.current ? ' • ' + escHtml(b.current.title) : ''}${b.failed ? ' • ' + b.failed + ' fallaron' : ''}${b.skipped ? ' • ' + b.skipped + ' ya estaban' : ''}
+          </div>
+          <div style="height:5px;background:rgba(255,255,255,0.12);border-radius:3px;overflow:hidden;margin-top:8px;">
+            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#FF6B35,#FF4757);transition:width 0.3s ease;"></div>
+          </div>
+        </div>
+        <button type="button" id="sonora-dl-batch-btn"
+                style="flex-shrink:0;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:var(--color-text-primary, #fff);border-radius:12px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;">
+          ${b.running ? 'Detener' : 'OK'}
+        </button>
+      </div>`;
+    el.style.display = 'block';
+
+    var btn = document.getElementById('sonora-dl-batch-btn');
+    if (btn) {
+      btn.onclick = function () {
+        if (b.running) {
+          Sonora.Download.cancelPlaylistDownload();
+        } else {
+          _playlistBatch = null;
+          emitBatch();
+        }
+      };
+    }
+
+    if (!b.running) {
+      if (_batchHideTimer) clearTimeout(_batchHideTimer);
+      _batchHideTimer = setTimeout(function () {
+        if (_playlistBatch && !_playlistBatch.running) {
+          _playlistBatch = null;
+          renderBatchCard();
+        }
+      }, 7000);
+    }
+  }
+
+  function emitBatch() {
+    try { renderBatchCard(); } catch (e) {}
+    try {
+      if (Sonora.Store && typeof Sonora.Store.emit === 'function') {
+        Sonora.Store.emit('playlistDownload', _playlistBatch ? JSON.parse(JSON.stringify(_playlistBatch)) : null);
+      }
+    } catch (e) {}
+  }
+
   function loadHistory() {
     try {
       var saved = localStorage.getItem('sonora_download_history');
@@ -472,6 +554,122 @@
 
     getActiveDownloads: function () {
       return Object.values(_activeDownloads);
+    },
+
+    /**
+     * Descarga TODA una playlist, una canción detrás de otra (cola secuencial
+     * para no saturar el servidor). Informa del progreso del lote mediante el
+     * evento 'playlistDownload' del Store.
+     * @param {Array} tracks  Canciones de la playlist
+     * @param {string} name   Nombre de la playlist (para los mensajes)
+     * @param {string} mode   'sonora' (offline en la app), 'device' o 'both'
+     */
+    downloadPlaylist: async function (tracks, name, mode) {
+      var list = (tracks || []).filter(function (t) { return t && !t.isDeviceTrack; });
+      mode = mode || 'sonora';
+      name = name || 'Playlist';
+
+      if (_playlistBatch && _playlistBatch.running) {
+        if (Sonora.Store) {
+          Sonora.Store.emit('toast', { message: '⚠ Ya hay una descarga de playlist en curso', type: 'warning' });
+        }
+        return _playlistBatch;
+      }
+
+      if (!list.length) {
+        if (Sonora.Store) {
+          Sonora.Store.emit('toast', {
+            message: 'ℹ Esta playlist no tiene canciones de Sonora que descargar',
+            type: 'info'
+          });
+        }
+        return null;
+      }
+
+      _playlistBatch = {
+        name: name,
+        mode: mode,
+        total: list.length,
+        done: 0,
+        failed: 0,
+        skipped: 0,
+        running: true,
+        cancelled: false,
+        current: null,
+        startedAt: Date.now()
+      };
+      emitBatch();
+
+      if (Sonora.Store) {
+        Sonora.Store.emit('toast', {
+          message: '⬇️ Descargando "' + name + '" (' + list.length + ' canciones)…',
+          type: 'info'
+        });
+      }
+
+      var arr = list;
+      for (var i = 0; i < arr.length; i++) {
+        if (!_playlistBatch.running) break;
+
+        var tr = arr[i];
+        _playlistBatch.current = { title: tr.title || 'Canción', artist: tr.artist || '', index: i + 1 };
+        emitBatch();
+
+        // Si ya está descargada offline, la saltamos sin volver a bajarla.
+        var already = false;
+        try { already = await Sonora.Download.isDownloaded(tr.id); } catch (e) { already = false; }
+
+        if (already) {
+          _playlistBatch.skipped++;
+          _playlistBatch.done++;
+          emitBatch();
+          continue;
+        }
+
+        var before = _completedHistory.length;
+        try {
+          await Sonora.Download.startDownload(tr, 'mp3', '320k', mode);
+        } catch (e) {
+          console.warn('[Download] fallo en la cola de la playlist:', e && e.message);
+        }
+        // startDownload no lanza al fallar: comparamos el historial para saberlo.
+        if (_completedHistory.length > before) _playlistBatch.done++;
+        else _playlistBatch.failed++;
+        emitBatch();
+      }
+
+      var batch = _playlistBatch;
+      batch.running = false;
+      batch.current = null;
+      emitBatch();
+
+      if (Sonora.Store) {
+        if (batch.cancelled) {
+          Sonora.Store.emit('toast', {
+            message: '⏹ Descarga de "' + name + '" cancelada (' + batch.done + '/' + batch.total + ')',
+            type: 'warning'
+          });
+        } else {
+          Sonora.Store.emit('toast', {
+            message: '✓ Playlist "' + name + '" lista: ' + batch.done + ' de ' + batch.total +
+              (batch.failed ? ' (' + batch.failed + ' fallaron)' : ''),
+            type: 'success'
+          });
+        }
+      }
+      return batch;
+    },
+
+    getPlaylistBatch: function () {
+      return _playlistBatch;
+    },
+
+    cancelPlaylistDownload: function () {
+      if (_playlistBatch && _playlistBatch.running) {
+        _playlistBatch.running = false;
+        _playlistBatch.cancelled = true;
+        emitBatch();
+      }
     },
 
     getCompletedHistory: function () {

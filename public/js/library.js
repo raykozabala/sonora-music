@@ -26,6 +26,50 @@
       .replace(/'/g, '&#039;');
   }
 
+  /**
+   * Pide una foto al usuario y la devuelve reducida como data URL JPEG.
+   * Se usa para poner carátula manual a las canciones (sobre todo a las del
+   * teléfono, cuando el archivo no trae ninguna).
+   */
+  function pickImageFile(maxSize, onDone) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+
+    input.addEventListener('change', function () {
+      const file = input.files && input.files[0];
+      if (!file) { try { input.remove(); } catch (e) {} return; }
+      const reader = new FileReader();
+      reader.onload = function () {
+        const img = new Image();
+        img.onload = function () {
+          try {
+            const max = maxSize || 512;
+            const scale = Math.min(1, max / Math.max(img.width || max, img.height || max));
+            const cw = Math.max(1, Math.round((img.width || max) * scale));
+            const ch = Math.max(1, Math.round((img.height || max) * scale));
+            const canvas = document.createElement('canvas');
+            canvas.width = cw;
+            canvas.height = ch;
+            canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
+            onDone(canvas.toDataURL('image/jpeg', 0.85));
+          } catch (e) {
+            onDone(reader.result);
+          }
+          try { input.remove(); } catch (e) {}
+        };
+        img.onerror = function () { onDone(reader.result); try { input.remove(); } catch (e) {} };
+        img.src = reader.result;
+      };
+      reader.onerror = function () { try { input.remove(); } catch (e) {} };
+      reader.readAsDataURL(file);
+    });
+
+    input.click();
+  }
+
   function showToast(message) {
     let toast = $('#library-toast');
     if (!toast) {
@@ -901,6 +945,15 @@
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
             <span>Ir al álbum (${escapeHtml(track.album || 'Álbum')})</span>
           </button>`}
+          <button class="sheet-menu-item" data-action="sheet-pick-art">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+            <span>${track.artworkUrl ? '🖼️ Cambiar carátula' : '🖼️ Elegir carátula (poner foto)'}</span>
+          </button>
+          ${track.artworkManual ? `
+          <button class="sheet-menu-item" data-action="sheet-clear-art">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 10 9 10"/></svg>
+            <span>↩️ Quitar mi carátula</span>
+          </button>` : ''}
           <button class="sheet-menu-item" data-action="sheet-share">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
             <span>Compartir</span>
@@ -1799,6 +1852,51 @@
           if (sheetFavBtn && activeTrackForMenu) {
             await toggleTrackFavorite(activeTrackForMenu.id);
             closeContextMenu();
+            return;
+          }
+
+          // 13b. Context Menu Action: Elegir carátula manual
+          const sheetPickArtBtn = target.closest('[data-action="sheet-pick-art"]');
+          if (sheetPickArtBtn && activeTrackForMenu) {
+            const targetTrack = activeTrackForMenu;
+            closeContextMenu();
+            pickImageFile(512, async (dataUrl) => {
+              if (!dataUrl) return;
+              try {
+                targetTrack.artworkUrl = dataUrl;
+                targetTrack.artworkManual = 1;
+                if (Sonora.DB && Sonora.DB.tracks && typeof Sonora.DB.tracks.update === 'function') {
+                  await Sonora.DB.tracks.update(targetTrack);
+                }
+                deviceArtworkCache[artworkCacheKey(targetTrack)] = dataUrl;
+                refreshVisibleArtwork();
+                renderCurrentView();
+                showToast('🖼️ Carátula actualizada');
+              } catch (err) {
+                console.warn('[Library] No se pudo guardar la carátula:', err);
+                showToast('No se pudo guardar la carátula');
+              }
+            });
+            return;
+          }
+
+          // 13c. Context Menu Action: Quitar la carátula puesta a mano
+          const sheetClearArtBtn = target.closest('[data-action="sheet-clear-art"]');
+          if (sheetClearArtBtn && activeTrackForMenu) {
+            const targetTrack = activeTrackForMenu;
+            try {
+              delete targetTrack.artworkManual;
+              targetTrack.artworkUrl = '';
+              if (Sonora.DB && Sonora.DB.tracks && typeof Sonora.DB.tracks.update === 'function') {
+                await Sonora.DB.tracks.update(targetTrack);
+              }
+              delete deviceArtworkCache[artworkCacheKey(targetTrack)];
+            } catch (err) {
+              console.warn('[Library] No se pudo quitar la carátula:', err);
+            }
+            closeContextMenu();
+            renderCurrentView();
+            showToast('Carátula restablecida');
             return;
           }
 

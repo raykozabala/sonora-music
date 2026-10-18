@@ -62,6 +62,17 @@
   var EQ_TYPES = ['lowshelf', 'peaking', 'peaking', 'peaking', 'highshelf'];
   var _eqGains = [0, 0, 0, 0, 0];
 
+  // Presets del ecualizador (ganancias en dB para las 5 bandas)
+  var EQ_PRESETS = {
+    flat:    [0, 0, 0, 0, 0],
+    bass:    [9, 6, 1, -1, -2],     // Bass boost (más graves)
+    voice:   [-3, 2, 4, 4, 1],      // Voces / podcast
+    rock:    [5, 3, -1, 3, 5],
+    electro: [7, 4, 0, 3, 6],       // Electrónica / dance
+    party:   [10, 7, 2, 4, 8],      // Fiesta: graves + agudos
+    lofi:    [4, 0, -3, -2, -6]     // Suave / lo-fi
+  };
+
   /**
    * Safe helper to emit toast messages to the UI
    */
@@ -1632,6 +1643,32 @@
       return result;
     },
 
+    /** Lista de presets disponibles: [{ key, gains }] */
+    getEQPresets: function () {
+      return Object.keys(EQ_PRESETS).map(function (k) {
+        return { key: k, gains: EQ_PRESETS[k].slice() };
+      });
+    },
+
+    /**
+     * Aplica un preset del ecualizador ('flat', 'bass', 'voice', 'rock',
+     * 'electro', 'party', 'lofi') o una lista de ganancias personalizada.
+     */
+    setEQPreset: function (preset) {
+      var gains = EQ_PRESETS[preset];
+      if (!gains && Array.isArray(preset)) gains = preset;
+      if (!gains) return false;
+      for (var i = 0; i < EQ_FREQUENCIES.length; i++) {
+        Sonora.Player.setEQ(i, Number(gains[i]) || 0);
+      }
+      return true;
+    },
+
+    /** Atajo: activar/desactivar el realce de graves (bass boost). */
+    setBassBoost: function (on) {
+      return Sonora.Player.setEQPreset(on ? 'bass' : 'flat');
+    },
+
     /**
      * Initialize player engine (called on application boot)
      */
@@ -1639,6 +1676,24 @@
       try {
         initAudioGraph();
         initMediaSessionHandlers();
+
+        // Recupera el ecualizador y el fundido guardados en Ajustes.
+        try {
+          if (Sonora.DB && Sonora.DB.settings && typeof Sonora.DB.settings.get === 'function') {
+            Sonora.DB.settings.get('eqGains').then(function (gains) {
+              if (Array.isArray(gains)) {
+                for (var i = 0; i < gains.length && i < EQ_FREQUENCIES.length; i++) {
+                  Sonora.Player.setEQ(i, Number(gains[i]) || 0);
+                }
+              }
+            }).catch(function () {});
+
+            Sonora.DB.settings.get('playback_crossfade').then(function (sec) {
+              var s = Number(sec) || 0;
+              if (s > 0) Sonora.Player.setCrossfade(s * 1000);
+            }).catch(function () {});
+          }
+        } catch (e) {}
 
         // Browser autoplay requirement: resume AudioContext on first user gesture
         var unlockContext = function () {

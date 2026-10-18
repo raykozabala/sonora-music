@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.sonoramusic.app"
-    android:versionCode="82"
-    android:versionName="7.9.0">
+    android:versionCode="83"
+    android:versionName="7.10.0">
 
     <uses-sdk
         android:minSdkVersion="24"
@@ -53,5 +53,18 @@
             android:name="com.sonoramusic.app.PlaybackService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- Widget de la pantalla de inicio -->
+        <receiver
+            android:name="com.sonoramusic.app.SonoraWidgetProvider"
+            android:exported="false"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/sonora_widget_info" />
+        </receiver>
     </application>
 </manifest>
