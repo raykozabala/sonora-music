@@ -52,6 +52,7 @@
   var _sleepTimerEndTime = null;
   var _sleepTimerTimeout = null;
   var _sleepTimerInterval = null;
+  var _sleepTimerEndOfTrack = false;   // "Fin de pista": pausa al acabar la canción
 
   // Progress Interval
   var _progressInterval = null;
@@ -788,6 +789,15 @@
    * Handle track completion
    */
   function handleTrackEnded() {
+    // Temporizador "fin de pista": se pausa al acabar la canción actual
+    if (_sleepTimerEndOfTrack) {
+      _sleepTimerEndOfTrack = false;
+      updateState('sleepTimer', null);
+      Sonora.Player.pause();
+      showToast('Se acabó la canción: reproducción pausada', 'info');
+      return;
+    }
+
     if (_repeatMode === 'one') {
       // Replay same track from start
       Sonora.Player.seek(0);
@@ -1469,14 +1479,28 @@
         _sleepTimerInterval = null;
       }
 
-      var mins = Number(minutes) || 0;
-      if (mins <= 0) {
+      var isEndOfTrack = (minutes === 'end_track');
+
+      // Desactivar
+      if (!isEndOfTrack && (Number(minutes) || 0) <= 0) {
         _sleepTimerEndTime = null;
+        _sleepTimerEndOfTrack = false;
         updateState('sleepTimer', null);
         showToast('Temporizador de sueño desactivado', 'info');
         return;
       }
 
+      // "Fin de pista": se pausa al terminar la canción actual
+      if (isEndOfTrack) {
+        _sleepTimerEndOfTrack = true;
+        _sleepTimerEndTime = null;
+        updateState('sleepTimer', 'end_track');
+        showToast('El temporizador se activará al terminar esta canción', 'info');
+        return;
+      }
+
+      var mins = Number(minutes) || 0;
+      _sleepTimerEndOfTrack = false;
       _sleepTimerEndTime = Date.now() + (mins * 60 * 1000);
       updateState('sleepTimer', mins);
 

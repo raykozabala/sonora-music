@@ -1459,16 +1459,22 @@
 
       // 4. Sleep timer presets
       const timerBtns = $$('#control-sleep-timer .segmented-btn');
+      const savedTimer = await getSetting('sleep_timer', '0');
+      const markTimerActive = (val) => {
+        timerBtns.forEach(b => b.classList.toggle('active', b.getAttribute('data-timer') === String(val)));
+      };
+      markTimerActive(savedTimer);
       timerBtns.forEach(btn => {
         addTrackedListener(btn, 'click', async () => {
-          timerBtns.forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
           const val = btn.getAttribute('data-timer');
           if (Sonora.Player && typeof Sonora.Player.setSleepTimer === 'function') {
             Sonora.Player.setSleepTimer(val === 'end_track' ? 'end_track' : Number(val));
           }
+          markTimerActive(val);
           await setSetting('sleep_timer', val);
-          showToast(val === '0' ? 'Temporizador desactivado' : `Temporizador programado: ${btn.textContent.trim()}`);
+          if (val === '0') showToast('Temporizador desactivado');
+          else if (val === 'end_track') showToast('Se pausará al terminar esta canción');
+          else showToast(`Temporizador programado: ${btn.textContent.trim()}`);
         });
       });
     },

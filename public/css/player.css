@@ -898,3 +898,30 @@ body.light .lyrics-line.active {
   color: var(--color-on-primary);
   border-color: var(--color-primary);
 }
+
+/* ==========================================================================
+   Modo claro: los paneles con tinte de portada usan texto oscuro
+   ========================================================================== */
+
+/* El reproductor completo baja la intensidad del color de la portada para que
+   el texto oscuro se lea bien en modo claro. */
+body.light #full-player {
+  background-image:
+    radial-gradient(140% 70% at 50% -10%,
+      rgba(var(--artwork-rgb, 255, 71, 87), 0.34) 0%,
+      rgba(var(--artwork-rgb, 255, 71, 87), 0) 66%),
+    linear-gradient(180deg,
+      rgba(var(--artwork-rgb, 255, 71, 87), 0.18) 0%,
+      rgba(0, 0, 0, 0) 46%);
+}
+
+body.light .lyrics-panel__title,
+body.light .lyrics-panel__close,
+body.light .queue-panel__header h3,
+body.light .queue-panel__close {
+  color: var(--color-text-primary);
+}
+
+body.light .lyrics-panel__artist {
+  color: var(--color-text-secondary);
+}
