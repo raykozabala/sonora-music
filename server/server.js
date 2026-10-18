@@ -1131,7 +1131,7 @@ app.get('/api/search/external', async (req, res) => {
  */
 app.get('/api/stream/external', async (req, res) => {
   try {
-    let targetUrl = req.query.url;
+    let targetUrl = normalizeYtdlpTarget(req.query.url);
     if (!targetUrl && req.query.id) {
       const cleanId = String(req.query.id).replace('yt_', '');
       targetUrl = `https://www.youtube.com/watch?v=${cleanId}`;
@@ -1270,6 +1270,35 @@ function extractYouTubeId(input) {
   return null;
 }
 
+/**
+ * La app, cuando una canción no trae videoId, manda como respaldo una URL de
+ * RESULTADOS de búsqueda de YouTube. yt-dlp no sabe abrir esa URL, así que la
+ * convertimos a su búsqueda nativa (ytsearch1:) para que la descarga y el
+ * streaming funcionen igualmente.
+ */
+function normalizeYtdlpTarget(targetUrl) {
+  if (!targetUrl) return targetUrl;
+  const s = String(targetUrl).trim();
+
+  // https://www.youtube.com/results?search_query=artista+cancion
+  const m = s.match(/youtube\.com\/results\?[^#]*?search_query=([^&]+)/i);
+  if (m) {
+    let q = m[1];
+    try { q = decodeURIComponent(q.replace(/\+/g, ' ')); } catch (e) {}
+    return 'ytsearch1:' + q;
+  }
+
+  // https://music.youtube.com/search?q=artista+cancion
+  if (/music\.youtube\.com\/search/i.test(s)) {
+    try {
+      const q = new URL(s).searchParams.get('q');
+      if (q) return 'ytsearch1:' + q;
+    } catch (e) {}
+  }
+
+  return s;
+}
+
 async function resolveViaInvidious(videoId) {
   for (const base of INVIDIOUS_INSTANCES) {
     try {
@@ -1368,7 +1397,7 @@ function pruneDownloadCache() {
  * Usa caché en disco y devuelve un error real (502) si algo falla.
  */
 app.get('/api/download/external', async (req, res) => {
-  const targetUrl = req.query.url;
+  const targetUrl = normalizeYtdlpTarget(req.query.url);
   const format = (req.query.format || 'mp3').toLowerCase();
   const quality = (req.query.quality || (format === 'mp3' ? '320k' : '720p')).toLowerCase();
   const title = (req.query.title || 'Cancion').replace(/[/\\?%*:|"<>]/g, '_').trim();
