@@ -761,15 +761,15 @@ function safeExec(cmd, timeoutMs) {
 // esquivar el bloqueo "Sign in to confirm you're not a bot" en servidores cloud.
 // Ojo: android_vr / tv_embedded / mweb son los que suelen pasar en datacenter.
 const YT_CLIENT_FALLBACKS = [
-  null,
+  null,             // "default" (web + deno + cookies): verificado OK en Render
+  'tv_embedded',    // verificado OK en Render
   'android_vr',
-  'tv_embedded',
   'android',
   'mweb',
-  'web_embedded',
-  'tv',
   'ios',
-  'web_safari'
+  'web_safari',
+  'tv',
+  'web_embedded'
 ];
 const YTDLP_CLIENT_TIMEOUT = 30000;
 
@@ -895,6 +895,20 @@ function proxyAudioStream(directUrl, req, res) {
   if (req.headers.range) headers['Range'] = req.headers.range;
 
   const upstream = lib.get(directUrl, { headers }, (up) => {
+    const ct = String(up.headers['content-type'] || '');
+    const rejected = (up.statusCode && up.statusCode >= 400) || ct.indexOf('text/html') !== -1;
+    if (rejected) {
+      // El CDN de YouTube devolvió una página de error en lugar del audio.
+      console.warn('[Stream] el CDN rechazó la URL: HTTP ' + up.statusCode + ' ' + (ct || 'sin content-type'));
+      up.resume();
+      if (!res.headersSent) {
+        res.status(502).json({
+          error: 'El CDN de YouTube rechazó el audio',
+          detail: 'HTTP ' + (up.statusCode || '?') + ' ' + (ct || 'sin content-type')
+        });
+      }
+      return;
+    }
     res.status(up.statusCode || 200);
     ['content-type', 'content-length', 'accept-ranges', 'content-range', 'content-encoding'].forEach((h) => {
       if (up.headers[h]) res.setHeader(h, up.headers[h]);
