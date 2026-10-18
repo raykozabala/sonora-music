@@ -529,6 +529,127 @@
             .btn--primary:active {
               transform: scale(0.97);
             }
+
+            /* ══════════ Diseño del inicio ══════════ */
+            @keyframes cardIn {
+              from { opacity: 0; transform: translateY(14px); }
+              to   { opacity: 1; transform: translateY(0); }
+            }
+            @keyframes heroGlow {
+              0%, 100% { opacity: 0.55; transform: scale(1); }
+              50%      { opacity: 0.95; transform: scale(1.06); }
+            }
+
+            /* Cabecera de bienvenida con los colores de la portada */
+            .greeting-banner {
+              padding: 26px 20px 22px;
+              overflow: hidden;
+              background:
+                radial-gradient(120% 100% at 100% 0%,
+                  rgba(var(--artwork-rgb, 255, 71, 87), 0.42), transparent 62%),
+                linear-gradient(180deg,
+                  rgba(var(--artwork-rgb, 255, 71, 87), 0.24) 0%,
+                  rgba(18, 18, 18, 0) 100%);
+              transition: background-image 0.6s ease;
+              animation: cardIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+            }
+            .greeting-banner::after {
+              content: '';
+              position: absolute;
+              width: 180px;
+              height: 180px;
+              right: -70px;
+              top: -80px;
+              border-radius: 50%;
+              background: radial-gradient(circle,
+                rgba(var(--artwork-rgb, 255, 71, 87), 0.5), transparent 68%);
+              animation: heroGlow 5.5s ease-in-out infinite;
+              pointer-events: none;
+            }
+            .greeting-avatar {
+              background: linear-gradient(135deg,
+                var(--artwork-color, #FF4757), var(--artwork-color-2, #FF6B35));
+              box-shadow: 0 4px 14px rgba(var(--artwork-rgb, 255, 71, 87), 0.45);
+            }
+
+            /* Título de sección con acento de color */
+            .section__title {
+              position: relative;
+              padding-left: 12px;
+            }
+            .section__title::before {
+              content: '';
+              position: absolute;
+              left: 0;
+              top: 50%;
+              transform: translateY(-50%);
+              width: 4px;
+              height: 17px;
+              border-radius: 3px;
+              background: linear-gradient(180deg,
+                var(--artwork-color, #FF4757), var(--artwork-color-2, #FF6B35));
+            }
+
+            /* Entrada escalonada + elevación al pasar el dedo */
+            .section__scroll > * {
+              animation: cardIn 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+            }
+            .section__scroll > *:nth-child(1) { animation-delay: 0.02s; }
+            .section__scroll > *:nth-child(2) { animation-delay: 0.06s; }
+            .section__scroll > *:nth-child(3) { animation-delay: 0.10s; }
+            .section__scroll > *:nth-child(4) { animation-delay: 0.14s; }
+            .section__scroll > *:nth-child(5) { animation-delay: 0.18s; }
+
+            .recent-card, .played-card, .mix-card, .artist-card {
+              transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
+            }
+            .recent-card:hover, .played-card:hover,
+            .mix-card:hover, .artist-card:hover {
+              transform: translateY(-4px);
+            }
+            .recent-artwork, .played-artwork, .artist-avatar, .mix-card__art-wrap {
+              transition: transform 0.35s ease;
+            }
+            .recent-card:hover .recent-artwork,
+            .played-card:hover .played-artwork,
+            .artist-card:hover .artist-avatar {
+              transform: scale(1.07);
+            }
+
+            /* Chips de sugerencias rápidas (estaban sin estilo) */
+            .quick-suggest-chip {
+              display: inline-flex;
+              align-items: center;
+              gap: 6px;
+              padding: 9px 14px;
+              border-radius: 999px;
+              background: rgba(255, 255, 255, 0.06);
+              border: 1px solid rgba(255, 255, 255, 0.1);
+              color: #ffffff;
+              font-size: 12.5px;
+              font-weight: 600;
+              cursor: pointer;
+              white-space: nowrap;
+              transition: background 0.18s ease, border-color 0.18s ease, transform 0.15s ease;
+            }
+            .quick-suggest-chip:hover {
+              background: rgba(var(--artwork-rgb, 255, 71, 87), 0.22);
+              border-color: rgba(var(--artwork-rgb, 255, 71, 87), 0.5);
+            }
+            .quick-suggest-chip:active { transform: scale(0.95); }
+
+            /* Responsive: las tarjetas tenían ancho fijo en px */
+            @media (max-width: 380px) {
+              .recent-card { flex: 0 0 112px; width: 112px; height: 162px; }
+              .recent-artwork-wrap { width: 112px; height: 112px; }
+              .mix-card { flex: 0 0 152px; width: 152px; }
+              .played-card { flex: 0 0 118px; width: 118px; }
+            }
+            @media (min-width: 700px) {
+              .recent-card { flex: 0 0 152px; width: 152px; height: 208px; }
+              .recent-artwork-wrap { width: 152px; height: 152px; }
+              .mix-card { flex: 0 0 208px; width: 208px; }
+            }
           </style>
 
           <!-- Greeting Banner -->

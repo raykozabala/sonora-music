@@ -235,8 +235,10 @@
         updateState('isPlaying', false);
         stopProgressTimer();
         _consecutiveErrors++;
+        // Antes de rendirse, probar con el otro servidor (local <-> nube)
+        if (retryWithOtherServer()) return;
         if (_consecutiveErrors === 1) {
-          showToast('No se pudo reproducir el audio. Comprueba la conexión a tu servidor local', 'warning');
+          showToast('No se pudo reproducir el audio. Comprueba la conexión', 'warning');
         }
       }
     });
@@ -259,6 +261,11 @@
     } catch (e) {
       console.error('[Player] Store.set error (' + key + '):', e);
     }
+    // Mantiene sincronizados los controles del sistema (barra de notificaciones)
+    if (key === 'isPlaying' || key === 'playing' || key === 'currentTrack' ||
+        key === 'track' || key === 'queue') {
+      try { syncNativeMedia(); } catch (e) {}
+    }
   }
 
   /**
@@ -273,6 +280,80 @@
       console.error('[Player] Store.emit error (' + event + '):', e);
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Controles en la barra de notificaciones (Android)
+  // Manda el estado al servicio nativo y recibe sus botones. En iOS/web no
+  // existe SonoraNative, así que todo esto se ignora sin más.
+  // ---------------------------------------------------------------------------
+  var _nativeMediaTimer = null;
+
+  function nativeMediaAvailable() {
+    return !!(window.SonoraNative && typeof window.SonoraNative.updatePlaybackInfo === 'function');
+  }
+
+  function syncNativeMedia() {
+    if (!nativeMediaAvailable() || !Sonora.Player) return;
+    try {
+      var track = _currentTrack;
+      var prog = Sonora.Player.getProgress ? Sonora.Player.getProgress() : { current: 0, duration: 0 };
+      var playing = Sonora.Player.isPlaying ? Sonora.Player.isPlaying() : false;
+      var queue = Sonora.Player.getQueue ? (Sonora.Player.getQueue() || []) : [];
+
+      window.SonoraNative.updatePlaybackInfo(JSON.stringify({
+        title: track ? (track.title || '') : '',
+        artist: track ? (track.artist || '') : '',
+        album: track ? (track.album || '') : '',
+        artwork: track ? (track.artworkUrl || '') : '',
+        playing: !!playing,
+        hasPrev: queue.length > 1,
+        hasNext: queue.length > 1,
+        position: prog.current || 0,
+        duration: prog.duration || 0
+      }));
+
+      // Mientras suena, se refresca la posición cada 5 s.
+      if (playing && !_nativeMediaTimer) {
+        _nativeMediaTimer = setInterval(syncNativeMedia, 5000);
+      } else if (!playing && _nativeMediaTimer) {
+        clearInterval(_nativeMediaTimer);
+        _nativeMediaTimer = null;
+      }
+    } catch (e) {
+      console.warn('[Player] syncNativeMedia:', e && e.message);
+    }
+  }
+
+  // Lo llama el servicio nativo cuando pulsas un botón de la notificación.
+  window.SonoraNativeMedia = {
+    onAction: function (cmd) {
+      try {
+        var p = Sonora.Player;
+        if (!p) return;
+        var g;
+        switch (cmd) {
+          case 'play': p.resume(); break;
+          case 'pause': p.pause(); break;
+          case 'toggle': p.isPlaying() ? p.pause() : p.resume(); break;
+          case 'next': p.next(); break;
+          case 'prev': p.previous(); break;
+          case 'forward':
+            g = p.getProgress();
+            p.seek(Math.min(g.duration || 0, (g.current || 0) + 10));
+            break;
+          case 'rewind':
+            g = p.getProgress();
+            p.seek(Math.max(0, (g.current || 0) - 10));
+            break;
+        }
+        setTimeout(syncNativeMedia, 150);
+      } catch (e) {
+        console.warn('[Player] SonoraNativeMedia:', e && e.message);
+      }
+    }
+  };
+
+  Sonora.Player_syncNativeMedia = syncNativeMedia;
 
   /**
    * Continuous Autoplay / Recommendations Fetcher
@@ -697,6 +778,37 @@
     return result;
   }
 
+  // Reintento automático con el otro servidor (local <-> nube) cuando el audio
+  // no carga. Sólo una vez por canción, para no entrar en bucles.
+  var _retriedServerFor = null;
+
+  function retryWithOtherServer() {
+    var track = _currentTrack;
+    if (!track) return false;
+    if (!(Sonora.API && Sonora.API.testConnection && Sonora.API.setMode)) return false;
+
+    var key = String(track.id || track.videoId || track.url || track.title || '');
+    if (!key || _retriedServerFor === key) return false;
+    _retriedServerFor = key;
+
+    var current = (Sonora.API.getMode && Sonora.API.getMode()) || 'local';
+    var other = (current === 'render') ? 'local' : 'render';
+
+    showToast('Probando con el otro servidor…', 'info');
+
+    Sonora.API.testConnection(other).then(function (res) {
+      if (res && res.ok) {
+        Sonora.API.setMode(other);
+        showToast(other === 'render' ? 'Conectado a la nube' : 'Conectado al servidor local', 'info');
+        setTimeout(function () { try { Sonora.Player.play(track); } catch (e) {} }, 400);
+      } else {
+        showToast('No hay ningún servidor disponible', 'warning');
+      }
+    }).catch(function () {});
+
+    return true;
+  }
+
   /**
    * Public Player Object
    */
@@ -786,6 +898,7 @@
           if (playPromise !== undefined) {
             playPromise.then(function () {
               _consecutiveErrors = 0;
+              _retriedServerFor = null;
               _isPlaying = true;
               updateState('isPlaying', true);
               startProgressTimer();
@@ -797,11 +910,10 @@
               updateState('isPlaying', false);
               stopProgressTimer();
               _consecutiveErrors++;
+              // Reintentar con el otro servidor antes de dar error
+              if (retryWithOtherServer()) return;
               if (_consecutiveErrors === 1) {
-                showToast('Error al reproducir audio. Conectando con servidor local...', 'warning');
-                if (Sonora.API && typeof Sonora.API.autoDetect === 'function') {
-                  Sonora.API.autoDetect();
-                }
+                showToast('Error al reproducir el audio. Comprueba la conexión', 'warning');
               }
             });
           }

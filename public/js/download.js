@@ -94,6 +94,93 @@
   }
 
   /**
+   * Nombre de archivo legible y seguro: quita acentos y caracteres que Android
+   * no admite. Sin esto el gestor de descargas mostraba nombres rotos.
+   */
+  function safeFileName(artist, title, format) {
+    function clean(s) {
+      var out = String(s == null ? '' : s);
+      try {
+        if (out.normalize) out = out.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      } catch (e) {}
+      return out
+        .replace(/[\u2018\u2019\u201C\u201D]/g, '')
+        .replace(/[/\\:*?"<>|#%\r\n\t]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+    var a = clean(artist) || 'Sonora Music';
+    var t = clean(title) || 'Cancion';
+    var name = a + ' - ' + t;
+    if (name.length > 110) name = name.substring(0, 110).trim();
+    return name + '.' + format;
+  }
+
+  /**
+   * Escribe en la carpeta Descargas del teléfono un blob que YA tenemos.
+   * Es la vía fiable: no depende de que el servidor responda rápido, funciona
+   * con los datos ya bajados y el archivo aparece al instante.
+   */
+  function saveBlobToDevice(blob, filename, mime, taskId) {
+    return new Promise(function (resolve) {
+      var native = window.SonoraNative;
+      if (!native || typeof native.startSaveToDownloads !== 'function') return resolve(false);
+
+      var started = '';
+      try { started = native.startSaveToDownloads(filename, mime); } catch (e) { started = ''; }
+      if (!started) return resolve(false);
+
+      var CHUNK = 192 * 1024;
+      var offset = 0;
+
+      function fail() {
+        try { native.abortSaveToDownloads(); } catch (e) {}
+        resolve(false);
+      }
+
+      function pump() {
+        if (offset >= blob.size) {
+          try { return resolve(!!native.finishSaveToDownloads() || true); } catch (e) { return resolve(false); }
+        }
+        var slice = blob.slice(offset, Math.min(offset + CHUNK, blob.size));
+        var reader = new FileReader();
+        reader.onload = function () {
+          var b64 = String(reader.result || '').split(',')[1] || '';
+          var ok = false;
+          try { ok = native.appendSaveChunk(b64); } catch (e) { ok = false; }
+          if (!ok) return fail();
+          offset += CHUNK;
+          var t = _activeDownloads[taskId];
+          if (t) {
+            t.phase = 'saving';
+            t.speed = 'Guardando en el teléfono…';
+            t.progress = Math.min(99, Math.round((offset / blob.size) * 100));
+            updateBadge();
+          }
+          setTimeout(pump, 0);
+        };
+        reader.onerror = fail;
+        reader.readAsDataURL(slice);
+      }
+      pump();
+    });
+  }
+
+  /** Primer servidor que responda, para no lanzar descargas condenadas. */
+  function pickReachableServer() {
+    var servers = getCandidateServers();
+    var i = 0;
+    function next() {
+      if (i >= servers.length) return Promise.resolve(null);
+      var base = servers[i++];
+      return fetch(base.replace(/\/+$/, '') + '/api/health', { method: 'GET' })
+        .then(function (r) { return r.ok ? base : next(); })
+        .catch(function () { return next(); });
+    }
+    return next();
+  }
+
+  /**
    * Descarga un blob reportando progreso REAL (bytes y Content-Length).
    */
   function fetchBlobWithProgress(url, onProgress) {
@@ -140,9 +227,7 @@
       var taskId = 'dl_' + (track.id || Date.now());
       var title = track.title || 'Canción';
       var artist = track.artist || 'Sonora Music';
-      var cleanTitle = title.replace(/[/\\?%*:|"<>]/g, '_').trim();
-      var cleanArtist = artist.replace(/[/\\?%*:|"<>]/g, '_').trim();
-      var filename = cleanArtist + ' - ' + cleanTitle + '.' + format;
+      var filename = safeFileName(artist, title, format);
       var targetUrl = buildTargetUrl(track, title, artist);
       var mime = format === 'mp4' ? 'video/mp4' : 'audio/mpeg';
       var servers = getCandidateServers();
@@ -192,6 +277,7 @@
       var blob = null;
       var usedServer = null;
       var lastError = null;
+      var savedToDevice = false;
 
       // 1) Copia offline dentro de la app (blob en IndexedDB)
       if (mode === 'sonora' || mode === 'both') {
@@ -208,12 +294,13 @@
             console.warn('[Download] servidor ' + servers[i] + ' falló:', err.message);
           }
         }
-        if (!blob && mode === 'sonora') {
+        if (!blob) {
           delete _activeDownloads[taskId];
           updateBadge();
           if (Sonora.Store) {
             Sonora.Store.emit('toast', {
-              message: '✗ No se pudo descargar "' + title + '": ' + (lastError ? lastError.message : 'error'),
+              message: '✗ No se pudo descargar "' + title + '": ' +
+                (lastError ? lastError.message : 'sin conexión con el servidor'),
               type: 'error'
             });
           }
@@ -221,21 +308,43 @@
         }
       }
 
-      // 2) Archivo real en el teléfono (Android DownloadManager) o navegador
-      var deviceUrl = buildDownloadUrl(usedServer || servers[0], targetUrl, format, quality, title, artist);
-      try {
-        if (window.SonoraNative && typeof window.SonoraNative.downloadFile === 'function') {
-          window.SonoraNative.downloadFile(deviceUrl, filename, mime);
-        } else {
-          var a = document.createElement('a');
-          a.href = deviceUrl;
-          a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
+      // 2) Archivo real en el teléfono
+      //   2a) Lo normal: escribir en Descargas el blob que YA tenemos. Es
+      //       inmediato, no depende del servidor y evita que Android deje la
+      //       descarga "en espera para reintentar" con 0 B y nombre roto.
+      if (mode === 'device' || mode === 'both') {
+        if (blob) {
+          savedToDevice = await saveBlobToDevice(blob, filename, mime, taskId);
         }
-      } catch (e) {
-        console.warn('[Download] device download error:', e);
+
+        if (!savedToDevice) {
+          // 2b) Sin blob (modo "solo teléfono"): usar el gestor de Android,
+          //     pero sólo con un servidor que responda de verdad.
+          var deviceServer = usedServer || await pickReachableServer();
+          if (deviceServer) {
+            var deviceUrl = buildDownloadUrl(deviceServer, targetUrl, format, quality, title, artist);
+            try {
+              if (window.SonoraNative && typeof window.SonoraNative.downloadFile === 'function') {
+                savedToDevice = !!window.SonoraNative.downloadFile(deviceUrl, filename, mime);
+              } else {
+                var a = document.createElement('a');
+                a.href = deviceUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                savedToDevice = true;
+              }
+            } catch (e) {
+              console.warn('[Download] device download error:', e);
+            }
+          } else if (Sonora.Store) {
+            Sonora.Store.emit('toast', {
+              message: '⚠ No hay ningún servidor disponible para guardar en el teléfono',
+              type: 'warning'
+            });
+          }
+        }
       }
 
       // 3) Guardar en la biblioteca + letras
@@ -304,6 +413,7 @@
           filename: filename,
           timestamp: Date.now(),
           size: blob ? blob.size : 0,
+          deviceSaved: !!savedToDevice,
           artworkUrl: track.thumbnail || track.artworkUrl || ''
         });
         saveHistory();
@@ -313,7 +423,8 @@
 
         if (Sonora.Store) {
           Sonora.Store.emit('toast', {
-            message: '✓ "' + title + '" descargada (' + format.toUpperCase() + ')',
+            message: '✓ "' + title + '" lista (' + format.toUpperCase() +
+              (savedToDevice ? ' · guardada en Descargas' : ' · guardada en Sonora') + ')',
             type: 'success'
           });
         }
@@ -387,8 +498,10 @@
                       : 'width:' + item.progress + '%; transition:width 0.3s ease;';
                     var detail = preparing
                       ? 'Convirtiendo en el servidor…'
-                      : (item.speed + ' • Restante: ' + item.eta +
-                         (item.total ? ' • ' + formatBytes(item.bytes) + ' de ' + formatBytes(item.total) : ''));
+                      : (item.phase === 'saving'
+                        ? 'Guardando en el teléfono…'
+                        : (item.speed + ' • Restante: ' + item.eta +
+                           (item.total ? ' • ' + formatBytes(item.bytes) + ' de ' + formatBytes(item.total) : '')));
                     return `
                     <div style="background:#1e1e2d; border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px;">
                       <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;">

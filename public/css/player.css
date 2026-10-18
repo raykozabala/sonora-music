@@ -14,7 +14,14 @@
   left: 10px;
   right: 10px;
   height: 62px;
-  background: rgba(22, 24, 38, 0.96);
+  background-color: rgba(22, 24, 38, 0.94);
+  /* Tinte dinámico con el color de la portada (antes --artwork-color se
+     calculaba pero ninguna regla lo usaba: por eso se veía gris). */
+  background-image: linear-gradient(120deg,
+    rgba(var(--artwork-rgb, 255, 71, 87), 0.55) 0%,
+    rgba(var(--artwork-rgb, 255, 71, 87), 0.10) 55%,
+    rgba(22, 24, 38, 0) 100%);
+  transition: background-image 0.6s ease, transform var(--transition-normal), opacity var(--transition-normal);
   backdrop-filter: blur(28px);
   -webkit-backdrop-filter: blur(28px);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -26,7 +33,6 @@
   z-index: 190;
   cursor: pointer;
   overflow: hidden;
-  transition: transform var(--transition-normal), opacity var(--transition-normal);
 }
 
 .mini-player__content {
@@ -132,6 +138,15 @@ body.light #mini-player {
   justify-content: space-between;
   padding: env(safe-area-inset-top, 16px) 20px env(safe-area-inset-bottom, 20px) 20px;
   background-color: var(--color-background);
+  /* Fondo con los colores de la portada en vez del gris opaco de antes. */
+  background-image:
+    radial-gradient(140% 70% at 50% -10%,
+      rgba(var(--artwork-rgb, 255, 71, 87), 0.62) 0%,
+      rgba(var(--artwork-rgb, 255, 71, 87), 0) 64%),
+    linear-gradient(180deg,
+      rgba(var(--artwork-rgb, 255, 71, 87), 0.30) 0%,
+      rgba(0, 0, 0, 0) 46%);
+  transition: background-image 0.6s ease;
   overflow: hidden;
   animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -143,8 +158,8 @@ body.light #mini-player {
   z-index: 0;
   background-size: cover;
   background-position: center;
-  filter: blur(60px) saturate(180%) brightness(0.35);
-  opacity: 0.85;
+  filter: blur(70px) saturate(220%) brightness(0.55);
+  opacity: 0.9;
   pointer-events: none;
   transform: scale(1.15);
   transition: background-image 0.5s ease;
@@ -499,6 +514,11 @@ body.light #player-volume {
   inset: 0;
   z-index: 350;
   background: var(--color-surface);
+  /* Tinte con el color de la portada también en las letras. */
+  background-image: linear-gradient(180deg,
+    rgba(var(--artwork-rgb, 255, 71, 87), 0.28) 0%,
+    rgba(0, 0, 0, 0) 55%);
+  transition: background-image 0.6s ease;
   display: flex;
   flex-direction: column;
   padding-top: env(safe-area-inset-top, 16px);
@@ -555,6 +575,56 @@ body.light .lyrics-line:hover {
 body.light .lyrics-line.active {
   color: var(--color-primary);
   text-shadow: none;
+}
+
+/* ── Letra sincronizada: contenedor, resaltado y botón "Sincronizar" ── */
+.lyrics-container {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px 8px 0 8px;
+}
+
+/* Espacio inferior para que la última línea pueda quedar centrada. */
+.lyrics-tail-space {
+  height: 42vh;
+  flex: 0 0 auto;
+}
+
+.lyrics-line {
+  cursor: pointer;
+}
+
+/* El botón aparece sólo cuando el usuario mueve la letra a mano. */
+.lyrics-sync-btn {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom, 16px) + 20px);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 11px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: var(--artwork-color, var(--color-primary));
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  z-index: 6;
+  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.lyrics-sync-btn:active {
+  transform: translateX(-50%) scale(0.95);
+}
+
+.lyrics-sync-btn.hidden {
+  display: none;
 }
 
 /* ==========================================================================

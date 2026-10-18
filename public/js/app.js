@@ -514,10 +514,11 @@
     if (syncedLyricsText) {
       _syncedLines = parseLrc(syncedLyricsText);
       if (_syncedLines.length > 0) {
-        content.innerHTML = '<div class="lyrics-container" style="display:flex; flex-direction:column; gap:18px; padding:24px 8px;">' +
+        content.innerHTML = '<div class="lyrics-container">' +
           _syncedLines.map(function (line, idx) {
-            return '<div class="lyrics-line" id="lyric-line-' + idx + '" data-time="' + line.time + '">' + line.text + '</div>';
+            return '<div class="lyrics-line" id="lyric-line-' + idx + '" data-time="' + line.time + '">' + (line.text || '♪') + '</div>';
           }).join('') +
+          '<div class="lyrics-tail-space"></div>' +
         '</div>';
 
         content.onclick = function (e) {
@@ -534,6 +535,42 @@
           _lyricsUnsub();
           _lyricsUnsub = null;
         }
+
+        // ── Sincronización ──
+        // Si el usuario mueve la letra a mano, dejamos de arrastrarla y le
+        // ofrecemos el botón "Sincronizar" para volver a la línea que suena.
+        var syncBtn = $('#lyrics-sync');
+        var autoScroll = true;
+        var programmatic = false;
+        var scrollTimer = null;
+
+        function markProgrammatic() {
+          programmatic = true;
+          clearTimeout(scrollTimer);
+          scrollTimer = setTimeout(function () { programmatic = false; }, 900);
+        }
+
+        function setAutoScroll(on) {
+          autoScroll = on;
+          if (syncBtn) syncBtn.classList.toggle('hidden', on);
+        }
+
+        content.onscroll = function () {
+          if (programmatic || !autoScroll) return;
+          setAutoScroll(false);
+        };
+
+        if (syncBtn) {
+          syncBtn.onclick = function () {
+            setAutoScroll(true);
+            var el = content.querySelector('.lyrics-line.active') || content.querySelector('.lyrics-line');
+            if (el) {
+              markProgrammatic();
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          };
+        }
+        setAutoScroll(true);
 
         var lastActiveIdx = -1;
         _lyricsUnsub = Sonora.Store.subscribe('progress', function (prog) {
@@ -554,7 +591,10 @@
             allLines.forEach(function (el, idx) {
               if (idx === activeIdx) {
                 el.classList.add('active');
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                if (autoScroll) {
+                  markProgrammatic();
+                  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
               } else {
                 el.classList.remove('active');
               }
@@ -803,7 +843,11 @@
     if (queueClose) queueClose.addEventListener('click', function () { $('#queue-panel').classList.add('hidden'); });
 
     var lyricsClose = $('#lyrics-close');
-    if (lyricsClose) lyricsClose.addEventListener('click', function () { $('#lyrics-panel').classList.add('hidden'); });
+    if (lyricsClose) lyricsClose.addEventListener('click', function () {
+      $('#lyrics-panel').classList.add('hidden');
+      var syncBtn = $('#lyrics-sync');
+      if (syncBtn) syncBtn.classList.add('hidden');
+    });
 
     // Sleep timer options
     var sleepOptions = $('#sleep-timer-options');
@@ -882,6 +926,9 @@
       .on('/library', function () { loadPage('library'); })
       .on('/playlists', function () { loadPage('playlists'); })
       .on('/playlist/:id', function (params) { loadPage('playlists', params); })
+      // La app navega a /playlists/<id> (plural): sin esta ruta el detalle de
+      // una playlist no se abría nunca y volvía al inicio.
+      .on('/playlists/:id', function (params) { loadPage('playlists', params); })
       .on('/discover', function () { loadPage('discover'); })
       .on('/profile', function () { loadPage('profile'); })
       .on('/settings', function () { loadPage('settings'); })
@@ -1014,6 +1061,17 @@
         setupRoutes();
         bindEvents();
         bindStoreSubscriptions();
+
+        // Step 6b: Leer la música del teléfono en segundo plano (así las
+        // playlists ya pueden incluir archivos del dispositivo).
+        setTimeout(function () {
+          try {
+            if (Sonora.Pages && Sonora.Pages.Library &&
+                typeof Sonora.Pages.Library.preloadDeviceTracks === 'function') {
+              Sonora.Pages.Library.preloadDeviceTracks();
+            }
+          } catch (e) { /* noop */ }
+        }, 2500);
 
         // Step 7: Show app, hide splash
         var app = $('#app');

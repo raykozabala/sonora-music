@@ -64,7 +64,7 @@
   <div id="splash-screen">
     <img class="splash-note" src="./icons/icon-192.png" style="border-radius:20px; box-shadow:0 8px 30px rgba(0,0,0,0.4);" alt="Logo">
     <div class="splash-title">Sonora Music</div>
-    <div class="splash-subtitle">v7.6.1</div>
+    <div class="splash-subtitle">v7.6.2</div>
     <div class="splash-loader"></div>
   </div>
 
@@ -326,9 +326,13 @@
           </button>
         </div>
       </div>
-      <div class="panel__content" id="lyrics-content">
+      <div class="panel__content lyrics-panel__content" id="lyrics-content">
         <p class="lyrics-placeholder">No hay letra disponible para esta canción</p>
       </div>
+      <button id="lyrics-sync" class="lyrics-sync-btn hidden" aria-label="Volver a la letra que suena">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        Sincronizar
+      </button>
     </div>
 
     <!-- Sleep Timer Modal -->

@@ -45,7 +45,7 @@ echo "🔗 2/6: Enlazando paquete APK base..."
     compiled_res/resources.zip
 
 echo "☕ 3/6: Compilando código Java..."
-javac --release 8 -g:none -cp "$PLATFORM" -d obj src/com/sonoramusic/app/MainActivity.java
+javac --release 8 -g:none -cp "$PLATFORM" -d obj src/com/sonoramusic/app/*.java
 
 echo "⚡ 4/6: Generando Dalvik Executable (classes.dex) con D8..."
 echo "   (build-tools: $BUILD_TOOLS)"

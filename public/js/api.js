@@ -10,7 +10,9 @@
   var _mode = 'local'; // 'local' | 'render' | 'off' (Default to Local PC server on same Wi-Fi)
   var _localUrl = 'http://192.168.1.132:3000';
   var _renderUrl = 'https://sonora-music-b1ee.onrender.com';
-  var _timeout = 6000;
+  // Render (plan gratuito) hiberna: la primera petición puede tardar ~50 s.
+  // Con 6 s la app se daba por "desconectada" teniendo el servidor bien.
+  var _timeout = 20000;
 
   // Si la app se está viendo servida por el propio servidor (navegador en la PC
   // o en el celular vía http://IP:3000), usamos ese mismo origen como servidor
@@ -231,11 +233,12 @@
      * Test connection to a specific server mode
      * Returns { ok: boolean, latency: number, server: string }
      */
-    testConnection: function (mode) {
+    testConnection: function (mode, timeout) {
       var url = mode === 'local' ? _localUrl : _renderUrl;
       var start = Date.now();
+      var t = timeout || 8000;
 
-      return fetchWithTimeout(url + '/api/health', {}, 8000)
+      return fetchWithTimeout(url + '/api/health', {}, t)
         .then(function (resp) {
           var latency = Date.now() - start;
           if (resp.ok) {
@@ -246,7 +249,7 @@
             });
           }
           // Fallback to pinging root URL (especially for Render servers)
-          return fetchWithTimeout(url + '/', {}, 8000).then(function (r2) {
+          return fetchWithTimeout(url + '/', {}, t).then(function (r2) {
             if (r2.ok) {
               return { ok: true, latency: Date.now() - start, server: mode, data: { status: 'ok', server: 'render' } };
             }
@@ -273,22 +276,33 @@
      * Tries local first, then render, then offline
      */
     autoDetect: function () {
-      return Sonora.API.testConnection('local').then(function (localResult) {
+      return Sonora.API.testConnection('local', 6000).then(function (localResult) {
         if (localResult.ok) {
           Sonora.API.setMode('local');
           return { mode: 'local', result: localResult };
         }
-        return Sonora.API.testConnection('render').then(function (renderResult) {
-          if (renderResult.ok) {
+        // La nube puede estar despertando: damos dos oportunidades con margen
+        // amplio antes de darnos por vencidos.
+        return Sonora.API.testConnection('render', 25000).then(function (r1) {
+          if (r1.ok) {
             Sonora.API.setMode('render');
-            return { mode: 'render', result: renderResult };
+            return { mode: 'render', result: r1 };
           }
-          Sonora.API.setMode('off');
-          return { mode: 'off', result: null };
+          return Sonora.API.testConnection('render', 30000).then(function (r2) {
+            if (r2.ok || _renderUrl) {
+              // Aunque el sondeo falle, si hay URL de nube la dejamos activa:
+              // la propia búsqueda/canción la despertará. Antes se ponía "off"
+              // y la app quedaba desconectada teniendo servidor.
+              Sonora.API.setMode('render');
+              return { mode: 'render', result: r2 };
+            }
+            Sonora.API.setMode('off');
+            return { mode: 'off', result: null };
+          });
         });
       }).catch(function () {
-        Sonora.API.setMode('off');
-        return { mode: 'off', result: null };
+        Sonora.API.setMode(_renderUrl ? 'render' : 'off');
+        return { mode: _renderUrl ? 'render' : 'off', result: null };
       });
     },
 

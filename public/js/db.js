@@ -310,6 +310,7 @@
         });
       },
       update: function (track) { return putToStore('tracks', track); },
+      delete: function (id) { return deleteFromStore('tracks', id); },
       search: function (query) {
         var q = (query || '').toLowerCase();
         if (!q) return Promise.resolve([]);

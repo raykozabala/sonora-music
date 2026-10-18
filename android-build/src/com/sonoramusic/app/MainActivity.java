@@ -33,14 +33,41 @@ import android.provider.MediaStore;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import android.content.ContentValues;
+import android.util.Base64;
 
 public class MainActivity extends Activity {
     private static final String TAG = "SonoraMusic";
     private static final int FILE_CHOOSER_REQ = 1001;
     private static final int AUDIO_PERM_REQ = 1002;
+    private static final int NOTIF_PERM_REQ = 1003;
 
     private WebView webView;
     private ValueCallback<Uri[]> uploadMessage;
+
+    // Instancia viva: el servicio de reproducción la usa para mandar órdenes
+    // (play/pausa/siguiente...) al reproductor que vive en el WebView.
+    private static volatile MainActivity sInstance = null;
+
+    public static void sendCommandToWeb(final String cmd) {
+        MainActivity a = sInstance;
+        if (a == null || a.webView == null) return;
+        final WebView wv = a.webView;
+        wv.post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    wv.evaluateJavascript(
+                        "window.SonoraNativeMedia && window.SonoraNativeMedia.onAction('" + cmd + "');",
+                        null);
+                } catch (Exception e) {
+                    Log.e(TAG, "sendCommandToWeb: " + e.getMessage());
+                }
+            }
+        });
+    }
 
     private String[] audioPermissions() {
         if (Build.VERSION.SDK_INT >= 33) {
@@ -215,6 +242,170 @@ public class MainActivity extends Activity {
             return false;
         }
 
+        // ------------------------------------------------------------------
+        // Guardar en la carpeta Descargas del teléfono el audio que la app ya
+        // descargó. Se hace por trozos (base64) porque el audio puede pesar
+        // varios MB y el puente JS no admite binarios directos.
+        // ------------------------------------------------------------------
+        private SaveSession saveSession = null;
+
+        private static class SaveSession {
+            final Uri uri;
+            final OutputStream stream;
+            final String name;
+            final boolean modern;
+            long bytes = 0;
+            SaveSession(Uri uri, OutputStream stream, String name, boolean modern) {
+                this.uri = uri; this.stream = stream; this.name = name; this.modern = modern;
+            }
+            void close() throws Exception {
+                try { stream.flush(); } catch (Exception ignored) {}
+                stream.close();
+            }
+        }
+
+        private static String sanitizeFileName(String name) {
+            if (name == null) return "";
+            String s = name.replaceAll("[\\\\/:*?\"<>|\\r\\n\\t]", "_").trim();
+            if (s.length() > 120) {
+                int dot = s.lastIndexOf('.');
+                s = (dot > 0) ? (s.substring(0, 110) + s.substring(dot)) : s.substring(0, 120);
+            }
+            return s;
+        }
+
+        @android.webkit.JavascriptInterface
+        public String startSaveToDownloads(String filename, String mimetype) {
+            try {
+                if (saveSession != null) {
+                    try { saveSession.close(); } catch (Exception ignored) {}
+                    saveSession = null;
+                }
+                String clean = sanitizeFileName(filename);
+                if (clean.isEmpty()) clean = "sonora_" + System.currentTimeMillis() + ".mp3";
+                String mime = (mimetype != null && !mimetype.isEmpty()) ? mimetype : "audio/mpeg";
+
+                if (Build.VERSION.SDK_INT >= 29) {
+                    ContentValues values = new ContentValues();
+                    values.put(MediaStore.Audio.Media.DISPLAY_NAME, clean);
+                    values.put(MediaStore.Audio.Media.MIME_TYPE, mime);
+                    values.put(MediaStore.Audio.Media.RELATIVE_PATH,
+                            Environment.DIRECTORY_DOWNLOADS + "/Sonora Music");
+                    values.put(MediaStore.Audio.Media.IS_MUSIC, 1);
+                    values.put(MediaStore.Audio.Media.IS_PENDING, 1);
+                    Uri uri = activity.getContentResolver()
+                            .insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values);
+                    if (uri == null) { Log.e(TAG, "startSave: MediaStore devolvió null"); return ""; }
+                    OutputStream os = activity.getContentResolver().openOutputStream(uri);
+                    if (os == null) { Log.e(TAG, "startSave: sin stream"); return ""; }
+                    saveSession = new SaveSession(uri, os, clean, true);
+                    Log.i(TAG, "startSave: " + clean);
+                    return "ok:" + clean;
+                }
+
+                // Android 9 o anterior: carpeta pública + escaneo
+                File dir = new File(Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS), "Sonora Music");
+                if (!dir.exists()) dir.mkdirs();
+                File f = new File(dir, clean);
+                OutputStream os = new FileOutputStream(f);
+                saveSession = new SaveSession(Uri.fromFile(f), os, clean, false);
+                Log.i(TAG, "startSave(legacy): " + f.getAbsolutePath());
+                return "ok:" + clean;
+            } catch (Exception e) {
+                Log.e(TAG, "startSaveToDownloads: " + e.getMessage());
+                saveSession = null;
+                return "";
+            }
+        }
+
+        @android.webkit.JavascriptInterface
+        public boolean appendSaveChunk(String base64) {
+            if (saveSession == null || base64 == null || base64.isEmpty()) return false;
+            try {
+                byte[] data = Base64.decode(base64, Base64.DEFAULT);
+                saveSession.stream.write(data);
+                saveSession.bytes += data.length;
+                return true;
+            } catch (Exception e) {
+                Log.e(TAG, "appendSaveChunk: " + e.getMessage());
+                return false;
+            }
+        }
+
+        @android.webkit.JavascriptInterface
+        public String finishSaveToDownloads() {
+            if (saveSession == null) return "";
+            String name = saveSession.name;
+            long bytes = saveSession.bytes;
+            boolean modern = saveSession.modern;
+            Uri uri = saveSession.uri;
+            try {
+                saveSession.close();
+                if (modern && Build.VERSION.SDK_INT >= 29) {
+                    ContentValues v = new ContentValues();
+                    v.put(MediaStore.Audio.Media.IS_PENDING, 0);
+                    activity.getContentResolver().update(uri, v, null, null);
+                }
+                saveSession = null;
+                Log.i(TAG, "finishSave: " + name + " (" + bytes + " bytes)");
+                final String msg = "💾 Guardado en Descargas/Sonora Music: " + name;
+                activity.runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        Toast.makeText(activity, msg, Toast.LENGTH_LONG).show();
+                    }
+                });
+                return "ok";
+            } catch (Exception e) {
+                Log.e(TAG, "finishSaveToDownloads: " + e.getMessage());
+                saveSession = null;
+                return "";
+            }
+        }
+
+        @android.webkit.JavascriptInterface
+        public void abortSaveToDownloads() {
+            if (saveSession == null) return;
+            try {
+                saveSession.close();
+                if (saveSession.modern && Build.VERSION.SDK_INT >= 29) {
+                    activity.getContentResolver().delete(saveSession.uri, null, null);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "abortSave: " + e.getMessage());
+            }
+            saveSession = null;
+        }
+
+        // ------------------------------------------------------------------
+        // Controles de reproducción en la barra de notificaciones
+        // ------------------------------------------------------------------
+        @android.webkit.JavascriptInterface
+        public String updatePlaybackInfo(String json) {
+            try {
+                JSONObject o = new JSONObject(json == null ? "{}" : json);
+                PlaybackService.sTitle = o.optString("title", "");
+                PlaybackService.sArtist = o.optString("artist", "");
+                PlaybackService.sAlbum = o.optString("album", "");
+                PlaybackService.sArtwork = o.optString("artwork", "");
+                PlaybackService.sPlaying = o.optBoolean("playing", false);
+                PlaybackService.sHasPrev = o.optBoolean("hasPrev", true);
+                PlaybackService.sHasNext = o.optBoolean("hasNext", true);
+                PlaybackService.sPosition = (long) (o.optDouble("position", 0) * 1000);
+                PlaybackService.sDuration = (long) (o.optDouble("duration", 0) * 1000);
+
+                if (PlaybackService.sTitle.isEmpty()) {
+                    PlaybackService.shutdown(activity);
+                    return "stopped";
+                }
+                PlaybackService.push(activity);
+                return "ok";
+            } catch (Exception e) {
+                Log.e(TAG, "updatePlaybackInfo: " + e.getMessage());
+                return "error";
+            }
+        }
+
         @android.webkit.JavascriptInterface
         public boolean hasStoragePermission() {
             return activity.hasAudioPermission();
@@ -245,7 +436,12 @@ public class MainActivity extends Activity {
                     MediaStore.Audio.Media.DATA,
                     MediaStore.Audio.Media.ALBUM_ID
                 };
-                String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
+                // IS_MUSIC deja fuera lo que está en Descargas, así que también
+                // aceptamos cualquier MIME de audio (y descartamos tonos cortos).
+                String selection = "(" + MediaStore.Audio.Media.IS_MUSIC + " != 0 OR "
+                    + MediaStore.Audio.Media.MIME_TYPE + " LIKE 'audio/%')"
+                    + " AND (" + MediaStore.Audio.Media.DURATION + " IS NULL OR "
+                    + MediaStore.Audio.Media.DURATION + " > 20000)";
                 cursor = activity.getContentResolver().query(
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                     projection,
@@ -472,6 +668,19 @@ public class MainActivity extends Activity {
         webView.addJavascriptInterface(new SonoraNativeInterface(this), "SonoraNative");
 
         webView.loadUrl("file:///android_asset/index.html");
+
+        sInstance = this;
+
+        // Android 13+: sin este permiso no se muestra la notificación con los
+        // controles de reproducción.
+        try {
+            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(
+                    Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{ Manifest.permission.POST_NOTIFICATIONS }, NOTIF_PERM_REQ);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "permiso de notificaciones: " + e.getMessage());
+        }
     }
 
     @Override
@@ -489,6 +698,12 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (sInstance == this) sInstance = null;
+        try {
+            PlaybackService.shutdown(this);
+        } catch (Exception e) {
+            Log.e(TAG, "onDestroy(playback): " + e.getMessage());
+        }
         if (webView != null) {
             webView.destroy();
         }

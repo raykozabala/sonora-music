@@ -118,9 +118,24 @@
     return list;
   }
 
+  /**
+   * Busca una canción tanto en la biblioteca como entre las del teléfono.
+   * (Las pistas del dispositivo no están en `allTracks` pero sí se pueden
+   * añadir a playlists o abrir su menú de 3 puntos.)
+   */
+  function findTrackById(id) {
+    var t = allTracks.find(function (x) { return String(x.id) === String(id); });
+    if (t) return t;
+    return deviceTracks.find(function (x) { return String(x.id) === String(id); }) || null;
+  }
+
   function renderTrackRow(track, idx, context) {
     const isFav = !!track.isFavorite;
-    const isDl = !!track.isDownloaded || (Sonora.Download && typeof Sonora.Download.isDownloaded === 'function' && Sonora.Download.isDownloaded(track.id));
+    // OJO: antes se llamaba a Download.isDownloaded() (devuelve una promesa, es
+    // decir SIEMPRE verdadera) y TODAS las canciones salían con la etiqueta de
+    // descargada. Ahora usamos el dato guardado en la base de datos.
+    const isDevice = !!track.isDeviceTrack;
+    const isOffline = !isDevice && !!track.isDownloaded;
 
     return `
       <div class="lib-track-item" data-action="play-track" data-track-id="${escapeHtml(track.id)}" data-idx="${idx}" data-context="${context}">
@@ -131,7 +146,8 @@
         <div class="lib-track-info">
           <div class="lib-track-title">${escapeHtml(track.title)}</div>
           <div class="lib-track-meta">
-            ${isDl ? '<span class="download-badge" title="Descargado">✓</span>' : ''}
+            ${isDevice ? '<span class="src-badge src-badge--device" title="Archivo de música del teléfono">📱 Del dispositivo</span>' : ''}
+            ${isOffline ? '<span class="src-badge src-badge--sonora" title="Guardada en Sonora: suena sin internet">⬇ Guardado en Sonora</span>' : ''}
             <span>${escapeHtml(track.artist || 'Artista desconocido')}</span>
             ${track.album ? `<span>• ${escapeHtml(track.album)}</span>` : ''}
           </div>
@@ -285,6 +301,64 @@
     return !!(window.SonoraNative && typeof window.SonoraNative.getDeviceMusicFiles === 'function');
   }
 
+  /**
+   * Guarda en la base de datos las pistas del teléfono.
+   * Así pueden añadirse a playlists y reproducirse sin servidor (su filePath
+   * es un content:// que el reproductor usa directamente).
+   */
+  async function persistDeviceTracks(list) {
+    if (!Sonora.DB || !Sonora.DB.tracks || typeof Sonora.DB.tracks.add !== 'function') return;
+    try {
+      var all = (await Sonora.DB.tracks.getAll()) || [];
+      var prevIds = all.filter(t => t && t.isDeviceTrack).map(t => String(t.id));
+      var nowIds = list.map(t => String(t.id));
+
+      for (var i = 0; i < prevIds.length; i++) {
+        if (nowIds.indexOf(prevIds[i]) === -1) {
+          try { await Sonora.DB.tracks.delete(prevIds[i]); } catch (e) {}
+        }
+      }
+
+      if (!list.length) return;
+
+      var now = new Date().toISOString();
+      var records = list.map(function (t) {
+        return {
+          id: t.id,
+          title: t.title,
+          artist: t.artist,
+          album: t.album || 'Dispositivo',
+          albumId: t.albumId || 1,
+          artistId: 1,
+          duration: t.duration || 180,
+          artworkUrl: '',
+          filePath: t.filePath,
+          rawPath: t.rawPath || '',
+          sourceUrl: '',
+          streamUrl: '',
+          isFavorite: 0,
+          isDownloaded: 0,
+          isDeviceTrack: 1,
+          dateAdded: now,
+          genre: 'Dispositivo',
+          year: 0,
+          trackNumber: 1
+        };
+      });
+
+      // Una sola transacción: con bibliotecas grandes es mucho más rápido.
+      if (typeof Sonora.DB.tracks.addMany === 'function') {
+        await Sonora.DB.tracks.addMany(records);
+      } else {
+        for (var j = 0; j < records.length; j++) {
+          try { await Sonora.DB.tracks.add(records[j]); } catch (e) {}
+        }
+      }
+    } catch (e) {
+      console.warn('[Library] No se pudieron guardar las pistas del dispositivo:', e);
+    }
+  }
+
   async function loadDeviceTracks() {
     if (!deviceBridgeAvailable()) {
       deviceTracks = [];
@@ -303,6 +377,7 @@
       } else {
         deviceNeedsPermission = false;
         deviceTracks = Array.isArray(parsed) ? parsed : [];
+        await persistDeviceTracks(deviceTracks);
       }
     } catch (e) {
       console.warn('[Library] Error escaneando dispositivo:', e);
@@ -405,13 +480,9 @@
   }
 
   function renderDescargadosTab(tracks) {
-    const dlTracks = tracks.filter(t => {
-      if (t.isDownloaded) return true;
-      if (Sonora.Download && typeof Sonora.Download.isDownloaded === 'function') {
-        return Sonora.Download.isDownloaded(t.id);
-      }
-      return false;
-    });
+    // Antes se llamaba a Download.isDownloaded() (promesa => siempre verdadera)
+    // y esta pestaña listaba TODA la biblioteca como si estuviera descargada.
+    const dlTracks = tracks.filter(t => t && !!t.isDownloaded);
 
     if (dlTracks.length === 0) {
       return `
@@ -549,7 +620,10 @@
 
   function renderContextMenuContent(track) {
     if (!track) return '';
-    const isDl = !!track.isDownloaded || (Sonora.Download && typeof Sonora.Download.isDownloaded === 'function' && Sonora.Download.isDownloaded(track.id));
+    // OJO: Download.isDownloaded() devuelve una promesa (siempre verdadera),
+    // así que antes TODAS las canciones mostraban "Eliminar descarga".
+    const isDevice = !!track.isDeviceTrack;
+    const isDl = !isDevice && !!track.isDownloaded;
     const isFav = !!track.isFavorite;
 
     return `
@@ -564,6 +638,9 @@
             <div class="sheet-track-title">${escapeHtml(track.title)}</div>
             <div class="sheet-track-artist">${escapeHtml(track.artist || 'Artista desconocido')}</div>
             <div class="sheet-track-album">${escapeHtml(track.album || '')}</div>
+            ${isDevice
+              ? '<span class="src-badge src-badge--device">📱 Del dispositivo</span>'
+              : (isDl ? '<span class="src-badge src-badge--sonora">⬇ Guardado en Sonora</span>' : '')}
           </div>
         </div>
 
@@ -580,10 +657,12 @@
             <svg width="22" height="22" viewBox="0 0 24 24" fill="${isFav ? 'var(--primary, #FF4757)' : 'none'}" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
             <span>${isFav ? 'Eliminar de favoritos' : 'Añadir a favoritos'}</span>
           </button>
+          ${isDevice ? '' : `
           <button class="sheet-menu-item" data-action="sheet-toggle-download">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             <span>${isDl ? 'Eliminar descarga' : 'Descargar'}</span>
-          </button>
+          </button>`}
+          ${isDevice ? '' : `
           <button class="sheet-menu-item" data-action="sheet-go-artist">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             <span>Ir al artista (${escapeHtml(track.artist || 'Artista')})</span>
@@ -591,7 +670,7 @@
           <button class="sheet-menu-item" data-action="sheet-go-album">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
             <span>Ir al álbum (${escapeHtml(track.album || 'Álbum')})</span>
-          </button>
+          </button>`}
           <button class="sheet-menu-item" data-action="sheet-share">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
             <span>Compartir</span>
@@ -1212,6 +1291,21 @@
       `;
     },
 
+    /**
+     * Lee (una sola vez) la música del teléfono y la guarda en la base de
+     * datos, para que las playlists puedan usarla aunque el usuario no haya
+     * abierto todavía la pestaña "Este dispositivo".
+     */
+    preloadDeviceTracks() {
+      try {
+        if (deviceBridgeAvailable() && !deviceLoadedOnce && !deviceLoading) {
+          loadDeviceTracks();
+        }
+      } catch (e) {
+        console.warn('[Library] preloadDeviceTracks:', e && e.message);
+      }
+    },
+
     async init() {
       rootElement = $('.page-library');
       if (!rootElement) return;
@@ -1426,7 +1520,7 @@
           if (menuBtn) {
             e.stopPropagation();
             const trackId = menuBtn.getAttribute('data-track-id');
-            const track = allTracks.find(t => String(t.id) === String(trackId));
+            const track = findTrackById(trackId);
             if (track && bottomSheet) {
               activeTrackForMenu = track;
               bottomSheet.innerHTML = renderContextMenuContent(track);
@@ -1546,7 +1640,11 @@
 
       // Tracks
       if (Sonora.DB.tracks && typeof Sonora.DB.tracks.getAll === 'function') {
-        allTracks = (await Sonora.DB.tracks.getAll()) || [];
+        // Las pistas del teléfono tienen su propia pestaña ("Este dispositivo")
+        // y no deben mezclarse con la biblioteca de Sonora.
+        allTracks = ((await Sonora.DB.tracks.getAll()) || []).filter(function (t) {
+          return t && !t.isDeviceTrack;
+        });
       }
 
       // Albums
@@ -1649,7 +1747,7 @@
   }
 
   async function toggleTrackFavorite(trackId) {
-    const track = allTracks.find(t => String(t.id) === String(trackId));
+    const track = findTrackById(trackId);
     if (!track) return;
 
     track.isFavorite = !track.isFavorite;

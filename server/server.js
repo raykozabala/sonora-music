@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.6.1
+ * Sonora Music Server v7.6.2
  * Dual-mode backend server (Local PC & Render.com compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -624,7 +624,7 @@ app.get('/api/health', (req, res) => {
       status: 'ok',
       server: isRender ? 'render' : 'local',
       uptime: Math.floor(process.uptime()),
-      version: '7.6.1'
+      version: '7.6.2'
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
@@ -968,12 +968,37 @@ function audioContentType(filePath) {
   return 'audio/mpeg';
 }
 
+/**
+ * Tipo MIME mirando los primeros bytes del fichero. Es más fiable que la
+ * extensión: yt-dlp a veces guarda MP4/M4A en un fichero con otro nombre, y
+ * Android puede negarse a reproducirlo si el Content-Type no encaja.
+ */
+function sniffAudioContentType(filePath) {
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(16);
+    const n = fs.readSync(fd, buf, 0, 16, 0);
+    fs.closeSync(fd);
+    if (n >= 12) {
+      const four = buf.slice(0, 4).toString('latin1');
+      if (buf.slice(4, 8).toString('latin1') === 'ftyp') return 'audio/mp4';
+      if (four === 'OggS') return 'audio/ogg';
+      if (four === 'fLaC') return 'audio/flac';
+      if (four === 'RIFF') return 'audio/wav';
+      if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return 'audio/webm';
+      if (four.slice(0, 3) === 'ID3') return 'audio/mpeg';
+      if (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) return 'audio/mpeg';
+    }
+  } catch (e) {}
+  return audioContentType(filePath);
+}
+
 /** Sirve un fichero de audio local respetando Range (permite "seek"). */
 function serveAudioFileWithRanges(filePath, req, res) {
   const stat = fs.statSync(filePath);
   const fileSize = stat.size;
   const range = req.headers.range;
-  const contentType = audioContentType(filePath);
+  const contentType = sniffAudioContentType(filePath);
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -1047,14 +1072,21 @@ async function serveGeneratedAudio(targetUrl, req, res) {
     const generated = await ytdlpDownloadToFile(args, targetUrl, tmpDir, stamp);
     if (!generated) return false;
 
-    // Guardamos en caché conservando la extensión (define el Content-Type)
+    // Guardamos en caché conservando la extensión (ayuda al Content-Type).
+    // OJO: CACHE_DIR sólo lo creaba la ruta de descargas, así que en un
+    // contenedor nuevo (Render) esta copia fallaba con ENOENT y el audio se
+    // regeneraba en cada petición. Lo creamos aquí también.
     let finalPath = generated;
     try {
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
       const ext = path.extname(generated) || '.m4a';
       const cachedPath = path.join(CACHE_DIR, key + ext);
       fs.copyFileSync(generated, cachedPath);
       finalPath = cachedPath;
-    } catch (e) {}
+      console.log('[Stream] plan D: audio guardado en caché (' + path.basename(cachedPath) + ')');
+    } catch (copyErr) {
+      console.warn('[Stream] plan D: no se pudo cachear: ' + copyErr.message);
+    }
 
     console.log('[Stream] plan D: audio generado en el servidor');
     serveAudioFileWithRanges(finalPath, req, res);
@@ -1078,7 +1110,7 @@ app.get('/api/system', (req, res) => {
     mode: isRender ? 'render' : 'local',
     node: process.version,
     platform: process.platform,
-    version: '7.6.1',
+    version: '7.6.2',
     ytdlp: {
       path: YTDLP_BIN,
       available: !!ytdlpVersion,
@@ -1175,7 +1207,7 @@ const lyricsCache = new Map();
 async function fetchLrclib(url) {
   const resp = await fetch(url, {
     headers: {
-      'User-Agent': 'SonoraMusic/7.6.1 (+https://github.com/raykozabala/sonora-music)'
+      'User-Agent': 'SonoraMusic/7.6.2 (+https://github.com/raykozabala/sonora-music)'
     }
   });
   if (resp.status === 404) return null;
@@ -1354,6 +1386,21 @@ app.get('/api/stream/external', async (req, res) => {
       return res.status(502).json({ error: 'El plan D (generar el audio) falló' });
     }
 
+    // En Render (IP de datacenter) YouTube no deja proxificar el audio: la
+    // petición al CDN vuelve como página de error y perderíamos 45 s de espera
+    // para nada. Ahí la vía fiable es generar el fichero en el servidor —lo
+    // mismo que hacen las descargas, ya verificado— y servirlo desde disco.
+    // En local el proxy sí funciona y es más rápido (7 s la primera vez), así
+    // que se mantiene el camino completo.
+    if (SERVER_MODE === 'render') {
+      console.log('[Stream] servidor en la nube -> generamos el audio (plan D)');
+      if (await serveGeneratedAudio(targetUrl, req, res)) return;
+      return res.status(502).json({
+        error: 'No se pudo obtener el audio de esta canción',
+        detail: 'El servidor no pudo generar el audio'
+      });
+    }
+
     let lastResolveError = '';
     let directUrl = getResolvedUrl(targetUrl);
     if (directUrl) {
@@ -1524,7 +1571,7 @@ async function resolveViaInvidious(videoId) {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 12000);
       const r = await fetch(base + '/api/v1/videos/' + videoId, {
-        headers: { 'User-Agent': 'SonoraMusic/7.6.1' },
+        headers: { 'User-Agent': 'SonoraMusic/7.6.2' },
         signal: ctrl.signal
       });
       clearTimeout(t);
@@ -1709,7 +1756,11 @@ app.get('/api/download/external', async (req, res) => {
   res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length');
   res.setHeader('Content-Type', format === 'mp4' ? 'video/mp4' : 'audio/mpeg');
   res.setHeader('Content-Length', size);
-  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  // El nombre debe ir SIN codificar en "filename" (si no, Android genera
+  // nombres rotos del tipo ".mp3"); el nombre con acentos va en filename*.
+  const asciiName = filename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+  res.setHeader('Content-Disposition',
+    `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
 
   const cleanup = () => { if (!isCached) { try { fs.unlinkSync(filePath); } catch (e) {} } };
   const stream = fs.createReadStream(filePath);
@@ -2708,7 +2759,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('----------------------------------------------------');
-  console.log('🎵 Sonora Music Server v7.6.1');
+  console.log('🎵 Sonora Music Server v7.6.2');
   console.log(`📡 Mode: ${isRender ? 'Render' : 'Local'}`);
   console.log(`🌐 Port: ${PORT}`);
   console.log(`📁 Music directory: ${musicDir}`);

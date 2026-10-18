@@ -334,6 +334,10 @@
           <style>
             .page-search {
               padding-bottom: 120px;
+              /* Sin esto se sumaba al padding de main.css y el buscador quedaba
+                 con 32px de sangrado (desalineado con el resto). */
+              padding-left: 0;
+              padding-right: 0;
               min-height: 100vh;
               color: var(--text-color, #ffffff);
               background: var(--bg-color, #121212);
@@ -621,6 +625,8 @@
             .external-track-actions {
               display: flex;
               gap: 8px;
+              flex-wrap: wrap;
+              justify-content: flex-end;
             }
             .btn-action-download {
               background: var(--color-primary, #FF4757);
@@ -849,6 +855,43 @@
               color: #ffffff;
               text-align: center;
               align-items: center;
+            }
+
+            /* ── Pulido y animaciones del buscador ── */
+            @keyframes fadeIn {
+              from { opacity: 0; }
+              to { opacity: 1; }
+            }
+            @keyframes trackIn {
+              from { opacity: 0; transform: translateY(10px); }
+              to { opacity: 1; transform: translateY(0); }
+            }
+            .external-track-card {
+              animation: trackIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+              transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+            }
+            .tracks-list-external .external-track-card:nth-child(1) { animation-delay: 0.02s; }
+            .tracks-list-external .external-track-card:nth-child(2) { animation-delay: 0.05s; }
+            .tracks-list-external .external-track-card:nth-child(3) { animation-delay: 0.08s; }
+            .tracks-list-external .external-track-card:nth-child(4) { animation-delay: 0.11s; }
+            .tracks-list-external .external-track-card:nth-child(5) { animation-delay: 0.14s; }
+            .external-track-card:active { transform: scale(0.985); }
+            .external-track-card:hover {
+              border-color: rgba(255, 71, 87, 0.45);
+              box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            }
+            .external-track-art-wrap { overflow: hidden; }
+            .external-track-art-wrap img { transition: transform 0.28s ease; }
+            .external-track-card:hover .external-track-art-wrap img { transform: scale(1.07); }
+            .genre-card { transition: transform 0.18s ease, box-shadow 0.18s ease; }
+            .genre-card:hover { box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35); }
+            .search-bar { transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+            @media (min-width: 560px) { .genre-grid { grid-template-columns: 1fr 1fr 1fr; } }
+            @media (min-width: 860px) { .genre-grid { grid-template-columns: repeat(4, 1fr); } }
+            @media (max-width: 370px) {
+              .external-track-card { gap: 8px; padding: 8px; }
+              .external-track-art-wrap { width: 64px; height: 64px; }
+              .external-track-title { font-size: 13px; }
             }
           </style>
 

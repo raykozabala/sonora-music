@@ -11,6 +11,58 @@
   var _currentDarkMode = 'dark';
   var _currentFontSize = 'medium';
   var _customBg = null;
+  var _artColor = null;
+
+  // ── Utilidades de color para el fondo dinámico del reproductor ──
+  function clamp255(v) { return Math.max(0, Math.min(255, Math.round(v))); }
+
+  function rgbToHex(rgb) {
+    return '#' + rgb.map(function (v) {
+      var h = clamp255(v).toString(16);
+      return h.length === 1 ? '0' + h : h;
+    }).join('');
+  }
+
+  /** Sube viveza y saturación para que el color no salga apagado. */
+  function boost(rgb, amount) {
+    var r = rgb[0], g = rgb[1], b = rgb[2];
+    var max = Math.max(r, g, b), avg = (r + g + b) / 3;
+    var f = amount || 1.35;
+    return [
+      clamp255(avg + (r - avg) * f),
+      clamp255(avg + (g - avg) * f),
+      clamp255(avg + (b - avg) * f)
+    ];
+  }
+
+  /** Segundo color del degradado: gira ligeramente el tono. */
+  function shiftHue(rgb, mix, angle) {
+    var r = rgb[0] / 255, g = rgb[1] / 255, b = rgb[2] / 255;
+    var max = Math.max(r, g, b), min = Math.min(r, g, b);
+    var h = 0, s = 0, l = (max + min) / 2;
+    var d = max - min;
+    if (d !== 0) {
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max === r) h = ((g - b) / d + (g < b ? 6 : 0));
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60;
+    }
+    h = (h + (angle || 28)) % 360;
+    var c = (1 - Math.abs(2 * l - 1)) * s;
+    var x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    var m = l - c / 2;
+    var rr = 0, gg = 0, bb = 0;
+    if (h < 60) { rr = c; gg = x; }
+    else if (h < 120) { rr = x; gg = c; }
+    else if (h < 180) { gg = c; bb = x; }
+    else if (h < 240) { gg = x; bb = c; }
+    else if (h < 300) { rr = x; bb = c; }
+    else { rr = c; bb = x; }
+    var out = [(rr + m) * 255, (gg + m) * 255, (bb + m) * 255];
+    if (mix) out = out.map(function (v, i) { return clamp255(v * (1 - mix) + rgb[i] * mix); });
+    return out;
+  }
 
   var THEMES = [
     { id: 'system', name: 'Sistema', icon: '⚙️', color: '#607D8B' },
@@ -147,43 +199,82 @@
      */
     extractDominantColor: function (imageUrl) {
       return new Promise(function (resolve) {
-        if (!imageUrl) { resolve('#FF4757'); return; }
+        var fallback = { primary: '#FF4757', secondary: '#FF6B35', rgb: '255, 71, 87' };
+        if (!imageUrl) { resolve(fallback); return; }
         try {
           var img = new Image();
           img.crossOrigin = 'anonymous';
           img.onload = function () {
             try {
+              var N = 32;
               var canvas = document.createElement('canvas');
-              canvas.width = 1;
-              canvas.height = 1;
+              canvas.width = N;
+              canvas.height = N;
               var ctx = canvas.getContext('2d');
-              ctx.drawImage(img, 0, 0, 1, 1);
-              var data = ctx.getImageData(0, 0, 1, 1).data;
-              var hex = '#' + ((1 << 24) + (data[0] << 16) + (data[1] << 8) + data[2]).toString(16).slice(1);
-              resolve(hex);
-            } catch (e) { resolve('#FF4757'); }
+              ctx.drawImage(img, 0, 0, N, N);
+              var px = ctx.getImageData(0, 0, N, N).data;
+
+              // Se descartan los píxeles apagados (casi negros, casi blancos y
+              // grises): así el fondo coge el COLOR de la portada y no un gris.
+              var sumR = 0, sumG = 0, sumB = 0, sumW = 0;
+              var best = null, bestScore = -1;
+              for (var i = 0; i < px.length; i += 4) {
+                var r = px[i], g = px[i + 1], b = px[i + 2], a = px[i + 3];
+                if (a < 140) continue;
+                var mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+                var sat = mx === 0 ? 0 : (mx - mn) / mx;
+                var lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+                var score = sat * (1 - Math.abs(lum - 0.55) * 1.5);
+                if (lum < 0.10 || lum > 0.95) score *= 0.2;
+                sumR += r * score; sumG += g * score; sumB += b * score; sumW += score;
+                if (score > bestScore) { bestScore = score; best = [r, g, b]; }
+              }
+
+              var out = (sumW > 0)
+                ? [sumR / sumW, sumG / sumW, sumB / sumW]
+                : (best || [255, 71, 87]);
+
+              var vivid = boost(out, 1.4);
+              var second = shiftHue(vivid, 0.15, 30);
+              resolve({
+                primary: rgbToHex(vivid),
+                secondary: rgbToHex(second),
+                rgb: clamp255(vivid[0]) + ', ' + clamp255(vivid[1]) + ', ' + clamp255(vivid[2])
+              });
+            } catch (e) {
+              resolve(fallback);
+            }
           };
-          img.onerror = function () { resolve('#FF4757'); };
+          img.onerror = function () { resolve(fallback); };
           img.src = imageUrl;
-        } catch (e) { resolve('#FF4757'); }
+        } catch (e) { resolve(fallback); }
       });
     },
 
     /**
-     * Apply dynamic color to mini-player based on artwork
+     * Apply dynamic color to mini-player, full player and lyrics panel
      */
     applyArtworkColor: function (imageUrl) {
-      Sonora.Themes.extractDominantColor(imageUrl).then(function (color) {
-        var miniPlayer = document.getElementById('mini-player');
-        if (miniPlayer) {
-          miniPlayer.style.setProperty('--artwork-color', color);
-        }
-        var fullPlayer = document.getElementById('full-player');
-        if (fullPlayer) {
-          fullPlayer.style.setProperty('--artwork-color', color);
-        }
+      Sonora.Themes.extractDominantColor(imageUrl).then(function (c) {
+        if (!c) return;
+        _artColor = c;
+        var targets = ['mini-player', 'full-player', 'lyrics-panel', 'queue-panel'];
+        targets.forEach(function (id) {
+          var el = document.getElementById(id);
+          if (!el) return;
+          el.style.setProperty('--artwork-color', c.primary);
+          el.style.setProperty('--artwork-color-2', c.secondary);
+          el.style.setProperty('--artwork-rgb', c.rgb);
+        });
+        var root = document.documentElement;
+        root.style.setProperty('--artwork-color', c.primary);
+        root.style.setProperty('--artwork-color-2', c.secondary);
+        root.style.setProperty('--artwork-rgb', c.rgb);
       });
     },
+
+    /** Último color extraído (lo usan el mini-reproductor y los degradados). */
+    getArtworkColor: function () { return _artColor; },
 
     /**
      * Initialize themes from saved settings

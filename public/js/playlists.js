@@ -767,6 +767,50 @@
               color: var(--color-text-primary, #ffffff);
               margin: 0;
             }
+
+            /* ══════════ Pulido de playlists ══════════ */
+            @keyframes cardIn {
+              from { opacity: 0; transform: translateY(14px) scale(0.98); }
+              to   { opacity: 1; transform: translateY(0) scale(1); }
+            }
+            @keyframes fabFloat {
+              0%, 100% { transform: translateY(0); }
+              50%      { transform: translateY(-4px); }
+            }
+
+            .playlists-grid .playlist-card {
+              animation: cardIn 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+            }
+            .playlists-grid .playlist-card:nth-child(1) { animation-delay: 0.03s; }
+            .playlists-grid .playlist-card:nth-child(2) { animation-delay: 0.07s; }
+            .playlists-grid .playlist-card:nth-child(3) { animation-delay: 0.11s; }
+            .playlists-grid .playlist-card:nth-child(4) { animation-delay: 0.15s; }
+            .playlists-grid .playlist-card:nth-child(5) { animation-delay: 0.19s; }
+
+            .playlist-card:hover { transform: translateY(-3px); }
+            .playlist-cover-img, .mosaic-grid { transition: transform 0.35s ease; }
+            .playlist-card:hover .playlist-cover-img,
+            .playlist-card:hover .mosaic-grid { transform: scale(1.05); }
+
+            /* El FAB quedaba DEBAJO del mini-reproductor (z 80 < 190) */
+            .fab-create-playlist {
+              z-index: 250;
+            }
+
+            .playlist-track-item {
+              animation: cardIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+            }
+
+            /* El distintivo "Colaborativa" era absolute y sin padre posicionado:
+               se iba a la esquina de toda la página. */
+            .detail-stats { position: relative; }
+
+            .detail-desc {
+              display: -webkit-box;
+              -webkit-line-clamp: 3;
+              -webkit-box-orient: vertical;
+              overflow: hidden;
+            }
           </style>
 
           ${playlistId ? this.renderDetailShell(playlistId) : this.renderMainShell()}
