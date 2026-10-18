@@ -1206,13 +1206,17 @@
     if (sleepOptions) sleepOptions.addEventListener('click', function (e) {
       var btn = e.target.closest('.modal__option');
       if (!btn) return;
-      var minutes = parseInt(btn.getAttribute('data-minutes'));
+      var raw = btn.getAttribute('data-minutes');
+      var isEndOfTrack = (raw === 'end_track');
+      var minutes = isEndOfTrack ? 'end_track' : (parseInt(raw, 10) || 0);
       Sonora.Player.setSleepTimer(minutes);
       $('#sleep-timer-modal').classList.add('hidden');
-      if (minutes > 0) {
+      if (isEndOfTrack) {
+        Sonora.Store.emit('toast', { message: 'Se pausará al terminar esta canción', type: 'info' });
+      } else if (minutes > 0) {
         Sonora.Store.emit('toast', { message: 'Temporizador: ' + minutes + ' minutos', type: 'info' });
       } else {
-        Sonora.Store.emit('toast', { message: 'Temporizador cancelado', type: 'info' });
+        Sonora.Store.emit('toast', { message: 'Temporizador desactivado', type: 'info' });
       }
     });
 
