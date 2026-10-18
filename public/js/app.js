@@ -825,14 +825,14 @@
     modal.className = 'modal';
     modal.innerHTML =
       '<div class="modal__backdrop"></div>' +
-      '<div class="modal__content" style="max-width: 420px; width: calc(100% - 32px); border-radius: 20px; padding: 18px; background: #1a1a24; border: 1px solid rgba(255,255,255,0.12);">' +
+      '<div class="modal__content" style="max-width: 420px; width: calc(100% - 32px); border-radius: 20px; padding: 18px; background: var(--color-surface); border: 1px solid rgba(255,255,255,0.12);">' +
         '<h3 style="font-size: 16px; margin: 0 0 4px; text-align: center; color: #fff;">Editar letra</h3>' +
         '<p style="font-size: 11px; color: #8e8e93; text-align: center; margin: 0 0 12px;">' +
           'Usa <b>[mm:ss.xx]</b> al inicio de cada línea para sincronizarla. Si escribes texto normal, se guardará como letra sin sincronizar.' +
         '</p>' +
-        '<textarea id="lyrics-editor-text" spellcheck="false" style="width: 100%; height: 42vh; min-height: 220px; resize: vertical; box-sizing: border-box; background: #101018; color: #fff; border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; padding: 12px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; line-height: 1.6;">' + escHtml(current) + '</textarea>' +
+        '<textarea id="lyrics-editor-text" spellcheck="false" style="width: 100%; height: 42vh; min-height: 220px; resize: vertical; box-sizing: border-box; background: var(--color-background); color: #fff; border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; padding: 12px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; line-height: 1.6;">' + escHtml(current) + '</textarea>' +
         '<div style="display: flex; gap: 8px; margin-top: 14px;">' +
-          '<button id="lyrics-editor-cancel" class="btn" style="flex: 1; background: #252536; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 11px; border-radius: 12px; cursor: pointer;">Cancelar</button>' +
+          '<button id="lyrics-editor-cancel" class="btn" style="flex: 1; background: var(--color-surface-elevated); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 11px; border-radius: 12px; cursor: pointer;">Cancelar</button>' +
           '<button id="lyrics-editor-save" class="btn" style="flex: 1.4; background: var(--artwork-color, var(--color-primary)); border: none; color: #fff; font-weight: 700; padding: 11px; border-radius: 12px; cursor: pointer;">Guardar letra</button>' +
         '</div>' +
       '</div>';
@@ -887,7 +887,7 @@
     modal.className = 'modal';
     modal.innerHTML =
       '<div class="modal__backdrop"></div>' +
-      '<div class="modal__content" style="max-width: 320px; border-radius: 20px; padding: 18px; background: #1a1a24; border: 1px solid rgba(255,255,255,0.12);">' +
+      '<div class="modal__content" style="max-width: 320px; border-radius: 20px; padding: 18px; background: var(--color-surface); border: 1px solid rgba(255,255,255,0.12);">' +
         '<h3 style="font-size: 16px; margin: 0 0 14px; text-align: center; color: #fff;">Opciones de letra</h3>' +
         '<div style="display: flex; flex-direction: column; gap: 9px;">' +
           '<button data-lyr-action="edit" class="btn" style="' + lyricsMenuBtnStyle + '">✏️ Editar letra</button>' +
@@ -921,7 +921,7 @@
     });
   }
 
-  var lyricsMenuBtnStyle = 'background: #252536; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;';
+  var lyricsMenuBtnStyle = 'background: var(--color-surface-elevated); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;';
 
   /* ── Sleep Timer ── */
   function showSleepTimer() {
@@ -929,15 +929,44 @@
     if (modal) modal.classList.remove('hidden');
   }
 
-  /* ── Server status indicator ── */
+  /* ── Server status indicator ──
+     🔵 local · 🟢 nube (Render) · 🟡 conectado pero lento · 🔴 sin conexión */
   function updateServerStatus() {
     var dot = $('#server-dot');
     if (!dot) return;
     var mode = Sonora.Store.get('serverMode') || 'off';
+    var latency = Sonora.Store.get('serverLatency') || 0;
     dot.className = 'server-dot';
-    if (mode === 'local') dot.classList.add('server-dot--connected');
-    else if (mode === 'render') dot.classList.add('server-dot--render');
-    else dot.classList.add('server-dot--offline');
+    dot.title = 'Servidor desconectado';
+    if (mode === 'local' || mode === 'render') {
+      if (latency > 1000) {
+        dot.classList.add('server-dot--slow');
+        dot.title = 'Conectado pero lento (' + latency + ' ms)';
+      } else {
+        dot.classList.add(mode === 'local' ? 'server-dot--connected' : 'server-dot--render');
+        dot.title = (mode === 'local' ? 'Servidor local' : 'Servidor en la nube') + (latency ? ' · ' + latency + ' ms' : '');
+      }
+    } else {
+      dot.classList.add('server-dot--offline');
+    }
+  }
+
+  /** Mide la latencia del servidor activo y pinta el punto en consecuencia */
+  function probeServerStatus() {
+    var mode = Sonora.Store.get('serverMode') || 'off';
+    if (mode !== 'local' && mode !== 'render') { updateServerStatus(); return; }
+    if (!(Sonora.API && typeof Sonora.API.testConnection === 'function')) { updateServerStatus(); return; }
+    var t0 = Date.now();
+    Sonora.API.testConnection(mode).then(function (res) {
+      var ms = (res && res.latency) ? res.latency : (Date.now() - t0);
+      var ok = !!(res && (res.success || res.status === 200 || res.ok));
+      Sonora.Store.set('serverLatency', ok ? ms : 0);
+      if (!ok) Sonora.Store.set('serverMode', 'off');
+      updateServerStatus();
+    }).catch(function () {
+      Sonora.Store.set('serverLatency', 0);
+      updateServerStatus();
+    });
   }
 
   /* ── Progress bar scrubbing ── */
@@ -1071,10 +1100,15 @@
     if (shareBtn) shareBtn.addEventListener('click', function () {
       var track = Sonora.Player.getCurrentTrack();
       if (!track) return;
-      if (navigator.share) {
-        navigator.share({ title: track.title, text: track.title + ' - ' + track.artist, url: window.location.href });
+      var title = track.title || 'Canción';
+      var artist = track.artist || 'Artista desconocido';
+      var text = '🎧 Escuchando "' + title + '" de ' + artist + ' en Sonora Music.';
+      if (Sonora.Share && typeof Sonora.Share.shareText === 'function') {
+        Sonora.Share.shareText(title, text);
+      } else if (navigator.share) {
+        navigator.share({ title: title, text: text }).catch(function () {});
       } else {
-        Sonora.Store.emit('toast', { message: 'Compartir no disponible en este navegador', type: 'warning' });
+        Sonora.Store.emit('toast', { message: 'Compartir no está disponible', type: 'warning' });
       }
     });
 
@@ -1110,13 +1144,13 @@
         var modal = document.createElement('div');
         modal.className = 'modal';
         modal.innerHTML = '<div class="modal__backdrop"></div>' +
-          '<div class="modal__content" style="max-width: 320px; border-radius: 20px; padding: 20px; background: #1a1a24; border: 1px solid rgba(255,255,255,0.12);">' +
+          '<div class="modal__content" style="max-width: 320px; border-radius: 20px; padding: 20px; background: var(--color-surface); border: 1px solid rgba(255,255,255,0.12);">' +
             '<h3 style="font-size: 17px; margin-bottom: 16px; text-align: center; color: #fff;">Opciones de reproducción</h3>' +
             '<div style="display: flex; flex-direction: column; gap: 10px;">' +
-              '<button id="opt-open-lark" class="btn" style="background: #252536; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer;">🎵 Abrir en Lark Player</button>' +
-              '<button id="opt-toggle-autoplay" class="btn" style="background: #252536; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer;">📻 Modo Radio: ' + (autoplayState ? 'Activado ✓' : 'Desactivado') + '</button>' +
-              '<button id="opt-show-lyrics" class="btn" style="background: #252536; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer;">📝 Ver letra sincronizada</button>' +
-              '<button id="opt-download" class="btn" style="background: #252536; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer;">📱 Descargar al dispositivo</button>' +
+              '<button id="opt-open-lark" class="btn" style="background: var(--color-surface-elevated); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer;">🎵 Abrir en Lark Player</button>' +
+              '<button id="opt-toggle-autoplay" class="btn" style="background: var(--color-surface-elevated); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer;">📻 Modo Radio: ' + (autoplayState ? 'Activado ✓' : 'Desactivado') + '</button>' +
+              '<button id="opt-show-lyrics" class="btn" style="background: var(--color-surface-elevated); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer;">📝 Ver letra sincronizada</button>' +
+              '<button id="opt-download" class="btn" style="background: var(--color-surface-elevated); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer;">📱 Descargar al dispositivo</button>' +
             '</div>' +
           '</div>';
         document.body.appendChild(modal);
@@ -1225,6 +1259,10 @@
     });
 
     Sonora.Store.subscribe('serverMode', updateServerStatus);
+    Sonora.Store.subscribe('serverLatency', updateServerStatus);
+    // Comprobación periódica del servidor (pinta el punto azul/verde/amarillo/rojo)
+    probeServerStatus();
+    setInterval(probeServerStatus, 60000);
 
     Sonora.Store.on('trackChanged', function () {
       updateMiniPlayer();
@@ -1243,6 +1281,23 @@
       .on('/search', function () { loadPage('search'); })
       .on('/library', function () { loadPage('library'); })
       .on('/playlists', function () { loadPage('playlists'); })
+      // Enlace compartido de playlist colaborativa: abre la app y se une sola.
+      .on('/playlists/join', function (params) {
+        loadPage('playlists');
+        setTimeout(function () {
+          var code = (params && params.code) || '';
+          var P = Sonora.Pages && (Sonora.Pages.Playlists || Sonora.Pages.Playlist);
+          if (code && P && typeof P.joinByCode === 'function') P.joinByCode(code);
+        }, 350);
+      })
+      .on('/playlist/join', function (params) {
+        loadPage('playlists');
+        setTimeout(function () {
+          var code = (params && params.code) || '';
+          var P = Sonora.Pages && (Sonora.Pages.Playlists || Sonora.Pages.Playlist);
+          if (code && P && typeof P.joinByCode === 'function') P.joinByCode(code);
+        }, 350);
+      })
       .on('/playlist/:id', function (params) { loadPage('playlists', params); })
       // La app navega a /playlists/<id> (plural): sin esta ruta el detalle de
       // una playlist no se abría nunca y volvía al inicio.
@@ -1359,6 +1414,13 @@
         var inits = [];
         if (Sonora.API && Sonora.API.init) inits.push(Sonora.API.init());
         if (Sonora.Themes && Sonora.Themes.init) inits.push(Sonora.Themes.init());
+
+        // Idioma guardado (Español / English)
+        if (Sonora.i18n && Sonora.DB && Sonora.DB.settings) {
+          inits.push(Sonora.DB.settings.get('language').then(function (lang) {
+            Sonora.i18n.setLang(lang || 'es');
+          }).catch(function () { Sonora.i18n.setLang('es'); }));
+        }
 
         return Promise.all(inits);
       })

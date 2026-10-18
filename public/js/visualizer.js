@@ -131,18 +131,20 @@
 
     // Fallback: Generate procedural simulated frequency spectrum
     if (!hasAudioData) {
-      _simulatedTime += 0.04;
+      // Ritmo más lento y amplitudes más bajas: antes el "bajo" estaba casi
+      // siempre al máximo y disparaba estallidos y acelerones constantes.
+      _simulatedTime += 0.018;
       for (var j = 0; j < SPECTRUM_SIZE; j++) {
         if (isPlaying) {
           var slow = Math.sin(_simulatedTime * 0.8 + j * 0.12);
           var mid = Math.sin(_simulatedTime * 1.7 + j * 0.28);
           var fast = Math.cos(_simulatedTime * 2.9 + j * 0.5);
           var falloff = Math.max(0.15, 1 - (j / SPECTRUM_SIZE) * 0.75);
-          var amp = ((slow * 0.5 + mid * 0.35 + fast * 0.15 + 1) * 115) * falloff;
+          var amp = ((slow * 0.5 + mid * 0.35 + fast * 0.15 + 1) * 82) * falloff;
           _freqData[j] = Math.max(0, Math.min(255, Math.floor(amp)));
         } else {
           // Subtle resting ambient pulse when paused
-          var idleVal = (Math.sin(_simulatedTime * 0.3 + j * 0.1) * 6) + 10;
+          var idleVal = (Math.sin(_simulatedTime * 0.3 + j * 0.1) * 5) + 8;
           _freqData[j] = Math.max(0, Math.floor(idleVal));
         }
       }
@@ -334,17 +336,24 @@
   // ==========================================
   // Visualizer 3: Particle Visualizer ('particle')
   // ==========================================
+  // Límite duro: evita que la lista crezca sin control y se vea "una fila
+  // fila de partículas" cuando la velocidad subía demasiado.
+  var MAX_PARTICLES = 260;
+
   function initParticleSystem() {
     _particleList = [];
-    var totalParticles = 210;
+    var totalParticles = 130;
     for (var i = 0; i < totalParticles; i++) {
       _particleList.push({
         x: Math.random() * _width,
         y: Math.random() * _height,
-        vx: (Math.random() - 0.5) * 1.2,
-        vy: (Math.random() - 0.5) * 1.2,
-        baseRadius: 1.5 + Math.random() * 2.5,
-        alpha: 0.35 + Math.random() * 0.6,
+        vx: (Math.random() - 0.5) * 0.45,
+        vy: (Math.random() - 0.5) * 0.45,
+        // Cada partícula tiene su propia caída: antes todas caían igual y
+        // por eso se alineaban en filas.
+        gravity: 0.004 + Math.random() * 0.010,
+        baseRadius: 1.2 + Math.random() * 2.2,
+        alpha: 0.22 + Math.random() * 0.45,
         colorIndex: i % 3
       });
     }
@@ -359,64 +368,87 @@
     var now = Date.now();
     var palette = [colors.primary, colors.secondary, colors.tertiary];
 
-    // Trail effect (semi-transparent clear each frame)
-    _ctx.fillStyle = 'rgba(18, 18, 24, 0.22)';
-    _ctx.fillRect(0, 0, _width, _height);
+    var isPlaying = false;
+    try {
+      isPlaying = !!(Sonora.Player && typeof Sonora.Player.isPlaying === 'function' && Sonora.Player.isPlaying());
+    } catch (e) { isPlaying = false; }
 
-    // Spawn particles from center on beat detection
-    if (bass > 0.65 && (now - _lastBeatTime > 260)) {
+    // Estela suave SIN pintar un fondo oscuro. El canvas es transparente, así
+    // que borrar con 'destination-out' deja sólo la estela de las partículas
+    // (antes se rellenaba con un gris y se veía un recuadro apagado detrás).
+    _ctx.save();
+    _ctx.globalCompositeOperation = 'destination-out';
+    _ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
+    _ctx.fillRect(0, 0, _width, _height);
+    _ctx.restore();
+
+    // Estallido desde el centro sólo en picos de graves reales y con pausa
+    // mínima entre uno y otro, para que no se sature de partículas.
+    if (isPlaying && bass > 0.62 && (now - _lastBeatTime > 480) && _particleList.length < MAX_PARTICLES) {
       _lastBeatTime = now;
-      var spawnCount = 10;
+      var spawnCount = 16;
       var cx = _width / 2;
       var cy = _height / 2;
       for (var b = 0; b < spawnCount; b++) {
         var burstAngle = Math.random() * Math.PI * 2;
-        var burstSpeed = 2 + Math.random() * 4.5;
+        // Velocidad inicial mucho más lenta (antes 2 – 6.5 → se disparaban)
+        var burstSpeed = 0.7 + Math.random() * 1.5;
         _particleList.push({
-          x: cx,
-          y: cy,
+          x: cx + Math.cos(burstAngle) * 8,
+          y: cy + Math.sin(burstAngle) * 8,
           vx: Math.cos(burstAngle) * burstSpeed,
           vy: Math.sin(burstAngle) * burstSpeed,
-          baseRadius: 2.5 + Math.random() * 2,
-          alpha: 1.0,
+          gravity: 0.003 + Math.random() * 0.007,
+          baseRadius: 1.8 + Math.random() * 2.2,
+          alpha: 0.85,
           colorIndex: Math.floor(Math.random() * 3),
-          ephemeral: true
+          ephemeral: true,
+          life: 0.006 + Math.random() * 0.007
         });
       }
     }
 
-    var connectionDistance = 65;
+    var connectionDistance = 60;
     var len = _particleList.length;
+    // Antes 1.0 + bass * 1.6: a velocidad alta se veían "rayas" de partículas.
+    var speedMultiplier = 1.0 + bass * 0.40;
 
-    // Update and draw particles
     for (var i = len - 1; i >= 0; i--) {
       var p = _particleList[i];
 
-      // Gentle gravity pulling down, bass pushes up
-      p.vy += 0.035;
-      p.vy -= bass * 0.14;
+      if (isPlaying) {
+        p.vy += p.gravity;
+        p.vy -= bass * 0.045;            // empuje suave, ya no saltan hacia arriba
+        p.x += p.vx * speedMultiplier;
+        p.y += p.vy * speedMultiplier;
+        // Viscosidad: frena cualquier velocidad alta y evita el efecto "rayo".
+        p.vx *= 0.994;
+        p.vy *= 0.994;
+      } else {
+        // Al pausar no caen ni se disparan: se van frenando suavemente.
+        p.vx *= 0.94;
+        p.vy *= 0.94;
+        p.x += p.vx;
+        p.y += p.vy;
+      }
 
-      // Speed up on bass reaction
-      var speedMultiplier = 1.0 + bass * 1.6;
-      p.x += p.vx * speedMultiplier;
-      p.y += p.vy * speedMultiplier;
-
-      // Wrap around canvas edges (or remove ephemeral bursts)
       if (p.ephemeral) {
-        p.alpha -= 0.02;
-        if (p.alpha <= 0 || p.x < 0 || p.x > _width || p.y < 0 || p.y > _height) {
+        p.alpha -= p.life;
+        if (p.alpha <= 0 || p.x < -30 || p.x > _width + 30 || p.y < -30 || p.y > _height + 30) {
           _particleList.splice(i, 1);
           continue;
         }
       } else {
-        if (p.x < 0) p.x = _width;
-        if (p.x > _width) p.x = 0;
-        if (p.y < 0) p.y = _height;
-        if (p.y > _height) p.y = 0;
+        // Rebote en los bordes en lugar de "teletransporte" al lado opuesto
+        // (el salto brusco generaba esas bandas ordenadas).
+        if (p.x < 0) { p.x = 0; p.vx = Math.abs(p.vx); }
+        if (p.x > _width) { p.x = _width; p.vx = -Math.abs(p.vx); }
+        if (p.y < 0) { p.y = 0; p.vy = Math.abs(p.vy); }
+        if (p.y > _height) { p.y = _height; p.vy = -Math.abs(p.vy); }
       }
 
-      // Grow with bass
-      var currentRadius = p.baseRadius * (1.0 + bass * 1.75);
+      // Crece con los graves, pero con menos exageración
+      var currentRadius = p.baseRadius * (1.0 + bass * 1.1);
       var pColor = palette[p.colorIndex];
 
       _ctx.fillStyle = hexToRgba(pColor, p.alpha);
@@ -424,20 +456,21 @@
       _ctx.arc(p.x, p.y, currentRadius, 0, Math.PI * 2);
       _ctx.fill();
 
-      // Constellation effect: Connect close particles with subtle lines
-      // Limit neighbor checking to maintain 60fps on mobile devices
-      var checkLimit = Math.min(i + 16, len);
+      // Constelación: sólo entre las partículas "base" (no las de estallido)
+      // y saltando de 2 en 2 para no saturar la pantalla ni la CPU.
+      if (p.ephemeral) continue;
+      var checkLimit = Math.min(i + 14, len);
       for (var j = i + 1; j < checkLimit; j++) {
         var p2 = _particleList[j];
-        if (!p2) continue;
+        if (!p2 || p2.ephemeral) continue;
         var dx = p.x - p2.x;
         var dy = p.y - p2.y;
         var dist = Math.sqrt(dx * dx + dy * dy);
 
         if (dist < connectionDistance) {
-          var lineAlpha = (1 - dist / connectionDistance) * 0.35 * (0.4 + bass * 0.6);
+          var lineAlpha = (1 - dist / connectionDistance) * 0.22 * (0.4 + bass * 0.5);
           _ctx.strokeStyle = hexToRgba(pColor, lineAlpha);
-          _ctx.lineWidth = 0.8;
+          _ctx.lineWidth = 0.7;
           _ctx.beginPath();
           _ctx.moveTo(p.x, p.y);
           _ctx.lineTo(p2.x, p2.y);

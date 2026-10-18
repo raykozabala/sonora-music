@@ -134,6 +134,41 @@
       });
     },
 
+    /** Crear/actualizar una playlist colaborativa completa en el servidor */
+    saveCollaborativePlaylist: function (code, data) {
+      var base = this.getActiveUrl();
+      return fetchWithTimeout(base + '/api/playlists/collaborative/' + encodeURIComponent(code), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data || {})
+      }, 10000).then(function (res) {
+        if (!res.ok) throw new Error('Error al guardar la playlist colaborativa');
+        return res.json();
+      });
+    },
+
+    /** Eliminar una playlist colaborativa del servidor */
+    deleteCollaborativePlaylist: function (code) {
+      var base = this.getActiveUrl();
+      return fetchWithTimeout(base + '/api/playlists/collaborative/' + encodeURIComponent(code), {
+        method: 'DELETE'
+      }, 8000).then(function (res) {
+        if (!res.ok) throw new Error('Error al eliminar');
+        return res.json();
+      });
+    },
+
+    /** Quitar una canción concreta de una playlist colaborativa */
+    removeTrackFromCollaborative: function (code, trackId) {
+      var base = this.getActiveUrl();
+      return fetchWithTimeout(base + '/api/playlists/collaborative/' + encodeURIComponent(code) + '/tracks/' + encodeURIComponent(trackId), {
+        method: 'DELETE'
+      }, 8000).then(function (res) {
+        if (!res.ok) throw new Error('Error al quitar la canción');
+        return res.json();
+      });
+    },
+
     /**
      * GET request to API
      */

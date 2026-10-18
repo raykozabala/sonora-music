@@ -238,9 +238,9 @@ body.light ::-webkit-scrollbar-thumb {
   top: 0;
   left: 0;
   right: 0;
-  height: var(--header-height);
+  min-height: var(--header-height);
   padding: 0 16px;
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: calc(env(safe-area-inset-top, 0px) + 2px);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -250,6 +250,7 @@ body.light ::-webkit-scrollbar-thumb {
   border-bottom: 1px solid var(--color-surface-glass-border);
   z-index: 100;
   flex-shrink: 0;
+  transition: background 0.3s ease, border-color 0.3s ease;
 }
 
 .header-title {
@@ -280,7 +281,7 @@ body.light ::-webkit-scrollbar-thumb {
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  padding: 16px 0 calc(var(--bottom-nav-height) + var(--mini-player-height) + env(safe-area-inset-bottom, 0px) + 20px) 0;
+  padding: 0 0 calc(var(--bottom-nav-height) + var(--mini-player-height) + env(safe-area-inset-bottom, 0px) + 20px) 0;
   position: relative;
 }
 
@@ -1640,16 +1641,37 @@ body.light .btn--icon:hover {
   gap: 8px;
 }
 
+/* Botones de opciones del temporizador de sueño (la clase usada en el HTML
+   era .modal__option y no tenía estilos: se veían superpuestos y sin caja) */
+.modal__option,
 .modal__option-btn {
   width: 100%;
   padding: 12px 16px;
   border-radius: var(--radius-md);
   background: var(--color-surface-elevated);
   color: var(--color-text-primary);
+  border: 1px solid var(--color-card-border);
   font-size: 0.9375rem;
   font-weight: 600;
   text-align: left;
-  transition: background var(--transition-fast);
+  line-height: 1.25;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.modal__option:active,
+.modal__option-btn:active,
+.modal__option:hover,
+.modal__option-btn:hover {
+  background: rgba(var(--artwork-rgb, 255, 71, 87), 0.18);
+  border-color: rgba(var(--artwork-rgb, 255, 71, 87), 0.45);
+}
+
+/* El temporizador de sueño también usa el color de la portada */
+#sleep-timer-modal .modal__content {
+  background-image: linear-gradient(180deg,
+    rgba(var(--artwork-rgb, 255, 71, 87), 0.30) 0%,
+    rgba(0, 0, 0, 0) 70%);
 }
 
 .modal__option-btn:hover {
@@ -1758,7 +1780,7 @@ body.light .skeleton {
   top: 4px;
   right: 4px;
   background: var(--color-primary, #FF4757);
-  color: #fff;
+  color: var(--color-text-primary);
   font-size: 10px;
   font-weight: 800;
   width: 17px;
@@ -1797,7 +1819,7 @@ body.light .skeleton {
 }
 
 .modal-downloads-card {
-  background: #181824;
+  background: var(--color-surface);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 24px 24px 0 0;
   width: 100%;
@@ -1819,6 +1841,50 @@ body.light .skeleton {
 @keyframes slideUpModal {
   from { transform: translateY(100%); }
   to { transform: translateY(0); }
+}
+
+/* Hoja de acciones (long-press en playlists / confirmaciones) */
+@keyframes sonoraSheetFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sonoraSheetFadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes sonoraSheetUp {
+  from { transform: translateY(24px); opacity: .6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+/* Animación de "playlist rompiéndose" al mantener pulsada */
+@keyframes sonoraPlaylistCrack {
+  0%   { transform: scale(1) rotate(0deg); filter: none; }
+  20%  { transform: scale(0.97) rotate(-1deg); filter: contrast(1.3) saturate(1.6); }
+  45%  { transform: scale(1.01) rotate(1deg); filter: contrast(1.6) hue-rotate(-18deg); }
+  70%  { transform: scale(0.96) rotate(-0.5deg); filter: contrast(2) saturate(2.2); }
+  100% { transform: scale(1) rotate(0deg); filter: none; }
+}
+.playlist-card--holding {
+  animation: sonoraPlaylistCrack 0.5s ease-in-out !important;
+}
+
+/* Secciones del modal "Añadir canciones" (biblioteca / internet) */
+.add-tracks-section-label {
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary, #A0A5BA);
+  padding: 14px 4px 6px;
+}
+.playlist-card__code {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-primary, #FF4757);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .modal-downloads-header {
@@ -1911,7 +1977,7 @@ body.light .skeleton {
 .modal__option {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #ffffff;
+  color: var(--color-text-primary);
   border-radius: 12px;
   padding: 13px 10px;
   font-size: 13px;
@@ -1940,18 +2006,27 @@ body.light .skeleton {
   transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
+/* 🔵 Servidor local conectado */
 .server-dot.connected-local,
 .server-dot.server-dot--connected {
+  background: #2F80FF;
+  box-shadow: 0 0 9px rgba(47, 128, 255, 0.9);
+}
+
+/* 🟢 Servidor en la nube (Render) conectado */
+.server-dot.connected-render,
+.server-dot.server-dot--render {
   background: #22c55e;
   box-shadow: 0 0 9px rgba(34, 197, 94, 0.85);
 }
 
-.server-dot.connected-render,
-.server-dot.server-dot--render {
-  background: #4fc3f7;
-  box-shadow: 0 0 9px rgba(79, 195, 247, 0.85);
+/* 🟡 Conectado pero lento (> 1 s) */
+.server-dot.server-dot--slow {
+  background: #FFC107;
+  box-shadow: 0 0 9px rgba(255, 193, 7, 0.9);
 }
 
+/* 🔴 Desconectado */
 .server-dot.disconnected,
 .server-dot.server-dot--offline {
   background: #ef4444;

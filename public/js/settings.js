@@ -274,22 +274,41 @@
               gap: 6px;
             }
             .status-dot {
-              width: 8px;
-              height: 8px;
+              width: 10px;
+              height: 10px;
               border-radius: 50%;
               background: #757575;
               display: inline-block;
+              flex-shrink: 0;
+              transition: background .2s ease, box-shadow .2s ease;
+            }
+            /* 🔵 Servidor local conectado */
+            .status-dot.local {
+              background: #2F80FF;
+              box-shadow: 0 0 9px rgba(47, 128, 255, 0.95);
+            }
+            /* 🟢 Servidor en la nube (Render) conectado */
+            .status-dot.render {
+              background: #22C55E;
+              box-shadow: 0 0 9px rgba(34, 197, 94, 0.95);
+            }
+            /* 🟡 Conectado pero lento (> 1 s) */
+            .status-dot.slow {
+              background: #FFC107;
+              box-shadow: 0 0 9px rgba(255, 193, 7, 0.95);
             }
             .status-dot.connected {
-              background: #4CAF50;
-              box-shadow: 0 0 8px #4CAF50;
+              background: #22C55E;
+              box-shadow: 0 0 8px #22C55E;
             }
             .status-dot.testing {
               background: #FFC107;
               box-shadow: 0 0 8px #FFC107;
             }
+            /* 🔴 Desconectado */
             .status-dot.disconnected {
               background: #FF5252;
+              box-shadow: 0 0 8px rgba(255, 82, 82, 0.7);
             }
             .server-card__subtitle {
               font-size: 11px;
@@ -377,7 +396,7 @@
             }
             .btn-pill--primary {
               background: linear-gradient(135deg, var(--color-primary, #FF4757), var(--color-secondary, #FF6B35));
-              color: #ffffff;
+              color: var(--color-on-primary, #fff);
             }
             .btn-pill--secondary {
               background: var(--color-card-bg, rgba(255, 255, 255, 0.08));
@@ -415,14 +434,14 @@
               display: flex;
               align-items: center;
               justify-content: center;
-              color: #ffffff;
+              color: var(--color-text-primary);
               font-size: 18px;
               box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
               border: 2px solid transparent;
               transition: transform 0.2s ease, border-color 0.2s ease;
             }
             .theme-circle-item.active .theme-circle {
-              border-color: #ffffff;
+              border-color: var(--color-text-primary);
               transform: scale(1.1);
             }
             .theme-circle-name {
@@ -433,6 +452,7 @@
             /* Segmented control */
             .segmented-control {
               display: flex;
+              flex-wrap: wrap;
               background: var(--color-surface-elevated, #22253d);
               border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.08));
               border-radius: var(--radius-md, 12px);
@@ -442,13 +462,14 @@
               box-sizing: border-box;
             }
             .segmented-btn {
-              flex: 1;
+              flex: 1 1 auto;
               background: transparent;
               border: none;
               color: var(--color-text-secondary, #A0A5BA);
               padding: 9px 8px;
-              font-size: 13px;
+              font-size: 12.5px;
               font-weight: 600;
+              line-height: 1.2;
               border-radius: var(--radius-sm, 9px);
               cursor: pointer;
               transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
@@ -457,7 +478,7 @@
             }
             .segmented-btn.active {
               background: var(--color-primary, #FF4757);
-              color: #ffffff;
+              color: var(--color-text-primary);
               box-shadow: 0 2px 8px rgba(var(--color-primary-rgb, 255, 71, 87), 0.35);
             }
             /* Setting item row */
@@ -618,7 +639,7 @@
               transform: translateX(-50%) translateY(20px);
               background: rgba(26, 26, 46, 0.95);
               border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.15));
-              color: #ffffff;
+              color: var(--color-text-primary);
               padding: 10px 20px;
               border-radius: 30px;
               font-size: 13px;
@@ -714,11 +735,11 @@
 
           <!-- SECTION 2: APARIENCIA -->
           <section class="settings-section">
-            <h2 class="settings-section__title">🎨 Apariencia</h2>
+            <h2 class="settings-section__title">🎨 <span data-i18n="settings.section.appearance">Apariencia</span></h2>
 
             <div class="setting-item-row">
               <div class="setting-label-box">
-                <span class="setting-label-title">Tema de colores</span>
+                <span class="setting-label-title" data-i18n="settings.theme">Tema de colores</span>
                 <span class="setting-label-sub">Selecciona el color de acento principal</span>
               </div>
               <div class="theme-circles-grid" id="theme-circles-container">
@@ -728,13 +749,13 @@
 
             <div class="setting-item-row">
               <div class="setting-label-box">
-                <span class="setting-label-title">Modo de pantalla</span>
-                <span class="setting-label-sub">Claro, oscuro o según el sistema</span>
+                <span class="setting-label-title" data-i18n="settings.screen">Modo de pantalla</span>
+                <span class="setting-label-sub" data-i18n="settings.screen.sub">Claro, oscuro o según el sistema</span>
               </div>
               <div class="segmented-control" id="control-dark-mode">
-                <button class="segmented-btn" data-mode="light">☀️ Claro</button>
-                <button class="segmented-btn active" data-mode="dark">🌙 Oscuro</button>
-                <button class="segmented-btn" data-mode="system">⚙️ Sistema</button>
+                <button class="segmented-btn" data-mode="light">☀️ <span data-i18n="settings.mode.light">Claro</span></button>
+                <button class="segmented-btn active" data-mode="dark">🌙 <span data-i18n="settings.mode.dark">Oscuro</span></button>
+                <button class="segmented-btn" data-mode="system">⚙️ <span data-i18n="settings.mode.system">Sistema</span></button>
               </div>
             </div>
 
@@ -770,11 +791,11 @@
 
           <!-- SECTION 3: REPRODUCCIÓN -->
           <section class="settings-section">
-            <h2 class="settings-section__title">🎵 Reproducción</h2>
+            <h2 class="settings-section__title">🎵 <span data-i18n="settings.section.playback">Reproducción</span></h2>
 
             <div class="setting-item-row">
               <div class="setting-label-box">
-                <span class="setting-label-title">Crossfade (Fundido entre canciones)</span>
+                <span class="setting-label-title" data-i18n="settings.crossfade">Crossfade (Fundido entre canciones)</span>
                 <span class="setting-label-sub" id="crossfade-value-label">0 segundos (Desactivado)</span>
               </div>
               <div class="segmented-control" id="control-crossfade">
@@ -787,7 +808,7 @@
 
             <div class="setting-item-row">
               <div class="setting-label-box">
-                <span class="setting-label-title">Velocidad de reproducción</span>
+                <span class="setting-label-title" data-i18n="settings.speed">Velocidad de reproducción</span>
                 <span class="setting-label-sub">Modifica el tempo del audio</span>
               </div>
               <div class="segmented-control" id="control-playback-speed">
@@ -802,7 +823,7 @@
 
             <div class="setting-item-row">
               <div class="setting-label-box">
-                <span class="setting-label-title">Calidad de audio</span>
+                <span class="setting-label-title" data-i18n="settings.quality">Calidad de audio</span>
                 <span class="setting-label-sub">Streaming y compresión sonora</span>
               </div>
               <div class="segmented-control" id="control-audio-quality">
@@ -814,7 +835,7 @@
 
             <div class="setting-item-row">
               <div class="setting-label-box">
-                <span class="setting-label-title">Temporizador de sueño</span>
+                <span class="setting-label-title" data-i18n="settings.sleep">Temporizador de sueño</span>
                 <span class="setting-label-sub">Pausar la reproducción automáticamente</span>
               </div>
               <div class="segmented-control" id="control-sleep-timer" style="flex-wrap:wrap;">
@@ -830,11 +851,11 @@
 
           <!-- SECTION 4: DESCARGAS -->
           <section class="settings-section">
-            <h2 class="settings-section__title">💾 Descargas y Almacenamiento</h2>
+            <h2 class="settings-section__title">💾 <span data-i18n="settings.section.downloads">Descargas y Almacenamiento</span></h2>
 
             <div class="setting-item-row">
               <div class="setting-label-box">
-                <span class="setting-label-title">Espacio utilizado</span>
+                <span class="setting-label-title" data-i18n="settings.storage">Espacio utilizado</span>
                 <span class="setting-label-sub" id="storage-used-label">0 B usados</span>
               </div>
               <div class="downloads-bar-wrap">
@@ -855,11 +876,11 @@
 
           <!-- SECTION 5: IDIOMA -->
           <section class="settings-section">
-            <h2 class="settings-section__title">🌍 Idioma</h2>
+            <h2 class="settings-section__title">🌍 <span data-i18n="settings.section.language">Idioma</span></h2>
             <div class="setting-item-row">
               <div class="setting-label-box">
-                <span class="setting-label-title">Idioma de la interfaz</span>
-                <span class="setting-label-sub">Selecciona el idioma de Sonora Music</span>
+                <span class="setting-label-title" data-i18n="settings.language">Idioma de la interfaz</span>
+                <span class="setting-label-sub" data-i18n="settings.language.sub">Selecciona el idioma de Sonora Music</span>
               </div>
               <div class="segmented-control" id="control-language">
                 <button class="segmented-btn active" data-lang="es">🇪🇸 Español</button>
@@ -870,7 +891,7 @@
 
           <!-- SECTION 6: NOTIFICACIONES -->
           <section class="settings-section">
-            <h2 class="settings-section__title">🔔 Notificaciones</h2>
+            <h2 class="settings-section__title">🔔 <span data-i18n="settings.section.notifications">Notificaciones</span></h2>
 
             <div class="setting-item-row setting-item-row--inline">
               <div class="setting-label-box">
@@ -1046,7 +1067,8 @@
       const updateModeUI = (mode) => {
         if (!modeBadge || !modeText || !overallDot) return;
         modeBadge.className = 'server-mode-indicator mode-' + mode;
-        overallDot.className = 'status-dot ' + (mode !== 'off' ? 'connected' : 'disconnected');
+        // 🔵 local · 🟢 nube · 🔴 sin conexión
+        overallDot.className = 'status-dot ' + (mode === 'local' ? 'local' : (mode === 'render' ? 'render' : 'disconnected'));
 
         if (cardLocal) cardLocal.classList.toggle('active-server', mode === 'local');
         if (cardRender) cardRender.classList.toggle('active-server', mode === 'render');
@@ -1059,6 +1081,43 @@
           modeText.textContent = 'Desconectado';
         }
       };
+
+      // Colorea el punto según el tipo de servidor y la latencia:
+      // azul = local · verde = nube · amarillo = lento (>1s) · rojo = sin conexión
+      const dotClassFor = (type, latencyMs) => {
+        if (latencyMs > 1000) return 'slow';
+        return type === 'render' ? 'render' : 'local';
+      };
+      const dotEmojiFor = (cls) => (cls === 'slow' ? '🟡' : (cls === 'render' ? '🟢' : (cls === 'local' ? '🔵' : '🔴')));
+
+      // Comprobación automática al abrir Ajustes (sin pulsar nada)
+      const autoColorDot = async (type, dot, latencyEl) => {
+        if (!dot) return;
+        try {
+          dot.className = 'status-dot testing';
+          if (latencyEl) latencyEl.textContent = '…';
+          let ok = false, ms = 0;
+          if (Sonora.API && typeof Sonora.API.testConnection === 'function') {
+            const t0 = Date.now();
+            const res = await Sonora.API.testConnection(type);
+            ms = (res && res.latency) ? res.latency : (Date.now() - t0);
+            ok = !!(res && (res.success || res.status === 200 || res.ok));
+          }
+          if (ok) {
+            const cls = dotClassFor(type, ms);
+            dot.className = 'status-dot ' + cls;
+            if (latencyEl) latencyEl.textContent = dotEmojiFor(cls) + ' ' + ms + ' ms' + (cls === 'slow' ? ' (lento)' : '');
+          } else {
+            dot.className = 'status-dot disconnected';
+            if (latencyEl) latencyEl.textContent = '🔴 Inaccesible';
+          }
+        } catch (e) {
+          dot.className = 'status-dot disconnected';
+          if (latencyEl) latencyEl.textContent = '🔴 Inaccesible';
+        }
+      };
+      autoColorDot('local', dotLocal, latencyLocal);
+      autoColorDot('render', dotRender, latencyRender);
 
       updateModeUI(serverMode);
 
@@ -1184,9 +1243,12 @@
         btn.disabled = false;
 
         if (success) {
-          dot.className = 'status-dot connected';
-          latencyEl.textContent = `🟢 ${latencyMs} ms`;
-          showToast(`Conexión exitosa (${latencyMs} ms)`);
+          const cls = dotClassFor(type, latencyMs);
+          dot.className = 'status-dot ' + cls;
+          latencyEl.textContent = dotEmojiFor(cls) + ' ' + latencyMs + ' ms' + (cls === 'slow' ? ' (lento)' : '');
+          showToast(cls === 'slow'
+            ? `Conectado pero lento: ${latencyMs} ms`
+            : `Conexión exitosa (${latencyMs} ms)`, cls === 'slow' ? 'warning' : 'success');
         } else {
           dot.className = 'status-dot disconnected';
           latencyEl.textContent = `🔴 Inaccesible`;
@@ -1524,6 +1586,11 @@
       const savedLang = await getSetting('language', 'es');
       const langBtns = $$('#control-language .segmented-btn');
 
+      // Aplica el idioma guardado a toda la interfaz
+      if (Sonora.i18n && typeof Sonora.i18n.setLang === 'function') {
+        Sonora.i18n.setLang(savedLang);
+      }
+
       langBtns.forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-lang') === savedLang);
         addTrackedListener(btn, 'click', async () => {
@@ -1531,8 +1598,11 @@
           btn.classList.add('active');
           const lang = btn.getAttribute('data-lang');
           await setSetting('language', lang);
+          if (Sonora.i18n && typeof Sonora.i18n.setLang === 'function') {
+            Sonora.i18n.setLang(lang);
+          }
           if (Sonora.Store) Sonora.Store.set('language', lang);
-          showToast(`Idioma establecido: ${btn.textContent.trim()}`);
+          showToast(lang === 'en' ? 'Language set to English' : 'Idioma establecido: Español');
         });
       });
     },

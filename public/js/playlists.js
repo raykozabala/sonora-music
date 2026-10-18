@@ -91,6 +91,329 @@
     }
   }
 
+  /* ──────────────────────────────────────────────────────────────
+   * Compartir / copiar (funciona en el WebView de Android)
+   * ────────────────────────────────────────────────────────────── */
+  function copyPlainText(text) {
+    return new Promise(function (resolve) {
+      try {
+        if (window.SonoraNative && typeof window.SonoraNative.copyToClipboard === 'function') {
+          if (window.SonoraNative.copyToClipboard(text)) return resolve(true);
+        }
+      } catch (e) {}
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () { resolve(true); }).catch(function () { resolve(false); });
+          return;
+        }
+      } catch (e) {}
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        resolve(!!ok);
+      } catch (e) { resolve(false); }
+    });
+  }
+
+  function shareText(title, text) {
+    try {
+      if (window.SonoraNative && typeof window.SonoraNative.shareText === 'function') {
+        window.SonoraNative.shareText(title || 'Sonora Music', text || '');
+        return;
+      }
+    } catch (e) {}
+    try {
+      if (navigator.share) {
+        navigator.share({ title: title || 'Sonora Music', text: text || '' }).catch(function () {});
+        return;
+      }
+    } catch (e) {}
+    // Último recurso: copiar y avisar
+    copyPlainText(text || '').then(function (ok) {
+      showToast(ok ? 'Contenido copiado al portapapeles' : 'No se pudo compartir', ok ? 'success' : 'error');
+    });
+  }
+
+  // Se expone para que otras páginas (reproductor, biblioteca...) lo usen.
+  Sonora.Share = { shareText: shareText, copy: copyPlainText };
+
+  /** URL del servidor activo (local o nube) */
+  function getServerBase() {
+    try {
+      if (Sonora.API && typeof Sonora.API.getActiveUrl === 'function') return Sonora.API.getActiveUrl();
+    } catch (e) {}
+    return 'http://192.168.1.132:3000';
+  }
+
+  /** Convierte un resultado de búsqueda online en una canción guardable */
+  function buildExternalTrack(t, serverBase) {
+    var url = t.url || '';
+    var platform = t.platform || 'youtube';
+    var base = String(t.id || url || (t.title + t.artist)).replace(/[^a-zA-Z0-9]/g, '');
+    if (base.length > 36) base = base.slice(0, 36);
+    var id = 'ext_' + base;
+    return {
+      id: id,
+      title: t.title || 'Pista',
+      artist: t.artist || 'Artista desconocido',
+      album: platform === 'soundcloud' ? 'SoundCloud' : 'YouTube Music',
+      duration: t.duration || 0,
+      artworkUrl: t.thumbnail || '',
+      sourceUrl: url,
+      streamUrl: serverBase + '/api/stream/external?url=' + encodeURIComponent(url),
+      platform: platform,
+      addedAt: Date.now()
+    };
+  }
+
+  /* ──────────────────────────────────────────────────────────────
+   * Hoja de acciones reutilizable (long-press en playlists)
+   * ────────────────────────────────────────────────────────────── */
+  function openActionSheet(opts) {
+    var existing = document.getElementById('sonora-action-sheet');
+    if (existing) existing.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'sonora-action-sheet';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.55);display:flex;align-items:flex-end;justify-content:center;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);animation:sonoraSheetFade .18s ease;';
+
+    var sheet = document.createElement('div');
+    sheet.style.cssText = 'width:100%;max-width:520px;background:var(--color-surface,#1c1c22);border-radius:22px 22px 0 0;padding:10px 14px 26px;box-shadow:0 -18px 50px rgba(0,0,0,.6);animation:sonoraSheetUp .22s cubic-bezier(.2,.9,.2,1);max-height:82vh;overflow-y:auto;';
+
+    var header = document.createElement('div');
+    header.style.cssText = 'padding:10px 6px 14px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:8px;';
+    header.innerHTML = '<div style="font-size:16px;font-weight:800;color:var(--color-text-primary,#fff);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
+      escapeHtml(opts.title || '') + '</div>' +
+      (opts.subtitle ? '<div style="font-size:12px;color:var(--color-text-secondary,#A0A5BA);margin-top:2px;">' + escapeHtml(opts.subtitle) + '</div>' : '');
+    sheet.appendChild(header);
+
+    (opts.actions || []).forEach(function (action) {
+      if (!action) return;
+      var btn = document.createElement('button');
+      var danger = !!action.danger;
+      btn.style.cssText = 'display:flex;align-items:center;gap:12px;width:100%;background:transparent;border:0;color:' +
+        (danger ? '#FF5B6A' : 'var(--color-text-primary,#fff)') +
+        ';font-size:15px;font-weight:600;padding:14px 10px;border-radius:14px;text-align:left;cursor:pointer;';
+      btn.innerHTML = '<span style="font-size:19px;width:24px;text-align:center;">' + (action.icon || '') + '</span><span>' + escapeHtml(action.label) + '</span>';
+      btn.addEventListener('click', function () {
+        close();
+        try { action.onSelect && action.onSelect(); } catch (e) { console.warn(e); }
+      });
+      btn.addEventListener('mouseenter', function () { btn.style.background = 'rgba(255,255,255,.06)'; });
+      btn.addEventListener('mouseleave', function () { btn.style.background = 'transparent'; });
+      sheet.appendChild(btn);
+    });
+
+    var cancel = document.createElement('button');
+    cancel.style.cssText = 'width:100%;margin-top:10px;background:rgba(255,255,255,.08);border:0;color:var(--color-text-primary,#fff);font-size:15px;font-weight:700;padding:14px;border-radius:14px;cursor:pointer;';
+    cancel.textContent = 'Cancelar';
+    cancel.addEventListener('click', close);
+    sheet.appendChild(cancel);
+
+    overlay.appendChild(sheet);
+    document.body.appendChild(overlay);
+
+    function close() {
+      overlay.style.animation = 'sonoraSheetFadeOut .16s ease forwards';
+      setTimeout(function () { overlay.remove(); }, 160);
+    }
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+
+    return close;
+  }
+
+  function confirmDialog(opts) {
+    var close = openActionSheet({
+      title: opts.title || '¿Seguro?',
+      subtitle: opts.message || '',
+      actions: [
+        { icon: '✓', label: opts.confirmLabel || 'Confirmar', danger: !!opts.danger, onSelect: function () { opts.onConfirm && opts.onConfirm(); } }
+      ]
+    });
+    return close;
+  }
+
+  /** Diálogo con un campo de texto (renombrar playlist, etc.) */
+  function openInputDialog(opts) {
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;padding:22px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);animation:sonoraSheetFade .16s ease;';
+    var box = document.createElement('div');
+    box.style.cssText = 'width:100%;max-width:420px;background:var(--color-surface,#1c1c22);border-radius:20px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.6);animation:sonoraSheetUp .2s ease;';
+    box.innerHTML =
+      '<div style="font-size:17px;font-weight:800;color:var(--color-text-primary,#fff);margin-bottom:12px;">' + escapeHtml(opts.title || '') + '</div>';
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.value = opts.value || '';
+    input.placeholder = opts.placeholder || '';
+    input.style.cssText = 'width:100%;box-sizing:border-box;padding:13px 14px;border-radius:13px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:var(--color-text-primary,#fff);font-size:15px;outline:none;';
+    box.appendChild(input);
+
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:10px;margin-top:16px;';
+    var cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancelar';
+    cancelBtn.style.cssText = 'flex:1;padding:13px;border-radius:13px;border:0;background:rgba(255,255,255,.08);color:var(--color-text-primary,#fff);font-size:15px;font-weight:700;cursor:pointer;';
+    var okBtn = document.createElement('button');
+    okBtn.textContent = opts.confirmLabel || 'Guardar';
+    okBtn.style.cssText = 'flex:1;padding:13px;border-radius:13px;border:0;background:linear-gradient(135deg,var(--color-primary,#FF4757),var(--color-secondary,#FF6B35));color:#fff;font-size:15px;font-weight:800;cursor:pointer;';
+    row.appendChild(cancelBtn);
+    row.appendChild(okBtn);
+    box.appendChild(row);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    function close() { overlay.remove(); }
+    cancelBtn.addEventListener('click', close);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    okBtn.addEventListener('click', function () {
+      var val = (input.value || '').trim();
+      if (!val && opts.required) { showToast('Escribe un nombre', 'error'); return; }
+      close();
+      opts.onConfirm && opts.onConfirm(val);
+    });
+    setTimeout(function () { try { input.focus(); input.select(); } catch (e) {} }, 60);
+  }
+
+  function navigateDetail(id) {
+    if (Sonora.Router && typeof Sonora.Router.navigate === 'function') {
+      Sonora.Router.navigate('/playlists/' + id);
+    } else {
+      window.location.hash = '#/playlists/' + id;
+    }
+  }
+
+  function buildJoinLink(code) {
+    return 'https://sonora-music-b1ee.onrender.com/#/playlists/join?code=' + encodeURIComponent(code);
+  }
+
+  /** Compartir una playlist (código de invitación si es colaborativa) */
+  function sharePlaylist(pl) {
+    var isCollab = !!(pl.isCollaborative || pl.code);
+    if (isCollab && pl.code) {
+      var link = buildJoinLink(pl.code);
+      var text = '🎧 Escucha mi playlist colaborativa "' + pl.name + '" en Sonora Music.\n' +
+                 'Código para unirte: ' + pl.code + '\n' + link;
+      openActionSheet({
+        title: 'Compartir playlist',
+        subtitle: 'Código ' + pl.code,
+        actions: [
+          { icon: '📤', label: 'Compartir con…', onSelect: function () { shareText('Sonora Music', text); } },
+          { icon: '📋', label: 'Copiar código', onSelect: function () { copyPlainText(pl.code).then(function (ok) { showToast(ok ? 'Código copiado: ' + pl.code : 'No se pudo copiar', ok ? 'success' : 'error'); }); } },
+          { icon: '🔗', label: 'Copiar enlace de invitación', onSelect: function () { copyPlainText(link).then(function (ok) { showToast(ok ? 'Enlace copiado' : 'No se pudo copiar', ok ? 'success' : 'error'); }); } }
+        ]
+      });
+    } else {
+      shareText('Sonora Music', '🎧 Escucha mi playlist "' + pl.name + '" en Sonora Music.');
+    }
+  }
+
+  /** Código de invitación para playlists colaborativas: SON-XXXX */
+  function genCollabCode() {
+    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    var out = '';
+    for (var i = 0; i < 4; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
+    return 'SON-' + out;
+  }
+
+  /** Sube la playlist colaborativa al servidor (para que otros se unan con el código) */
+  async function syncCollabPlaylistToServer(pl) {
+    if (!pl || !pl.code) return;
+    if (!(Sonora.API && typeof Sonora.API.saveCollaborativePlaylist === 'function')) return;
+    var tracks = [];
+    try {
+      for (var i = 0; i < (pl.trackIds || []).length; i++) {
+        if (Sonora.DB && Sonora.DB.tracks && typeof Sonora.DB.tracks.getById === 'function') {
+          var t = await Sonora.DB.tracks.getById(pl.trackIds[i]);
+          if (t) tracks.push(t);
+        }
+      }
+    } catch (e) {}
+    return Sonora.API.saveCollaborativePlaylist(pl.code, {
+      name: pl.name,
+      description: pl.description || '',
+      tracks: tracks
+    }).catch(function (e) { console.warn('[Playlists] sync collab falló:', e && e.message); });
+  }
+
+  /** Une una playlist colaborativa por su código y la guarda en local. */
+  async function joinCollaborativeByCode(rawCode) {
+    var code = String(rawCode || '').trim().toUpperCase();
+    if (!code) throw new Error('Introduce un código de playlist');
+
+    var remote = null;
+    if (Sonora.API && typeof Sonora.API.getCollaborativePlaylist === 'function') {
+      remote = await Sonora.API.getCollaborativePlaylist(code);
+    }
+    if (!remote) throw new Error('No se encontró ninguna playlist con el código ' + code);
+
+    // Guardamos las canciones del servidor en la base local para poder
+    // reproducirlas aunque el código lo compartió otra persona.
+    var trackIds = [];
+    var remoteTracks = Array.isArray(remote.tracks) ? remote.tracks : [];
+    for (var i = 0; i < remoteTracks.length; i++) {
+      var t = remoteTracks[i];
+      if (!t || t.id === undefined || t.id === null) continue;
+      try {
+        if (Sonora.DB && Sonora.DB.tracks && typeof Sonora.DB.tracks.getById === 'function') {
+          var existing = await Sonora.DB.tracks.getById(t.id);
+          if (!existing) await Sonora.DB.tracks.add(t);
+          else await Sonora.DB.tracks.update(t);
+        }
+      } catch (e) { /* seguimos */ }
+      trackIds.push(t.id);
+    }
+
+    // Si ya la teníamos unida, la actualizamos en vez de duplicarla.
+    var localPl = null;
+    try {
+      var all = await Sonora.DB.playlists.getAll();
+      localPl = (all || []).find(function (p) { return String(p.code || '').toUpperCase() === code; });
+    } catch (e) {}
+
+    if (localPl) {
+      localPl.name = remote.name || localPl.name;
+      localPl.description = remote.description || localPl.description || '';
+      localPl.trackIds = trackIds.length ? trackIds : (localPl.trackIds || []);
+      localPl.isCollaborative = 1;
+      localPl.code = code;
+      localPl.joined = 1;
+      await Sonora.DB.playlists.update(localPl);
+    } else {
+      localPl = await Sonora.DB.playlists.create({
+        name: remote.name || ('Playlist ' + code),
+        description: remote.description || 'Playlist colaborativa',
+        trackIds: trackIds,
+        artworkUrl: '',
+        isCollaborative: 1,
+        joined: 1,
+        userCreated: 0,
+        code: code,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+    }
+    return localPl;
+  }
+
+  function showPlaylistInfo(pl) {    var isCollab = !!(pl.isCollaborative || pl.code);
+    openActionSheet({
+      title: pl.name,
+      subtitle: 'Información de la playlist',
+      actions: [
+        { icon: '🎵', label: (pl.trackIds || []).length + ' canciones' },
+        { icon: '👥', label: isCollab ? 'Colaborativa' : 'Privada' },
+        pl.code ? { icon: '#️⃣', label: 'Código: ' + pl.code } : null,
+        { icon: '🗓️', label: 'Creada: ' + (pl.createdAt ? new Date(pl.createdAt).toLocaleDateString() : '—') }
+      ].filter(Boolean)
+    });
+  }
+
   // Helper to extract playlist ID from router or window hash
   function getCurrentPlaylistId() {
     let id = null;
@@ -282,7 +605,7 @@
               height: 56px;
               border-radius: 50%;
               background: linear-gradient(135deg, var(--color-primary, #FF4757), var(--color-secondary, #FF6B35));
-              color: #ffffff;
+              color: var(--color-on-primary, #fff);
               display: flex;
               align-items: center;
               justify-content: center;
@@ -390,8 +713,8 @@
               flex: 1;
               height: 48px;
               border-radius: 24px;
-              background: #1e202f;
-              border: 1px solid rgba(255, 255, 255, 0.08);
+              background: var(--color-surface);
+              border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.08));
               color: #4fc3f7;
               font-size: 15px;
               font-weight: 700;
@@ -404,7 +727,7 @@
             }
             .lark-pill-btn:active {
               transform: scale(0.97);
-              background: #25283c;
+              background: var(--color-surface-elevated);
             }
             .badge-letras {
               display: inline-block;
@@ -443,7 +766,7 @@
             }
             .btn-action--primary {
               background: linear-gradient(135deg, var(--color-primary, #FF4757), var(--color-secondary, #FF6B35));
-              color: #ffffff;
+              color: var(--color-on-primary, #fff);
               box-shadow: 0 4px 14px rgba(var(--color-primary-rgb, 255, 71, 87), 0.35);
             }
             .btn-action--secondary {
@@ -731,7 +1054,7 @@
               transform: translateX(-50%) translateY(20px);
               background: rgba(26, 26, 46, 0.95);
               border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.15));
-              color: #ffffff;
+              color: var(--color-text-primary);
               padding: 10px 20px;
               border-radius: 30px;
               font-size: 13px;
@@ -895,27 +1218,27 @@
                 Crea listas de reproducción junto a tus amigos o familia. Cualquier persona con el código puede añadir canciones que se sincronizan en tiempo real.
               </p>
               
-              <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 14px; display: flex; gap: 12px; align-items: flex-start;">
+              <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--color-card-border, rgba(255,255,255,0.08)); border-radius: 14px; padding: 14px; display: flex; gap: 12px; align-items: flex-start;">
                 <div style="font-size: 26px;">1️⃣</div>
                 <div>
-                  <div style="font-size: 14px; font-weight: 700; color: #fff;">Crea o activa la lista</div>
-                  <div style="font-size: 12.5px; color: #a0a5ba; margin-top: 2px;">Al crear o editar una playlist, activa el switch <b>"Playlist colaborativa"</b>. Esto generará un código único de 6 caracteres (ej. <code style="background:rgba(255,71,87,0.2); color:#FF4757; padding:2px 6px; border-radius:4px;">SON-4892</code>).</div>
+                  <div style="font-size: 14px; font-weight: 700; color: var(--color-text-primary);">Crea o activa la lista</div>
+                  <div style="font-size: 12.5px; color: var(--color-text-secondary); margin-top: 2px;">Al crear o editar una playlist, activa el switch <b>"Playlist colaborativa"</b>. Esto generará un código único de 6 caracteres (ej. <code style="background:rgba(255,71,87,0.2); color:#FF4757; padding:2px 6px; border-radius:4px;">SON-4892</code>).</div>
                 </div>
               </div>
 
-              <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 14px; display: flex; gap: 12px; align-items: flex-start;">
+              <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--color-card-border, rgba(255,255,255,0.08)); border-radius: 14px; padding: 14px; display: flex; gap: 12px; align-items: flex-start;">
                 <div style="font-size: 26px;">2️⃣</div>
                 <div>
-                  <div style="font-size: 14px; font-weight: 700; color: #fff;">Comparte el código</div>
-                  <div style="font-size: 12.5px; color: #a0a5ba; margin-top: 2px;">Comparte el código con tus amigos por WhatsApp, Telegram o en persona.</div>
+                  <div style="font-size: 14px; font-weight: 700; color: var(--color-text-primary);">Comparte el código</div>
+                  <div style="font-size: 12.5px; color: var(--color-text-secondary); margin-top: 2px;">Comparte el código con tus amigos por WhatsApp, Telegram o en persona.</div>
                 </div>
               </div>
 
-              <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 14px; display: flex; gap: 12px; align-items: flex-start;">
+              <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--color-card-border, rgba(255,255,255,0.08)); border-radius: 14px; padding: 14px; display: flex; gap: 12px; align-items: flex-start;">
                 <div style="font-size: 26px;">3️⃣</div>
                 <div>
-                  <div style="font-size: 14px; font-weight: 700; color: #fff;">Sincronización en vivo</div>
-                  <div style="font-size: 12.5px; color: #a0a5ba; margin-top: 2px;">Tus amigos tocan <b>"Unirse con código"</b> e ingresan el código. Todas las canciones añadidas por cualquier miembro se sincronizan instantáneamente a través del servidor Sonora.</div>
+                  <div style="font-size: 14px; font-weight: 700; color: var(--color-text-primary);">Sincronización en vivo</div>
+                  <div style="font-size: 12.5px; color: var(--color-text-secondary); margin-top: 2px;">Tus amigos tocan <b>"Unirse con código"</b> e ingresan el código. Todas las canciones añadidas por cualquier miembro se sincronizan instantáneamente a través del servidor Sonora.</div>
                 </div>
               </div>
             </div>
@@ -937,7 +1260,7 @@
                 <label for="join-collab-code">Código de la playlist *</label>
                 <input type="text" id="join-collab-code" class="form-input" placeholder="Ej. SON-4892" style="text-transform: uppercase; letter-spacing: 2px; font-size: 16px; font-weight: 700; text-align: center;" required />
               </div>
-              <p style="margin:0; font-size:12px; color:#8e8e93; text-align:center;">
+              <p style="margin:0; font-size:12px; color:var(--color-text-secondary); text-align:center;">
                 Pídele el código a la persona que creó la playlist colaborativa.
               </p>
             </div>
@@ -965,12 +1288,14 @@
               <img src="${generateArtwork(playlistId, 'Playlist')}" alt="Cover" style="width:100%; height:100%; object-fit:cover; border-radius:18px;" />
             </div>
             <div class="detail-meta-block lark-meta" style="text-align:center;">
-              <h1 class="detail-title lark-title" id="detail-title" style="font-size:22px; font-weight:800; margin:0 0 4px; color:#fff;">Cargando...</h1>
-              <p class="detail-desc" id="detail-desc" style="font-size:13px; color:#8e8e93; margin:0 0 6px;"></p>
-              <div class="detail-stats lark-stats" id="detail-stats" style="font-size:13px; color:#8e8e93; font-weight:600; display:flex; justify-content:center; align-items:center; gap:6px;">
+              <h1 class="detail-title lark-title" id="detail-title" style="font-size:22px; font-weight:800; margin:0 0 4px; color:var(--color-text-primary);">Cargando...</h1>
+              <p class="detail-desc" id="detail-desc" style="font-size:13px; color:var(--color-text-secondary); margin:0 0 6px;"></p>
+              <div class="detail-stats lark-stats" id="detail-stats" style="font-size:13px; color:var(--color-text-secondary); font-weight:600; display:flex; justify-content:center; align-items:center; gap:6px;">
                 <span id="detail-track-count">0 Canciones</span>
                 <span id="detail-collab-badge" style="display:none;margin-left:6px;" class="playlist-card__badge-collab">👥 Colaborativa</span>
               </div>
+              <!-- Código de la playlist colaborativa (para que otros se unan) -->
+              <div id="detail-collab-code" style="display:none;"></div>
             </div>
           </div>
 
@@ -1091,6 +1416,23 @@
     },
 
     /**
+     * Une una playlist colaborativa por código.
+     * Se usa cuando alguien abre un enlace compartido (#/playlists/join?code=...)
+     */
+    async joinByCode(code) {
+      try {
+        const pl = await joinCollaborativeByCode(code);
+        showToast(`¡Te uniste a "${pl.name}"!`, 'success');
+        navigateDetail(pl.id);
+        return pl;
+      } catch (err) {
+        showToast('No se pudo unir: ' + (err && err.message ? err.message : 'código no válido'), 'error');
+        if (Sonora.Router) Sonora.Router.navigate('/playlists');
+        return null;
+      }
+    },
+
+    /**
      * Main view initialization
      */
     async initMainView() {
@@ -1117,38 +1459,86 @@
       }
 
       const tracksMap = new Map();
-      allTracks.forEach(t => tracksMap.set(t.id, t));
+      // Los ids pueden ser número o texto ("it_...", "ext_..."): normalizamos
+      allTracks.forEach(t => tracksMap.set(String(t.id), t));
 
-      // Smart Playlists (Lark Player style: Recientemente reproducidas & Mis Favoritos)
-      let historyTracks = [];
-      let favTracks = [];
-      try {
-        if (Sonora.DB && Sonora.DB.history) historyTracks = (await Sonora.DB.history.getRecent(50)) || [];
-        favTracks = allTracks.filter(t => t.isFavorite);
-      } catch(e){}
-
-      const recentIds = historyTracks.map(h => h.trackId || (h.track && h.track.id)).filter(Boolean);
-      const recentUnique = Array.from(new Set(recentIds));
-      const recentCount = recentUnique.length > 0 ? recentUnique.length : Math.min(15, allTracks.length);
-
-      const smartPlaylists = [
-        {
-          id: 'recent',
-          name: 'Recientemente reproducidas',
-          trackIds: recentUnique.slice(0, 4),
-          customCount: `${recentCount} ${recentCount === 1 ? 'canción' : 'canciones'}`,
-          isSmart: true
-        },
-        {
-          id: 'favorites',
-          name: 'Mis Favoritos',
-          trackIds: favTracks.slice(0, 4).map(t => t.id),
-          customCount: `${favTracks.length} ${favTracks.length === 1 ? 'canción' : 'canciones'}`,
-          isSmart: true
-        }
+      // ─────────────────────────────────────────────────────────────
+      // Sólo se muestran las playlists del usuario. Las listas "smart"
+      // (Recientemente reproducidas / Mis Favoritos) ya viven en Biblioteca,
+      // y las semillas antiguas del servidor ("Favoritas para el gym",
+      // "Chill Vibes", etc.) se eliminan de una vez.
+      // ─────────────────────────────────────────────────────────────
+      const LEGACY_NAMES = [
+        'mis favoritos', 'mis favoritas', 'favoritas del momento',
+        'favoritas para el gym', 'para entrenar', 'chill vibes',
+        'recientemente escuchado', 'recientemente escuchadas',
+        'recientemente reproducidas', 'sesion acustica e indie',
+        'sesion acustica'
       ];
+      const normalizeName = (s) => String(s || '')
+        .toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
 
-      const allPlaylists = [...smartPlaylists, ...playlists];
+      const userPlaylists = [];
+      for (const p of playlists) {
+        const isUserOwned = !!(p.userCreated || p.isCollaborative || p.code || p.joined);
+        const isLegacy = LEGACY_NAMES.includes(normalizeName(p.name)) || !!p.isSmart || !!p.isSeed;
+        if (isUserOwned || !isLegacy) {
+          userPlaylists.push(p);
+        } else {
+          try { await Sonora.DB.playlists.delete(p.id); } catch (e) {}
+          console.info('[Playlists] Eliminada playlist que no creó el usuario:', p.name);
+        }
+      }
+
+      const allPlaylists = userPlaylists;
+
+      // Menú de acciones de una playlist (pulsación larga o botón ⋯)
+      const openPlaylistActions = (pl) => {
+        const isCollab = !!(pl.isCollaborative || pl.code);
+        const count = (pl.trackIds || []).length;
+        openActionSheet({
+          title: pl.name,
+          subtitle: `${count} ${count === 1 ? 'canción' : 'canciones'}${isCollab ? ' · Colaborativa' : ''}`,
+          actions: [
+            { icon: '▶️', label: 'Reproducir', onSelect: () => navigateDetail(pl.id) },
+            { icon: '🔗', label: isCollab ? 'Compartir e invitar' : 'Compartir', onSelect: () => sharePlaylist(pl) },
+            { icon: '✏️', label: 'Cambiar nombre', onSelect: () => openInputDialog({
+                title: 'Cambiar nombre',
+                value: pl.name,
+                confirmLabel: 'Guardar',
+                required: true,
+                onConfirm: async (name) => {
+                  try {
+                    await Sonora.DB.playlists.update({ ...pl, name, userCreated: 1 });
+                    await syncCollabPlaylistToServer({ ...pl, name, userCreated: 1 });
+                    showToast('Nombre actualizado');
+                    await this.initMainView();
+                  } catch (e) { showToast('No se pudo actualizar', 'error'); }
+                }
+              }) },
+            { icon: 'ℹ️', label: 'Información', onSelect: () => showPlaylistInfo(pl) },
+            { icon: '🗑️', label: 'Eliminar playlist', danger: true, onSelect: () => confirmDialog({
+                title: 'Eliminar playlist',
+                message: `¿Eliminar "${pl.name}"? Esta acción no se puede deshacer.`,
+                confirmLabel: 'Eliminar',
+                danger: true,
+                onConfirm: async () => {
+                  try {
+                    await Sonora.DB.playlists.delete(pl.id);
+                    if (pl.code && Sonora.API && typeof Sonora.API.deleteCollaborativePlaylist === 'function') {
+                      Sonora.API.deleteCollaborativePlaylist(pl.code).catch(() => {});
+                    }
+                    showToast('Playlist eliminada');
+                    await this.initMainView();
+                  } catch (e) { showToast('No se pudo eliminar', 'error'); }
+                }
+              }) }
+          ]
+        });
+      };
 
       // Render grid
       if (badge) {
@@ -1156,40 +1546,71 @@
       }
 
       if (grid) {
-        grid.innerHTML = allPlaylists.map(p => {
-          const trackIds = Array.isArray(p.trackIds) ? p.trackIds : [];
-          const pTracks = trackIds.map(id => tracksMap.get(id)).filter(Boolean);
-          const artworkHtml = renderMosaicHtml(pTracks, p);
-          const metaText = p.customCount || `${trackIds.length} ${trackIds.length === 1 ? 'canción' : 'canciones'}`;
-          return `
-            <div class="playlist-card" data-playlist-id="${escapeHtml(p.id)}">
-              <div class="playlist-card__artwork-wrapper">
-                <div class="playlist-card__artwork-inner">
-                  ${artworkHtml}
+        if (allPlaylists.length === 0) {
+          grid.innerHTML = `
+            <div style="grid-column:1/-1;text-align:center;padding:48px 20px;color:var(--color-text-secondary,#A0A5BA);">
+              <div style="font-size:46px;margin-bottom:10px;">🎵</div>
+              <div style="font-size:15px;font-weight:700;color:var(--color-text-primary,#fff);">Aún no tienes playlists</div>
+              <div style="font-size:13px;margin-top:6px;">Pulsa el botón ＋ para crear la primera.</div>
+            </div>`;
+        } else {
+          grid.innerHTML = allPlaylists.map(p => {
+            const trackIds = Array.isArray(p.trackIds) ? p.trackIds : [];
+            const pTracks = trackIds.map(id => tracksMap.get(String(id))).filter(Boolean);
+            const artworkHtml = renderMosaicHtml(pTracks, p);
+            const metaText = p.customCount || `${trackIds.length} ${trackIds.length === 1 ? 'canción' : 'canciones'}`;
+            return `
+              <div class="playlist-card" data-playlist-id="${escapeHtml(p.id)}">
+                <div class="playlist-card__artwork-wrapper">
+                  <div class="playlist-card__artwork-inner">
+                    ${artworkHtml}
+                  </div>
+                  ${(p.isCollaborative || p.code) ? '<div class="playlist-card__badge-collab">👥 Colaborativa</div>' : ''}
                 </div>
-                ${p.isCollaborative ? '<div class="playlist-card__badge-collab">👥 Colab</div>' : ''}
-                ${p.isSmart ? '<div class="playlist-card__badge-collab" style="background:rgba(255,71,87,0.85);">⭐ Sonora</div>' : ''}
+                <div class="playlist-card__info">
+                  <div class="playlist-card__title" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
+                  <div class="playlist-card__meta">${metaText}</div>
+                  ${p.code ? `<div class="playlist-card__code" title="Código para unirse">#️⃣ ${escapeHtml(p.code)}</div>` : ''}
+                </div>
               </div>
-              <div class="playlist-card__info">
-                <div class="playlist-card__title" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
-                <div class="playlist-card__meta">${metaText}</div>
-              </div>
-            </div>
-          `;
-        }).join('');
+            `;
+          }).join('');
 
-          // Bind card click to navigate
+          // Toque normal → abrir detalle. Pulsación larga → menú de acciones.
           $$('.playlist-card', grid).forEach(card => {
-            addTrackedListener(card, 'click', () => {
-              const pId = card.getAttribute('data-playlist-id');
-              if (Sonora.Router && typeof Sonora.Router.navigate === 'function') {
-                Sonora.Router.navigate('/playlists/' + pId);
-              } else {
-                window.location.hash = '#/playlists/' + pId;
-              }
+            const pid = card.getAttribute('data-playlist-id');
+            let longPressTimer = null;
+            let didLongPress = false;
+
+            const startPress = () => {
+              didLongPress = false;
+              card.classList.add('playlist-card--holding');
+              longPressTimer = setTimeout(() => {
+                didLongPress = true;
+                card.classList.remove('playlist-card--holding');
+                try { if (navigator.vibrate) navigator.vibrate(35); } catch (e) {}
+                const pl = allPlaylists.find(x => String(x.id) === String(pid));
+                if (pl) openPlaylistActions(pl);
+              }, 480);
+            };
+            const cancelPress = () => {
+              if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+              card.classList.remove('playlist-card--holding');
+            };
+
+            card.addEventListener('pointerdown', startPress);
+            card.addEventListener('pointerup', cancelPress);
+            card.addEventListener('pointerleave', cancelPress);
+            card.addEventListener('pointercancel', cancelPress);
+            card.addEventListener('contextmenu', (e) => e.preventDefault());
+
+            addTrackedListener(card, 'click', (e) => {
+              if (didLongPress) { didLongPress = false; e.preventDefault(); e.stopPropagation(); return; }
+              navigateDetail(pid);
             });
           });
         }
+      }
 
       // Modal open/close handlers
       const openCreateModal = () => {
@@ -1231,23 +1652,34 @@
           }
 
           const newPlaylistData = {
-            id: 'pl_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
             name: name,
             description: desc,
             trackIds: [],
             artworkUrl: '',
-            isCollaborative: isCollab,
+            isCollaborative: isCollab ? 1 : 0,
+            userCreated: 1,
+            code: isCollab ? genCollabCode() : '',
+            ownerId: (Sonora.Store && Sonora.Store.get && Sonora.Store.get('currentUser') && Sonora.Store.get('currentUser').id) || null,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
           };
 
           try {
+            let created = null;
             if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.create === 'function') {
-              await Sonora.DB.playlists.create(newPlaylistData);
+              created = await Sonora.DB.playlists.create(newPlaylistData);
             } else if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.add === 'function') {
               await Sonora.DB.playlists.add(newPlaylistData);
+              created = newPlaylistData;
             }
-            showToast('Playlist creada correctamente');
+            // Si es colaborativa, la registramos en el servidor para que otros
+            // puedan unirse con el código.
+            if (isCollab && created) {
+              syncCollabPlaylistToServer(created);
+            }
+            showToast(isCollab
+              ? 'Playlist colaborativa creada · código ' + (created && created.code || '')
+              : 'Playlist creada correctamente');
             closeCreateModal();
             // Refresh view
             await this.initMainView();
@@ -1316,31 +1748,12 @@
             btnSubmitJoinCode.textContent = 'Buscando...';
 
             try {
-              let playlist = null;
-              if (Sonora.API && typeof Sonora.API.getCollaborativePlaylist === 'function') {
-                playlist = await Sonora.API.getCollaborativePlaylist(rawCode);
-              }
-
-              if (playlist) {
-                if (Sonora.DB && Sonora.DB.playlists) {
-                  if (typeof Sonora.DB.playlists.create === 'function') {
-                    await Sonora.DB.playlists.create(playlist);
-                  } else if (typeof Sonora.DB.playlists.add === 'function') {
-                    await Sonora.DB.playlists.add(playlist);
-                  }
-                }
-                showToast(`¡Te uniste a "${playlist.name}"!`, 'success');
-                closeJoin();
-                if (Sonora.Router && typeof Sonora.Router.navigate === 'function') {
-                  Sonora.Router.navigate('/playlists/' + playlist.id);
-                } else {
-                  window.location.hash = '#/playlists/' + playlist.id;
-                }
-              } else {
-                showToast('No se encontró playlist con el código ' + rawCode, 'error');
-              }
+              const localPl = await joinCollaborativeByCode(rawCode);
+              showToast(`¡Te uniste a "${localPl.name}"!`, 'success');
+              closeJoin();
+              navigateDetail(localPl.id);
             } catch (err) {
-              showToast('Error al unirse: ' + err.message, 'error');
+              showToast('No se pudo unir: ' + (err && err.message ? err.message : 'código no válido'), 'error');
             } finally {
               btnSubmitJoinCode.disabled = false;
               btnSubmitJoinCode.textContent = 'Unirse';
@@ -1425,7 +1838,7 @@
       }
 
       const tracksMap = new Map();
-      allTracks.forEach(t => tracksMap.set(t.id, t));
+      allTracks.forEach(t => tracksMap.set(String(t.id), t));
 
       // Update Header info
       const titleEl = $('#detail-title');
@@ -1439,6 +1852,21 @@
       if (descEl) descEl.textContent = playlist.description || '';
       if (collabBadge) collabBadge.style.display = playlist.isCollaborative ? 'inline-flex' : 'none';
 
+      // Código visible debajo del nombre (para unirse a la playlist colaborativa)
+      const codeEl = document.getElementById('detail-collab-code');
+      if (codeEl) {
+        if ((playlist.isCollaborative || playlist.code) && playlist.code) {
+          codeEl.style.display = 'inline-flex';
+          codeEl.style.cssText = 'display:inline-flex;align-items:center;gap:8px;margin-top:10px;padding:7px 14px;border-radius:999px;background:rgba(var(--color-primary-rgb,255,71,87),0.16);border:1px solid rgba(var(--color-primary-rgb,255,71,87),0.45);font-size:13px;font-weight:700;color:var(--color-text-primary,#fff);cursor:pointer;';
+          codeEl.innerHTML = '🔑 Código: ' + escapeHtml(playlist.code) + ' · toca para copiar';
+          codeEl.onclick = () => {
+            copyPlainText(playlist.code).then(ok => showToast(ok ? 'Código copiado: ' + playlist.code : 'No se pudo copiar', ok ? 'success' : 'error'));
+          };
+        } else {
+          codeEl.style.display = 'none';
+        }
+      }
+
       const secActions = $('#detail-secondary-actions');
       if (secActions && playlist.isSmart) {
         const btnDel = $('#btn-delete-playlist', secActions);
@@ -1448,7 +1876,7 @@
       }
 
       const trackIds = Array.isArray(playlist.trackIds) ? [...playlist.trackIds] : [];
-      const currentTracks = trackIds.map(id => tracksMap.get(id)).filter(Boolean);
+      const currentTracks = trackIds.map(id => tracksMap.get(String(id))).filter(Boolean);
 
       let totalDurationSec = 0;
       currentTracks.forEach(t => { totalDurationSec += (t.duration || 0); });
@@ -1507,9 +1935,9 @@
           addTrackedListener(col, 'click', () => {
             const item = col.closest('.playlist-track-item');
             const trackId = item.getAttribute('data-track-id');
-            const clickedTrack = tracksMap.get(trackId);
+            const clickedTrack = tracksMap.get(String(trackId));
             if (clickedTrack && Sonora.Player) {
-              const clickedIdx = currentTracks.findIndex(t => t.id === trackId);
+              const clickedIdx = currentTracks.findIndex(t => String(t.id) === String(trackId));
               if (typeof Sonora.Player.setQueue === 'function') {
                 Sonora.Player.setQueue(currentTracks, clickedIdx >= 0 ? clickedIdx : 0);
               }
@@ -1526,15 +1954,20 @@
             e.stopPropagation();
             const trackId = btn.getAttribute('data-track-id');
             try {
-              // Update playlist
-              const updatedTrackIds = playlist.trackIds.filter(id => id !== trackId);
+              // Update playlist (comparando como texto: los ids pueden ser
+              // números o cadenas según el origen de la canción)
+              const updatedTrackIds = (playlist.trackIds || []).filter(id => String(id) !== String(trackId));
               playlist.trackIds = updatedTrackIds;
               if (Sonora.DB && Sonora.DB.playlists) {
                 if (typeof Sonora.DB.playlists.removeTrack === 'function') {
                   await Sonora.DB.playlists.removeTrack(playlist.id, trackId);
                 } else if (typeof Sonora.DB.playlists.update === 'function') {
-                  await Sonora.DB.playlists.update(playlist.id, { trackIds: updatedTrackIds, updatedAt: new Date().toISOString() });
+                  await Sonora.DB.playlists.update(Object.assign({}, playlist, { trackIds: updatedTrackIds, updatedAt: new Date().toISOString() }));
                 }
+              }
+              // Si es colaborativa, quitarla también en el servidor
+              if ((playlist.isCollaborative || playlist.code) && playlist.code && Sonora.API && typeof Sonora.API.removeTrackFromCollaborative === 'function') {
+                Sonora.API.removeTrackFromCollaborative(playlist.code, trackId).catch(() => {});
               }
               showToast('Canción eliminada de la playlist');
               await this.initDetailView(playlist.id);
@@ -1602,10 +2035,10 @@
               playlist.trackIds = newTrackIds;
               try {
                 if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.update === 'function') {
-                  await Sonora.DB.playlists.update(playlist.id, {
+                  await Sonora.DB.playlists.update(Object.assign({}, playlist, {
                     trackIds: newTrackIds,
                     updatedAt: new Date().toISOString()
-                  });
+                  }));
                 }
                 showToast('Orden actualizado');
               } catch (err) {
@@ -1634,10 +2067,10 @@
               playlist.trackIds = newTrackIds;
               try {
                 if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.update === 'function') {
-                  await Sonora.DB.playlists.update(playlist.id, {
+                  await Sonora.DB.playlists.update(Object.assign({}, playlist, {
                     trackIds: newTrackIds,
                     updatedAt: new Date().toISOString()
-                  });
+                  }));
                 }
                 showToast('Orden guardado');
               } catch (e) {}
@@ -1702,49 +2135,40 @@
       // Share button
       const btnShare = $('#btn-share-playlist');
       if (btnShare) {
-        addTrackedListener(btnShare, 'click', async () => {
-          const shareData = {
-            title: `Playlist: ${playlist.name}`,
-            text: `Escucha "${playlist.name}" en Sonora Music`,
-            url: window.location.href
-          };
-          if (navigator.share) {
-            try {
-              await navigator.share(shareData);
-            } catch (e) {
-              console.log('[Share] Cancelled or failed');
-            }
-          } else {
-            try {
-              await navigator.clipboard.writeText(window.location.href);
-              showToast('Enlace copiado al portapapeles');
-            } catch (e) {
-              showToast(`Código de playlist: ${playlist.id}`);
-            }
-          }
+        addTrackedListener(btnShare, 'click', () => {
+          sharePlaylist(playlist);
         });
       }
 
       // Delete Playlist
       const btnDelete = $('#btn-delete-playlist');
       if (btnDelete) {
-        addTrackedListener(btnDelete, 'click', async () => {
-          const confirmed = window.confirm(`¿Estás seguro de que quieres eliminar la playlist "${playlist.name}"?`);
-          if (!confirmed) return;
-          try {
-            if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.delete === 'function') {
-              await Sonora.DB.playlists.delete(playlist.id);
+        addTrackedListener(btnDelete, 'click', () => {
+          confirmDialog({
+            title: 'Eliminar playlist',
+            message: `¿Estás seguro de que quieres eliminar "${playlist.name}"? Esta acción no se puede deshacer.`,
+            confirmLabel: 'Eliminar',
+            danger: true,
+            onConfirm: async () => {
+              try {
+                if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.delete === 'function') {
+                  await Sonora.DB.playlists.delete(playlist.id);
+                }
+                if (playlist.code && Sonora.API && typeof Sonora.API.deleteCollaborativePlaylist === 'function') {
+                  Sonora.API.deleteCollaborativePlaylist(playlist.code).catch(() => {});
+                }
+                showToast('Playlist eliminada');
+                if (Sonora.Router && typeof Sonora.Router.navigate === 'function') {
+                  Sonora.Router.navigate('/playlists');
+                } else {
+                  window.location.hash = '#/playlists';
+                }
+              } catch (err) {
+                console.error('[Playlists] Delete failed', err);
+                showToast('Error al eliminar la playlist', 'error');
+              }
             }
-            showToast('Playlist eliminada');
-            if (Sonora.Router && typeof Sonora.Router.navigate === 'function') {
-              Sonora.Router.navigate('/playlists');
-            } else {
-              window.location.hash = '#/playlists';
-            }
-          } catch (err) {
-            console.error('[Playlists] Delete failed', err);
-            showToast('Error al eliminar la playlist', 'error');
-          }
+          });
         });
       }
 
@@ -1792,19 +2216,20 @@
 
           playlist.name = newName;
           playlist.description = newDesc;
-          playlist.isCollaborative = newCollab;
+          playlist.isCollaborative = newCollab ? 1 : 0;
+          playlist.userCreated = playlist.userCreated || 1;
+          // Si se activa la colaboración y aún no tiene código, se genera uno.
+          if (newCollab && !playlist.code) {
+            playlist.code = genCollabCode();
+          }
           playlist.updatedAt = new Date().toISOString();
 
           try {
             if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.update === 'function') {
-              await Sonora.DB.playlists.update(playlist.id, {
-                name: newName,
-                description: newDesc,
-                isCollaborative: newCollab,
-                updatedAt: playlist.updatedAt
-              });
+              await Sonora.DB.playlists.update(playlist);
             }
-            showToast('Playlist actualizada');
+            if (playlist.code) syncCollabPlaylistToServer(playlist);
+            showToast(playlist.code ? 'Playlist actualizada · código ' + playlist.code : 'Playlist actualizada');
             closeEditModal();
             await this.initDetailView(playlist.id);
           } catch (err) {
@@ -1822,6 +2247,38 @@
       const searchInput = $('#search-tracks-input');
       const addTracksList = $('#add-tracks-list');
 
+      // Estado de la búsqueda online dentro del modal "Añadir canciones"
+      let _onlineResults = [];
+      let _searchSeq = 0;
+      let _debounceTimer = null;
+
+      const isTrackInPlaylist = (id) => (playlist.trackIds || []).some(x => String(x) === String(id));
+
+      const trackRowHtml = (t, online) => {
+        const added = isTrackInPlaylist(t.id);
+        const artwork = t.artworkUrl || t.thumbnail || generateArtwork(t.id || t.title || 'x', t.title || '');
+        const tag = online
+          ? `<span style="font-size:9.5px;font-weight:800;padding:2px 6px;border-radius:8px;background:${t.platform === 'soundcloud' ? '#ff5500' : '#ff0033'};color:var(--color-text-primary);margin-left:6px;vertical-align:middle;">${t.platform === 'soundcloud' ? 'SoundCloud' : 'YouTube'}</span>`
+          : '';
+        const dur = t.duration ? formatTime(t.duration) : (t.durationText || '');
+        return `
+          <div class="playlist-track-item" style="padding:8px 0;">
+            <img src="${escapeHtml(artwork)}" class="track-cover-thumb" alt="" loading="lazy" />
+            <div class="track-info-col" style="min-width:0;flex:1;">
+              <div class="track-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(t.title || 'Pista')}${tag}</div>
+              <div class="track-artist" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(t.artist || 'Artista')}${dur ? ' • ' + dur : ''}</div>
+            </div>
+            <button class="btn-action ${added ? 'btn-action--secondary' : 'btn-action--primary'} btn-toggle-add-track"
+                    data-track-id="${escapeHtml(t.id)}"
+                    data-online="${online ? '1' : '0'}"
+                    data-in="${added ? 'true' : 'false'}"
+                    style="font-size:12px;padding:6px 12px;flex-shrink:0;">
+              ${added ? '✓ Añadido' : '+ Añadir'}
+            </button>
+          </div>
+        `;
+      };
+
       const renderAddTracksList = (filterText) => {
         if (!addTracksList) return;
         const q = (filterText || '').toLowerCase().trim();
@@ -1832,50 +2289,68 @@
                  (t.album && t.album.toLowerCase().includes(q));
         });
 
-        if (filtered.length === 0) {
-          addTracksList.innerHTML = `
+        let html = '';
+
+        if (filtered.length > 0) {
+          html += `<div class="add-tracks-section-label">En Sonora (${filtered.length})</div>`;
+          html += filtered.slice(0, 80).map(t => trackRowHtml(t, false)).join('');
+        } else if (!q) {
+          html += `
+            <div class="empty-state">
+              <div class="empty-state__icon">🎵</div>
+              <h4 class="empty-state__title">Tu biblioteca está vacía</h4>
+              <p style="margin:0;font-size:13px;color:var(--color-text-secondary);">Escribe arriba para buscar en YouTube y SoundCloud y añadir cualquier canción.</p>
+            </div>`;
+        }
+
+        if (_onlineResults.length > 0) {
+          html += `<div class="add-tracks-section-label">En internet (${_onlineResults.length})</div>`;
+          html += _onlineResults.map(t => trackRowHtml(t, true)).join('');
+        } else if (q.length >= 2) {
+          html += `<div style="padding:18px;text-align:center;color:var(--color-text-secondary);font-size:13px;">🔎 Buscando en internet…</div>`;
+        }
+
+        if (!html) {
+          html += `
             <div class="empty-state">
               <div class="empty-state__icon">🔍</div>
               <h4 class="empty-state__title">No se encontraron canciones</h4>
-            </div>
-          `;
-          return;
+            </div>`;
         }
 
-        addTracksList.innerHTML = filtered.map(t => {
-          const inPlaylist = playlist.trackIds && playlist.trackIds.includes(t.id);
-          const artwork = t.artworkUrl || generateArtwork(t.id, t.title);
-          return `
-            <div class="playlist-track-item" style="padding:8px 0;">
-              <img src="${artwork}" class="track-cover-thumb" alt="" loading="lazy" />
-              <div class="track-info-col">
-                <div class="track-title">${escapeHtml(t.title || 'Pista')}</div>
-                <div class="track-artist">${escapeHtml(t.artist || 'Artista')} • ${formatTime(t.duration || 0)}</div>
-              </div>
-              <button class="btn-action ${inPlaylist ? 'btn-action--secondary' : 'btn-action--primary'} btn-toggle-add-track"
-                      data-track-id="${escapeHtml(t.id)}"
-                      data-in="${inPlaylist ? 'true' : 'false'}"
-                      style="font-size:12px;padding:6px 12px;">
-                ${inPlaylist ? '✓ Añadido' : '+ Añadir'}
-              </button>
-            </div>
-          `;
-        }).join('');
+        addTracksList.innerHTML = html;
+        bindToggleButtons();
+      };
 
-        // Bind toggle add/remove
+      const bindToggleButtons = () => {
         $$('.btn-toggle-add-track', addTracksList).forEach(btn => {
           addTrackedListener(btn, 'click', async () => {
             const tId = btn.getAttribute('data-track-id');
+            const online = btn.getAttribute('data-online') === '1';
             const isIn = btn.getAttribute('data-in') === 'true';
 
             try {
               if (isIn) {
-                playlist.trackIds = playlist.trackIds.filter(id => id !== tId);
+                playlist.trackIds = (playlist.trackIds || []).filter(id => String(id) !== String(tId));
                 btn.setAttribute('data-in', 'false');
                 btn.className = 'btn-action btn-action--primary btn-toggle-add-track';
                 btn.textContent = '+ Añadir';
               } else {
-                if (!playlist.trackIds.includes(tId)) {
+                // Si viene de internet, la guardamos en la base local para que
+                // se pueda reproducir y forme parte de la playlist.
+                if (online) {
+                  const raw = _onlineResults.find(x => String(x.id) === String(tId));
+                  if (raw) {
+                    const trackObj = buildExternalTrack(raw, getServerBase());
+                    try {
+                      const existing = await Sonora.DB.tracks.getById(trackObj.id);
+                      if (existing) await Sonora.DB.tracks.update(Object.assign({}, existing, trackObj));
+                      else await Sonora.DB.tracks.add(trackObj);
+                    } catch (e) { console.warn('[Playlists] No se pudo guardar la canción', e); }
+                  }
+                }
+                playlist.trackIds = playlist.trackIds || [];
+                if (!playlist.trackIds.some(x => String(x) === String(tId))) {
                   playlist.trackIds.push(tId);
                 }
                 btn.setAttribute('data-in', 'true');
@@ -1884,21 +2359,41 @@
               }
 
               if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.update === 'function') {
-                await Sonora.DB.playlists.update(playlist.id, {
+                await Sonora.DB.playlists.update(Object.assign({}, playlist, {
                   trackIds: playlist.trackIds,
+                  userCreated: playlist.userCreated || 1,
                   updatedAt: new Date().toISOString()
-                });
+                }));
               }
+              // Las colaborativas se sincronizan con el servidor al instante
+              if (playlist.code) syncCollabPlaylistToServer(playlist);
             } catch (err) {
               console.error('[Playlists] Error toggling track', err);
+              showToast('No se pudo añadir la canción', 'error');
             }
           });
         });
       };
 
+      const searchOnlineTracks = (query) => {
+        const seq = ++_searchSeq;
+        const clean = (query || '').trim();
+        if (clean.length < 2) { _onlineResults = []; return; }
+        const serverBase = getServerBase();
+        fetch(serverBase + '/api/search/external?q=' + encodeURIComponent(clean), { headers: { 'Accept': 'application/json' } })
+          .then(r => r.ok ? r.json() : [])
+          .then(list => {
+            if (seq !== _searchSeq) return;
+            _onlineResults = (list || []).slice(0, 12);
+            renderAddTracksList(searchInput ? searchInput.value : '');
+          })
+          .catch(() => { if (seq === _searchSeq) _onlineResults = []; });
+      };
+
       const openAddModal = () => {
         if (modalAdd) {
           if (searchInput) searchInput.value = '';
+          _onlineResults = [];
           renderAddTracksList('');
           modalAdd.classList.add('active');
           setTimeout(() => searchInput && searchInput.focus(), 150);
@@ -1917,7 +2412,10 @@
 
       if (searchInput) {
         addTrackedListener(searchInput, 'input', (e) => {
-          renderAddTracksList(e.target.value);
+          const val = e.target.value;
+          renderAddTracksList(val);
+          if (_debounceTimer) clearTimeout(_debounceTimer);
+          _debounceTimer = setTimeout(() => searchOnlineTracks(val), 550);
         });
       }
     },

@@ -135,7 +135,7 @@
 
   function renderSuggestedArtistChips() {
     const artists = pickRandomArtists(8);
-    const chipStyle = 'background: #1e1e2a; border: 1px solid rgba(255,255,255,0.08); color: #ffffff; border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s;';
+    const chipStyle = 'background: var(--color-surface); border: 1px solid var(--color-card-border, rgba(255,255,255,0.08)); color: var(--color-text-primary); border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s;';
     return artists.map(function (a) {
       return `<button class="quick-suggest-chip" data-quick-search="${escapeHtml(a)}" style="${chipStyle}">${escapeHtml(a)}</button>`;
     }).join('');
@@ -190,16 +190,16 @@
             <circle cx="18" cy="16" r="3"></circle>
           </svg>
         </div>
-        <h3 class="empty-title" style="font-size: 22px; font-weight: 800; color: #ffffff; margin-bottom: 8px; letter-spacing: -0.3px;">Tu música en un solo lugar</h3>
+        <h3 class="empty-title" style="font-size: 22px; font-weight: 800; color: var(--color-text-primary); margin-bottom: 8px; letter-spacing: -0.3px;">Tu música en un solo lugar</h3>
         <p class="empty-desc" style="color: #9e9ea7; max-width: 320px; margin: 0 auto 24px; font-size: 14px; line-height: 1.5;">
           Busca canciones y artistas en YouTube y SoundCloud. Reproduce al instante y descarga con portada y letras.
         </p>
-        <button class="btn btn--primary" data-action="go-search" style="background: var(--color-primary, #FF4757); color: #fff; border: none; border-radius: 24px; padding: 13px 32px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 18px rgba(255,71,87,0.45); margin-bottom: 32px;">
+        <button class="btn btn--primary" data-action="go-search" style="background: var(--color-primary, #FF4757); color: var(--color-text-primary); border: none; border-radius: 24px; padding: 13px 32px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 18px rgba(255,71,87,0.45); margin-bottom: 32px;">
           Explorar y buscar música
         </button>
 
         <div style="text-align: left; max-width: 440px; margin: 0 auto;">
-          <div style="font-size: 12px; font-weight: 700; color: #8e8e93; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px;">Artistas sugeridos</div>
+          <div style="font-size: 12px; font-weight: 700; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px;">Artistas sugeridos</div>
           <div style="display: flex; flex-wrap: wrap; gap: 8px;">
             ${renderSuggestedArtistChips()}
           </div>
@@ -265,7 +265,7 @@
               letter-spacing: -0.5px;
               margin: 0;
               line-height: 1.2;
-              color: #ffffff;
+              color: var(--color-text-primary);
             }
             .greeting-sub {
               font-size: 14px;
@@ -280,7 +280,7 @@
               display: flex;
               align-items: center;
               justify-content: center;
-              color: #ffffff;
+              color: var(--color-on-primary, #fff);
               font-weight: 700;
               font-size: 16px;
               box-shadow: 0 4px 12px rgba(255, 71, 87, 0.35);
@@ -310,7 +310,7 @@
               font-size: 19px;
               font-weight: 700;
               margin: 0;
-              color: #ffffff;
+              color: var(--color-text-primary);
               letter-spacing: -0.3px;
             }
             .section__more {
@@ -359,7 +359,7 @@
               overflow: hidden;
               position: relative;
               box-shadow: 0 4px 14px rgba(0,0,0,0.4);
-              background: #202028;
+              background: var(--color-surface-elevated);
             }
             .recent-artwork {
               width: 100%;
@@ -378,14 +378,14 @@
               display: flex;
               align-items: center;
               justify-content: center;
-              color: #fff;
+              color: var(--color-text-primary);
               box-shadow: 0 4px 8px rgba(0,0,0,0.3);
               opacity: 0.92;
             }
             .recent-title {
               font-size: 14px;
               font-weight: 600;
-              color: #fff;
+              color: var(--color-text-primary);
               margin: 8px 0 2px;
               white-space: nowrap;
               overflow: hidden;
@@ -393,7 +393,7 @@
             }
             .recent-artist {
               font-size: 12px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               white-space: nowrap;
               overflow: hidden;
               text-overflow: ellipsis;
@@ -415,7 +415,7 @@
               overflow: hidden;
               position: relative;
               box-shadow: 0 6px 16px rgba(0,0,0,0.5);
-              background: #1c1c24;
+              background: var(--color-surface);
             }
             .mix-mosaic {
               display: grid;
@@ -441,12 +441,12 @@
               font-weight: 700;
               letter-spacing: 0.5px;
               text-transform: uppercase;
-              color: #ffffff;
+              color: var(--color-text-primary);
             }
             .mix-title {
               font-size: 15px;
               font-weight: 700;
-              color: #ffffff;
+              color: var(--color-text-primary);
               margin: 10px 0 3px;
               white-space: nowrap;
               overflow: hidden;
@@ -454,7 +454,7 @@
             }
             .mix-desc {
               font-size: 12px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               line-height: 1.3;
               display: -webkit-box;
               -webkit-line-clamp: 2;
@@ -478,7 +478,7 @@
               overflow: hidden;
               position: relative;
               box-shadow: 0 4px 14px rgba(0,0,0,0.4);
-              background: #202028;
+              background: var(--color-surface-elevated);
             }
             .played-artwork {
               width: 100%;
@@ -520,7 +520,7 @@
               border-radius: 50%;
               overflow: hidden;
               box-shadow: 0 4px 14px rgba(0,0,0,0.45);
-              background: #252530;
+              background: var(--color-surface-elevated);
               border: 2px solid rgba(255, 71, 87, 0.2);
             }
             .artist-avatar {
@@ -531,7 +531,7 @@
             .artist-name {
               font-size: 13px;
               font-weight: 600;
-              color: #fff;
+              color: var(--color-text-primary);
               margin-top: 8px;
               white-space: nowrap;
               overflow: hidden;
@@ -540,7 +540,7 @@
             }
             .artist-sub {
               font-size: 11px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
             }
             /* Skeletons */
             .skeleton-pulse {
@@ -602,18 +602,18 @@
               font-size: 20px;
               font-weight: 700;
               margin: 0 0 8px;
-              color: #ffffff;
+              color: var(--color-text-primary);
             }
             .empty-desc {
               font-size: 14px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               max-width: 280px;
               line-height: 1.4;
               margin: 0 0 24px;
             }
             .btn--primary {
               background: var(--primary, #FF4757);
-              color: #ffffff;
+              color: var(--color-text-primary);
               border: none;
               border-radius: 24px;
               padding: 12px 24px;
@@ -724,7 +724,7 @@
               border-radius: 999px;
               background: rgba(255, 255, 255, 0.06);
               border: 1px solid rgba(255, 255, 255, 0.1);
-              color: #ffffff;
+              color: var(--color-text-primary);
               font-size: 12.5px;
               font-weight: 600;
               cursor: pointer;

@@ -71,7 +71,7 @@ body.light #mini-player {
   border-radius: 10px;
   overflow: hidden;
   flex-shrink: 0;
-  background: #25283c;
+  background: var(--color-surface-elevated);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
   display: block;
 }
@@ -95,7 +95,7 @@ body.light #mini-player {
 .mini-player__title {
   font-size: 14px;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--color-text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -104,7 +104,7 @@ body.light #mini-player {
 
 .mini-player__artist {
   font-size: 12px;
-  color: #a0a5ba;
+  color: var(--color-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -233,7 +233,7 @@ body.light .player__bg-blur {
   height: 100%;
   pointer-events: none;
   z-index: 1;
-  opacity: 0.75;
+  opacity: 0.92;
 }
 
 .player__artwork {
@@ -475,6 +475,11 @@ body.light #player-volume {
   inset: 0;
   z-index: 350;
   background: var(--color-surface);
+  /* Mismo tinte con el color de la portada que las letras */
+  background-image: linear-gradient(180deg,
+    rgba(var(--artwork-rgb, 255, 71, 87), 0.34) 0%,
+    rgba(0, 0, 0, 0) 60%);
+  transition: background-image 0.6s ease;
   display: flex;
   flex-direction: column;
   padding-top: env(safe-area-inset-top, 16px);
@@ -587,15 +592,27 @@ body.light .lyrics__bg-tint {
 /* Disco girando con la portada de la canción */
 .lyrics-disc {
   position: relative;
-  width: 46px;
-  height: 46px;
+  width: 52px;
+  height: 52px;
   flex: 0 0 auto;
   border-radius: 50%;
   overflow: hidden;
-  background: #15151d center/cover no-repeat;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  background: var(--color-background) center/cover no-repeat;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.10);
   animation: lyricsDiscSpin 9s linear infinite;
   animation-play-state: paused;
+}
+
+/* Surcos del vinilo: le dan aspecto de disco de verdad */
+.lyrics-disc::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: repeating-radial-gradient(circle at 50% 50%,
+      rgba(255, 255, 255, 0.055) 0 1px,
+      rgba(0, 0, 0, 0) 1px 3px);
+  pointer-events: none;
 }
 
 .lyrics-disc.spinning {
@@ -610,16 +627,19 @@ body.light .lyrics__bg-tint {
   display: block;
 }
 
+/* Etiqueta central del vinilo (antes era un círculo negro que se veía feo) */
 .lyrics-disc__hole {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 13px;
-  height: 13px;
-  margin: -6.5px 0 0 -6.5px;
+  width: 15px;
+  height: 15px;
+  margin: -7.5px 0 0 -7.5px;
   border-radius: 50%;
-  background: rgba(10, 10, 12, 0.92);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.14);
+  background: rgba(12, 12, 16, 0.92);
+  border: 2px solid rgba(var(--artwork-rgb, 255, 71, 87), 0.85);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.6), inset 0 0 0 1.5px rgba(255, 255, 255, 0.22);
+  z-index: 2;
 }
 
 @keyframes lyricsDiscSpin {
@@ -635,7 +655,7 @@ body.light .lyrics__bg-tint {
 .lyrics-panel__title {
   font-size: 14px;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--color-text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -752,7 +772,7 @@ body.light .lyrics-line.active {
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 999px;
   background: var(--artwork-color, var(--color-primary));
-  color: #ffffff;
+  color: var(--color-on-primary, #fff);
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.2px;

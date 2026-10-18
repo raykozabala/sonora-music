@@ -75,6 +75,54 @@
     { id: 'pink', name: 'Rosa', icon: '💗', color: '#E91E63' }
   ];
 
+  function hexToRgb(hex) {
+    var h = String(hex || '#FF4757').replace('#', '');
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    return [
+      parseInt(h.substr(0, 2), 16) || 0,
+      parseInt(h.substr(2, 2), 16) || 0,
+      parseInt(h.substr(4, 2), 16) || 0
+    ];
+  }
+
+  function mixWith(rgb, target, amount) {
+    return rgb.map(function (v, i) { return clamp255(v * (1 - amount) + target[i] * amount); });
+  }
+
+  function rgbStr(rgb) { return 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')'; }
+
+  /**
+   * Tinta TODA la aplicación con el color del tema: el fondo, las tarjetas y
+   * la barra superior dejan de ser grises y pasan a combinar con el acento.
+   * Con el tema "Sistema" (o con fondo personalizado) se usa el aspecto neutro.
+   */
+  function applyTintedBackground() {
+    var body = document.body;
+
+    // Tema Sistema o fondo propio → colores neutros originales
+    if (_currentTheme === 'system' || _customBg) {
+      ['--color-background', '--color-surface', '--color-surface-elevated', '--color-surface-glass', '--color-surface-glass-border']
+        .forEach(function (p) { body.style.removeProperty(p); });
+      return;
+    }
+
+    var themeObj = THEMES.find(function (t) { return t.id === _currentTheme; }) || THEMES[2];
+    var primary = hexToRgb(themeObj.color);
+    var light = body.classList.contains('light');
+
+    // Fondo: apenas un 8-10 % del color del tema (claro = casi blanco / oscuro = casi negro)
+    var bg = light ? mixWith(primary, [255, 255, 255], 0.92) : mixWith(primary, [11, 11, 13], 0.92);
+    var surface = light ? mixWith(primary, [255, 255, 255], 0.96) : mixWith(primary, [22, 22, 28], 0.90);
+    var elevated = light ? mixWith(primary, [255, 255, 255], 0.93) : mixWith(primary, [30, 30, 38], 0.88);
+
+    body.style.setProperty('--color-background', rgbStr(bg));
+    body.style.setProperty('--color-surface', rgbStr(surface));
+    body.style.setProperty('--color-surface-elevated', rgbStr(elevated));
+    // La barra superior se funde con el fondo (antes era un recuadro gris)
+    body.style.setProperty('--color-surface-glass', 'rgba(' + bg[0] + ',' + bg[1] + ',' + bg[2] + ',' + (light ? '0.86' : '0.80') + ')');
+    body.style.setProperty('--color-surface-glass-border', light ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.05)');
+  }
+
   function applyThemeToDOM() {
     var body = document.body;
     // Remove all theme classes
@@ -105,6 +153,9 @@
         app.classList.remove('has-custom-bg');
       }
     }
+
+    // Tinte del fondo con el color del tema
+    applyTintedBackground();
 
     // Update meta theme-color
     var meta = document.querySelector('meta[name="theme-color"]');
@@ -258,7 +309,7 @@
       Sonora.Themes.extractDominantColor(imageUrl).then(function (c) {
         if (!c) return;
         _artColor = c;
-        var targets = ['mini-player', 'full-player', 'lyrics-panel', 'queue-panel'];
+        var targets = ['mini-player', 'full-player', 'lyrics-panel', 'queue-panel', 'sleep-timer-modal'];
         targets.forEach(function (id) {
           var el = document.getElementById(id);
           if (!el) return;

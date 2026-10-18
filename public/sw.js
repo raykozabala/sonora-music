@@ -3,7 +3,7 @@
  * Offline caching for PWA functionality
  */
 
-const CACHE_NAME = 'sonora-7.6.3';
+const CACHE_NAME = 'sonora-7.7.0';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -14,6 +14,7 @@ const STATIC_ASSETS = [
   '/css/animations.css',
   '/css/responsive.css',
   '/js/store.js',
+  '/js/i18n.js',
   '/js/router.js',
   '/js/db.js',
   '/js/api.js',

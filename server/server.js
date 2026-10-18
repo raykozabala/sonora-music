@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.6.3
+ * Sonora Music Server v7.7.0
  * Dual-mode backend server (Local PC & Render.com compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -487,11 +487,9 @@ function seedDatabase() {
       { id: 9, name: 'Chill Mix', description: 'Música tranquila y relajante para desconectar y concentrarse.', artwork_url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=400&q=80', track_ids: JSON.stringify([9, 10, 31, 32, 33, 41, 42, 43, 53, 55, 35, 45]), type: 'personal', genre: 'Chillout', mood: 'Chill' }
     ];
 
-    const playlists = [
-      { id: 1, name: 'Favoritas del Momento', description: 'Mis canciones favoritas y más escuchadas.', artwork_url: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=400&q=80', track_ids: JSON.stringify([1, 2, 3, 4, 5]), created_at: now, updated_at: now, is_collaborative: 0, owner_id: 1 },
-      { id: 2, name: 'Para Entrenar', description: 'Energía pura, rock y beats para el gimnasio.', artwork_url: 'https://images.unsplash.com/photo-1464375117522-1311d6a5b81f?auto=format&fit=crop&w=400&q=80', track_ids: JSON.stringify([11, 12, 13, 36, 37, 46, 47, 56, 57, 14]), created_at: now, updated_at: now, is_collaborative: 0, owner_id: 1 },
-      { id: 3, name: 'Sesión Acústica e Indie', description: 'Vibras acústicas y tranquilas para tardes de relax.', artwork_url: 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=400&q=80', track_ids: JSON.stringify([31, 32, 33, 41, 42, 51, 52, 9, 10, 34]), created_at: now, updated_at: now, is_collaborative: 0, owner_id: 1 }
-    ];
+    // Sin playlists sembradas: sólo las que crea el usuario (las listas
+    // antiguas tipo "Favoritas del Momento" / "Para Entrenar" ya no se generan).
+    const playlists = [];
 
     // Seed transaction
     const insertArtist = db.prepare(`
@@ -577,6 +575,18 @@ function seedDatabase() {
 // Execute initial seed
 seedDatabase();
 
+// Migración: quitar las playlists sembradas antiguas de bases ya existentes
+// (el usuario sólo quiere ver las playlists que él mismo creó).
+try {
+  const legacy = [[1, 'Favoritas del Momento'], [2, 'Para Entrenar'], [3, 'Sesión Acústica e Indie']];
+  const del = db.prepare('DELETE FROM playlists WHERE id = ? AND name = ?');
+  let removed = 0;
+  legacy.forEach(([id, name]) => { try { removed += del.run(id, name).changes; } catch (e) {} });
+  if (removed > 0) console.log(`[Migración] ${removed} playlists sembradas antiguas eliminadas`);
+} catch (err) {
+  console.warn('[Migración] No se pudieron limpiar las playlists antiguas:', err.message);
+}
+
 // ---------------------------------------------------------------------------
 // Multer Configuration (File Upload Support)
 // ---------------------------------------------------------------------------
@@ -624,7 +634,7 @@ app.get('/api/health', (req, res) => {
       status: 'ok',
       server: isRender ? 'render' : 'local',
       uptime: Math.floor(process.uptime()),
-      version: '7.6.3'
+      version: '7.7.0'
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
@@ -1110,7 +1120,7 @@ app.get('/api/system', (req, res) => {
     mode: isRender ? 'render' : 'local',
     node: process.version,
     platform: process.platform,
-    version: '7.6.3',
+    version: '7.7.0',
     ytdlp: {
       path: YTDLP_BIN,
       available: !!ytdlpVersion,
@@ -1207,7 +1217,7 @@ const lyricsCache = new Map();
 async function fetchLrclib(url) {
   const resp = await fetch(url, {
     headers: {
-      'User-Agent': 'SonoraMusic/7.6.3 (+https://github.com/raykozabala/sonora-music)'
+      'User-Agent': 'SonoraMusic/7.7.0 (+https://github.com/raykozabala/sonora-music)'
     }
   });
   if (resp.status === 404) return null;
@@ -1571,7 +1581,7 @@ async function resolveViaInvidious(videoId) {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 12000);
       const r = await fetch(base + '/api/v1/videos/' + videoId, {
-        headers: { 'User-Agent': 'SonoraMusic/7.6.3' },
+        headers: { 'User-Agent': 'SonoraMusic/7.7.0' },
         signal: ctrl.signal
       });
       clearTimeout(t);
@@ -1812,7 +1822,38 @@ app.get('/api/recommendations', async (req, res) => {
 /**
  * Collaborative Playlists Sync (In-memory + DB shared store)
  */
+// ---------------------------------------------------------------------------
+// Collaborative Playlists (persistentes en disco para que el código sobreviva
+// a reinicios y despliegues de Render)
+// ---------------------------------------------------------------------------
+const collaborativeFile = path.resolve(__dirname, 'sonora-collaborative.json');
 const collaborativeStore = new Map();
+
+function loadCollaborativeStore() {
+  try {
+    if (fs.existsSync(collaborativeFile)) {
+      const raw = JSON.parse(fs.readFileSync(collaborativeFile, 'utf8'));
+      Object.keys(raw || {}).forEach((code) => {
+        if (raw[code] && raw[code].code) collaborativeStore.set(code, raw[code]);
+      });
+      console.log(`[Collab] ${collaborativeStore.size} playlists colaborativas cargadas`);
+    }
+  } catch (err) {
+    console.error('[Collab] No se pudo cargar el almacén colaborativo:', err.message);
+  }
+}
+
+function saveCollaborativeStore() {
+  try {
+    const obj = {};
+    collaborativeStore.forEach((pl, code) => { obj[code] = pl; });
+    fs.writeFileSync(collaborativeFile, JSON.stringify(obj, null, 2));
+  } catch (err) {
+    console.error('[Collab] No se pudo guardar el almacén colaborativo:', err.message);
+  }
+}
+
+loadCollaborativeStore();
 
 app.get('/api/playlists/collaborative/:code', (req, res) => {
   const code = (req.params.code || '').toUpperCase().trim();
@@ -1823,20 +1864,30 @@ app.get('/api/playlists/collaborative/:code', (req, res) => {
 
 app.post('/api/playlists/collaborative/:code', (req, res) => {
   const code = (req.params.code || '').toUpperCase().trim();
+  if (!code) return res.status(400).json({ error: 'Código requerido' });
   const name = req.body.name || 'Playlist Colaborativa';
   const description = req.body.description || '';
-  const tracks = req.body.tracks || [];
+  const tracks = Array.isArray(req.body.tracks) ? req.body.tracks : [];
   let pl = collaborativeStore.get(code);
   if (!pl) {
     pl = { code, name, description, tracks, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   } else {
     pl.name = name;
     pl.description = description;
-    if (tracks.length > 0) pl.tracks = tracks;
+    // Reemplaza siempre la lista completa (así se reflejan también los borrados)
+    pl.tracks = tracks;
     pl.updatedAt = new Date().toISOString();
   }
   collaborativeStore.set(code, pl);
+  saveCollaborativeStore();
   res.json({ success: true, playlist: pl });
+});
+
+app.delete('/api/playlists/collaborative/:code', (req, res) => {
+  const code = (req.params.code || '').toUpperCase().trim();
+  const existed = collaborativeStore.delete(code);
+  saveCollaborativeStore();
+  res.json({ success: true, deleted: existed });
 });
 
 app.post('/api/playlists/collaborative/:code/tracks', (req, res) => {
@@ -1846,17 +1897,32 @@ app.post('/api/playlists/collaborative/:code/tracks', (req, res) => {
 
   let pl = collaborativeStore.get(code);
   if (!pl) {
-    pl = { code: code, name: req.body.playlistName || 'Playlist Colaborativa', tracks: [], updatedAt: new Date().toISOString() };
-    collaborativeStore.set(code, pl);
+    pl = { code: code, name: req.body.playlistName || 'Playlist Colaborativa', tracks: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   }
+  if (!Array.isArray(pl.tracks)) pl.tracks = [];
 
   // Avoid duplicates
-  if (!pl.tracks.some(t => t.id === track.id || t.title === track.title)) {
+  if (!pl.tracks.some(t => String(t.id) === String(track.id) || t.title === track.title)) {
     pl.tracks.push(track);
     pl.updatedAt = new Date().toISOString();
   }
 
+  collaborativeStore.set(code, pl);
+  saveCollaborativeStore();
   res.json({ success: true, count: pl.tracks.length, playlist: pl });
+});
+
+app.delete('/api/playlists/collaborative/:code/tracks/:trackId', (req, res) => {
+  const code = (req.params.code || '').toUpperCase().trim();
+  const trackId = req.params.trackId;
+  const pl = collaborativeStore.get(code);
+  if (!pl) return res.status(404).json({ error: 'Playlist no encontrada' });
+  const before = (pl.tracks || []).length;
+  pl.tracks = (pl.tracks || []).filter(t => String(t.id) !== String(trackId));
+  pl.updatedAt = new Date().toISOString();
+  collaborativeStore.set(code, pl);
+  saveCollaborativeStore();
+  res.json({ success: true, removed: before - pl.tracks.length, playlist: pl });
 });
 
 /**
@@ -2759,7 +2825,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('----------------------------------------------------');
-  console.log('🎵 Sonora Music Server v7.6.3');
+  console.log('🎵 Sonora Music Server v7.7.0');
   console.log(`📡 Mode: ${isRender ? 'Render' : 'Local'}`);
   console.log(`🌐 Port: ${PORT}`);
   console.log(`📁 Music directory: ${musicDir}`);

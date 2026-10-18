@@ -56,30 +56,47 @@
 
   // Genres with exact specified gradients
   const GENRES = [
-    { name: 'Rock', color: '#E91E63', gradient: 'linear-gradient(135deg, #E91E63, #880E4F)', icon: '🎸' },
-    { name: 'Pop', color: '#FF9800', gradient: 'linear-gradient(135deg, #FF9800, #E65100)', icon: '🎤' },
-    { name: 'Electrónica', color: '#00BCD4', gradient: 'linear-gradient(135deg, #00BCD4, #006064)', icon: '🎛️' },
-    { name: 'Hip-Hop', color: '#9C27B0', gradient: 'linear-gradient(135deg, #9C27B0, #4A148C)', icon: '🎧' },
-    { name: 'R&B', color: '#3F51B5', gradient: 'linear-gradient(135deg, #3F51B5, #1A237E)', icon: '🎷' },
-    { name: 'Jazz', color: '#795548', gradient: 'linear-gradient(135deg, #795548, #3E2723)', icon: '🎺' },
-    { name: 'Metal', color: '#37474F', gradient: 'linear-gradient(135deg, #37474F, #212121)', icon: '⚡' },
-    { name: 'Reggaetón', color: '#4CAF50', gradient: 'linear-gradient(135deg, #4CAF50, #1B5E20)', icon: '🔥' },
-    { name: 'Indie', color: '#FF5722', gradient: 'linear-gradient(135deg, #FF5722, #BF360C)', icon: '🌻' },
-    { name: 'Clásica', color: '#607D8B', gradient: 'linear-gradient(135deg, #607D8B, #263238)', icon: '🎻' },
-    { name: 'Latino', color: '#FFC107', gradient: 'linear-gradient(135deg, #FFC107, #FF8F00)', icon: '💃' },
-    { name: 'Ambient', color: '#009688', gradient: 'linear-gradient(135deg, #009688, #004D40)', icon: '🌌' }
+    { name: 'Rock', color: '#E91E63', gradient: 'linear-gradient(135deg, #E91E63, #880E4F)', icon: '🎸', query: 'classic rock 70s 80s 90s hits' },
+    { name: 'Pop', color: '#FF9800', gradient: 'linear-gradient(135deg, #FF9800, #E65100)', icon: '🎤', query: 'pop hits 90s 2000s' },
+    { name: 'Electrónica', color: '#00BCD4', gradient: 'linear-gradient(135deg, #00BCD4, #006064)', icon: '🎛️', query: 'electronic dance music mix' },
+    { name: 'Hip-Hop', color: '#9C27B0', gradient: 'linear-gradient(135deg, #9C27B0, #4A148C)', icon: '🎧', query: 'hip hop rap classics 90s' },
+    { name: 'R&B', color: '#3F51B5', gradient: 'linear-gradient(135deg, #3F51B5, #1A237E)', icon: '🎷', query: 'rnb soul classics' },
+    { name: 'Jazz', color: '#795548', gradient: 'linear-gradient(135deg, #795548, #3E2723)', icon: '🎺', query: 'jazz standards instrumental' },
+    { name: 'Metal', color: '#37474F', gradient: 'linear-gradient(135deg, #37474F, #212121)', icon: '⚡', query: 'heavy metal classics' },
+    { name: 'Reggaetón', color: '#4CAF50', gradient: 'linear-gradient(135deg, #4CAF50, #1B5E20)', icon: '🔥', query: 'reggaeton clasicos viejos' },
+    { name: 'Indie', color: '#FF5722', gradient: 'linear-gradient(135deg, #FF5722, #BF360C)', icon: '🌻', query: 'indie rock acoustic songs' },
+    { name: 'Clásica', color: '#607D8B', gradient: 'linear-gradient(135deg, #607D8B, #263238)', icon: '🎻', query: 'classical music best works' },
+    { name: 'Latino', color: '#FFC107', gradient: 'linear-gradient(135deg, #FFC107, #FF8F00)', icon: '💃', query: 'latin hits salsa bachata' },
+    { name: 'Ambient', color: '#009688', gradient: 'linear-gradient(135deg, #009688, #004D40)', icon: '🌌', query: 'ambient chill music long' }
   ];
 
-  // Moods
+  // Moods — cada uno con sus propios géneros/claves para que NO devuelvan
+  // siempre las mismas canciones.
   const MOODS = [
-    { id: 'chill', name: 'Chill', emoji: '🧊', gradient: 'linear-gradient(135deg, #4FC3F7, #0288D1)' },
-    { id: 'energia', name: 'Energía', emoji: '⚡', gradient: 'linear-gradient(135deg, #FFD54F, #FFA000)' },
-    { id: 'motivacion', name: 'Motivación', emoji: '🔥', gradient: 'linear-gradient(135deg, #FF7043, #D84315)' },
-    { id: 'relajacion', name: 'Relajación', emoji: '🌊', gradient: 'linear-gradient(135deg, #81C784, #388E3C)' },
-    { id: 'fiesta', name: 'Fiesta', emoji: '🎉', gradient: 'linear-gradient(135deg, #BA68C8, #7B1FA2)' },
-    { id: 'romantico', name: 'Romántico', emoji: '💕', gradient: 'linear-gradient(135deg, #F06292, #C2185B)' },
-    { id: 'workout', name: 'Workout', emoji: '💪', gradient: 'linear-gradient(135deg, #4DB6AC, #00796B)' },
-    { id: 'focus', name: 'Focus', emoji: '🎯', gradient: 'linear-gradient(135deg, #7986CB, #303F9F)' }
+    { id: 'chill', name: 'Chill', emoji: '🧊', gradient: 'linear-gradient(135deg, #4FC3F7, #0288D1)',
+      genres: ['ambient', 'indie', 'r&b', 'jazz', 'acoustic'], keywords: ['chill', 'relax', 'calm', 'lofi', 'tranquil'],
+      query: 'chill lofi relaxing music' },
+    { id: 'energia', name: 'Energía', emoji: '⚡', gradient: 'linear-gradient(135deg, #FFD54F, #FFA000)',
+      genres: ['rock', 'electrónica', 'metal', 'hip-hop', 'reggaeton'], keywords: ['energy', 'power', 'upbeat', 'remix', 'party'],
+      query: 'energetic upbeat rock mix' },
+    { id: 'motivacion', name: 'Motivación', emoji: '🔥', gradient: 'linear-gradient(135deg, #FF7043, #D84315)',
+      genres: ['rock', 'metal', 'electrónica'], keywords: ['motivation', 'anthem', 'rise', 'strong', 'victory'],
+      query: 'motivational rock anthems' },
+    { id: 'relajacion', name: 'Relajación', emoji: '🌊', gradient: 'linear-gradient(135deg, #81C784, #388E3C)',
+      genres: ['ambient', 'clásica', 'jazz'], keywords: ['relax', 'sleep', 'calm', 'meditation', 'peaceful'],
+      query: 'relaxing calming sleep music' },
+    { id: 'fiesta', name: 'Fiesta', emoji: '🎉', gradient: 'linear-gradient(135deg, #BA68C8, #7B1FA2)',
+      genres: ['reggaeton', 'electrónica', 'pop', 'latino'], keywords: ['party', 'dance', 'club', 'fiesta', 'remix'],
+      query: 'party dance hits mix' },
+    { id: 'romantico', name: 'Romántico', emoji: '💕', gradient: 'linear-gradient(135deg, #F06292, #C2185B)',
+      genres: ['r&b', 'pop', 'latino'], keywords: ['love', 'romantic', 'heart', 'amor', 'balada'],
+      query: 'romantic love songs baladas' },
+    { id: 'workout', name: 'Workout', emoji: '💪', gradient: 'linear-gradient(135deg, #4DB6AC, #00796B)',
+      genres: ['rock', 'metal', 'hip-hop', 'electrónica'], keywords: ['workout', 'gym', 'training', 'run', 'pump'],
+      query: 'workout gym motivation music' },
+    { id: 'focus', name: 'Focus', emoji: '🎯', gradient: 'linear-gradient(135deg, #7986CB, #303F9F)',
+      genres: ['ambient', 'clásica', 'electrónica'], keywords: ['focus', 'study', 'instrumental', 'concentration', 'deep'],
+      query: 'focus study instrumental music' }
   ];
 
   // State
@@ -203,15 +220,15 @@
     return `
       <section class="section discover-section">
         <div class="section__header">
-          <h2 class="section__title">Nuevos Lanzamientos</h2>
-          <span class="section__subtitle">Recién añadidos</span>
+          <h2 class="section__title">Más escuchadas</h2>
+          <span class="section__subtitle">Lo que más suena</span>
         </div>
         <div class="section__scroll releases-scroll">
           ${tracks.slice(0, 10).map((t, idx) => `
             <div class="release-card" data-action="play-release-track" data-idx="${idx}" data-track-id="${escapeHtml(t.id)}">
               <div class="release-art-wrap">
                 <img class="release-art" src="${escapeHtml(t.artworkUrl || generateArtwork(t.id, t.title))}" alt="" loading="lazy" />
-                <span class="release-badge">NUEVO</span>
+                <span class="release-badge">${(t.playCount || 0) > 0 ? 'TOP ' + (idx + 1) : 'NUEVO'}</span>
               </div>
               <div class="release-title">${escapeHtml(t.title)}</div>
               <div class="release-artist">${escapeHtml(t.artist || 'Artista desconocido')}</div>
@@ -320,7 +337,7 @@
               font-weight: 800;
               letter-spacing: 0.8px;
               text-transform: uppercase;
-              color: #ffffff;
+              color: var(--color-text-primary);
               width: fit-content;
               margin-bottom: 8px;
             }
@@ -328,7 +345,7 @@
               font-size: 22px;
               font-weight: 800;
               margin: 0 0 6px;
-              color: #ffffff;
+              color: var(--color-text-primary);
               line-height: 1.2;
               letter-spacing: -0.4px;
             }
@@ -390,12 +407,12 @@
               font-size: 20px;
               font-weight: 800;
               margin: 0;
-              color: #ffffff;
+              color: var(--color-text-primary);
               letter-spacing: -0.3px;
             }
             .section__subtitle {
               font-size: 12px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               display: block;
               margin-top: 2px;
             }
@@ -433,7 +450,7 @@
             .genre-title {
               font-size: 14px;
               font-weight: 700;
-              color: #ffffff;
+              color: var(--color-text-primary);
             }
             /* Moods Grid */
             .moods-grid {
@@ -465,7 +482,7 @@
             .mood-name {
               font-size: 12px;
               font-weight: 700;
-              color: #ffffff;
+              color: var(--color-text-primary);
               text-shadow: 0 1px 2px rgba(0,0,0,0.4);
             }
             /* Top Charts */
@@ -481,12 +498,12 @@
               gap: 12px;
               padding: 8px 10px;
               border-radius: 10px;
-              background: #191924;
+              background: var(--color-surface);
               cursor: pointer;
               transition: background 0.15s ease;
             }
             .chart-item:active {
-              background: #252535;
+              background: var(--color-surface-elevated);
             }
             .chart-rank {
               font-size: 17px;
@@ -506,7 +523,7 @@
               overflow: hidden;
               position: relative;
               flex-shrink: 0;
-              background: #282836;
+              background: var(--color-surface-elevated);
             }
             .chart-art {
               width: 100%;
@@ -520,7 +537,7 @@
               display: flex;
               align-items: center;
               justify-content: center;
-              color: #fff;
+              color: var(--color-text-primary);
               font-size: 12px;
               opacity: 0;
               transition: opacity 0.15s ease;
@@ -535,14 +552,14 @@
             .chart-title {
               font-size: 14px;
               font-weight: 600;
-              color: #ffffff;
+              color: var(--color-text-primary);
               white-space: nowrap;
               overflow: hidden;
               text-overflow: ellipsis;
             }
             .chart-artist {
               font-size: 12px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               white-space: nowrap;
               overflow: hidden;
               text-overflow: ellipsis;
@@ -553,7 +570,7 @@
             }
             .plays-badge {
               font-size: 11px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               background: rgba(255, 255, 255, 0.06);
               padding: 3px 8px;
               border-radius: 12px;
@@ -576,7 +593,7 @@
               border-radius: 12px;
               overflow: hidden;
               position: relative;
-              background: #252535;
+              background: var(--color-surface-elevated);
               box-shadow: 0 4px 12px rgba(0,0,0,0.35);
             }
             .release-art {
@@ -589,7 +606,7 @@
               top: 8px;
               left: 8px;
               background: var(--primary, #FF4757);
-              color: #ffffff;
+              color: var(--color-text-primary);
               font-size: 9px;
               font-weight: 800;
               padding: 2px 6px;
@@ -599,7 +616,7 @@
             .release-title {
               font-size: 13px;
               font-weight: 600;
-              color: #ffffff;
+              color: var(--color-text-primary);
               margin-top: 6px;
               white-space: nowrap;
               overflow: hidden;
@@ -607,7 +624,7 @@
             }
             .release-artist {
               font-size: 12px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               white-space: nowrap;
               overflow: hidden;
               text-overflow: ellipsis;
@@ -623,7 +640,7 @@
               background: rgba(0,0,0,0.3);
               backdrop-filter: blur(8px);
               border: none;
-              color: #ffffff;
+              color: var(--color-text-primary);
               font-size: 14px;
               font-weight: 600;
               padding: 6px 14px;
@@ -643,7 +660,7 @@
               font-size: 26px;
               font-weight: 800;
               margin: 0;
-              color: #ffffff;
+              color: var(--color-text-primary);
             }
             .filtered-count {
               font-size: 13px;
@@ -676,17 +693,17 @@
               gap: 12px;
               padding: 8px 10px;
               border-radius: 10px;
-              background: #1a1a24;
+              background: var(--color-surface);
               cursor: pointer;
               transition: background 0.15s ease;
             }
             .filtered-track-row:active {
-              background: #252535;
+              background: var(--color-surface-elevated);
             }
             .discover-empty-state {
               padding: 40px 20px;
               text-align: center;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
             }
           </style>
 
@@ -926,19 +943,67 @@
         topCharts = [...allTracks].sort((a, b) => (b.playCount || 0) - (a.playCount || 0)).slice(0, 10);
       }
 
-      // New Releases (10 recently added tracks)
-      if (Sonora.DB.tracks && typeof Sonora.DB.tracks.getRecent === 'function') {
-        newReleases = (await Sonora.DB.tracks.getRecent(10)) || [];
-      } else if (allTracks.length > 0) {
-        newReleases = allTracks.slice().reverse().slice(0, 10);
-      }
+      // "Más escuchadas": por número de reproducciones y, a igualdad,
+      // las añadidas más recientemente.
+      newReleases = [...allTracks]
+        .sort((a, b) => {
+          const pc = (b.playCount || 0) - (a.playCount || 0);
+          if (pc !== 0) return pc;
+          return (b.addedAt || b.dateAdded || 0) - (a.addedAt || a.dateAdded || 0);
+        })
+        .slice(0, 10);
     } catch (e) {
       console.error('[Discover] Load data error:', e);
     }
   }
 
+  /** Convierte un resultado del buscador online en una canción reproducible */
+  function mapExternalToTrack(item, base) {
+    const platform = item.platform || 'youtube';
+    const rawId = String(item.id || item.url || (item.title + item.artist)).replace(/[^a-zA-Z0-9]/g, '').slice(0, 36);
+    return {
+      id: 'ext_' + rawId,
+      title: item.title,
+      artist: item.artist || 'Artista desconocido',
+      album: platform === 'soundcloud' ? 'SoundCloud' : 'YouTube Music',
+      duration: item.duration || 0,
+      artworkUrl: item.thumbnail || '',
+      sourceUrl: item.url || '',
+      streamUrl: base + '/api/stream/external?url=' + encodeURIComponent(item.url || ''),
+      platform: platform
+    };
+  }
+
+  /** Rellena una sección con resultados reales del servidor (YouTube/SoundCloud) */
+  async function fetchOnlineTracks(query) {
+    if (!query) return [];
+    const base = (Sonora.API && typeof Sonora.API.getActiveUrl === 'function')
+      ? Sonora.API.getActiveUrl()
+      : 'http://192.168.1.132:3000';
+    try {
+      const res = await fetch(base + '/api/search/external?q=' + encodeURIComponent(query), { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) return [];
+      const list = await res.json();
+      return (list || []).filter(x => x && x.title).map(x => mapExternalToTrack(x, base));
+    } catch (e) {
+      console.warn('[Discover] Búsqueda online fallida:', e && e.message);
+      return [];
+    }
+  }
+
+  function dedupeTracks(list) {
+    const seen = new Set();
+    return list.filter(t => {
+      const key = String((t.title || '') + '|' + (t.artist || '')).toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
   async function openGenreView(genreName) {
     let tracks = [];
+    let genreMeta = null;
     try {
       if (Sonora.DB && Sonora.DB.tracks) {
         if (typeof Sonora.DB.tracks.getByGenre === 'function') {
@@ -952,11 +1017,19 @@
       console.error('[Discover] Genre view error:', e);
     }
 
-    const genreMeta = GENRES.find(g => g.name.toLowerCase() === genreName.toLowerCase()) || {
+    genreMeta = GENRES.find(g => g.name.toLowerCase() === genreName.toLowerCase()) || {
       name: genreName,
       gradient: 'linear-gradient(135deg, #FF4757, #FF6B35)',
-      icon: '🎸'
+      icon: '🎸',
+      query: genreName
     };
+
+    // Si la biblioteca tiene pocas canciones del género, se completa con
+    // resultados reales del servidor (rock clásico, pop, etc.).
+    if (tracks.length < 6 && genreMeta.query) {
+      const online = await fetchOnlineTracks(genreMeta.query);
+      tracks = dedupeTracks(tracks.concat(online)).slice(0, 60);
+    }
 
     activeFilteredView = {
       type: 'genre',
@@ -977,16 +1050,32 @@
         allTracks = (await Sonora.DB.tracks.getAll()) || [];
       }
 
+      const moodMetaLocal = MOODS.find(m => m.id === moodId || m.name.toLowerCase() === (moodName || '').toLowerCase());
+      const genres = (moodMetaLocal && moodMetaLocal.genres) || [];
+      const keywords = (moodMetaLocal && moodMetaLocal.keywords) || [];
       const q = (moodName || '').toLowerCase();
-      // Filter tracks by mood, genre match, or keyword match
+
+      // Cada estado de ánimo filtra por SUS géneros y SUS palabras clave,
+      // así "Chill" y "Energía" ya no devuelven las mismas canciones.
       tracks = allTracks.filter(t => {
-        if (t.mood && t.mood.toLowerCase().includes(q)) return true;
-        if (t.genre && t.genre.toLowerCase().includes(q)) return true;
-        if (t.title && t.title.toLowerCase().includes(q)) return true;
+        const title = (t.title || '').toLowerCase();
+        const artist = (t.artist || '').toLowerCase();
+        const genre = (t.genre || '').toLowerCase();
+        const mood = (t.mood || '').toLowerCase();
+        if (mood && (mood.includes(q) || keywords.some(k => mood.includes(k)))) return true;
+        if (genre && (genres.some(g => genre.includes(g)) || genres.some(g => g.includes(genre)))) return true;
+        if (keywords.some(k => title.includes(k) || artist.includes(k))) return true;
         return false;
       });
 
-      // Fallback: if no direct keyword match, grab a nice subset of tracks
+      // Se completa con la búsqueda online del estado de ánimo
+      if (tracks.length < 8) {
+        const query = (moodMetaLocal && moodMetaLocal.query) || (moodName + ' music');
+        const online = await fetchOnlineTracks(query);
+        tracks = dedupeTracks(tracks.concat(online)).slice(0, 60);
+      }
+
+      // Último recurso: una muestra variada de la biblioteca
       if (tracks.length === 0 && allTracks.length > 0) {
         tracks = allTracks.slice(0, 15);
       }
@@ -994,7 +1083,7 @@
       console.error('[Discover] Mood view error:', e);
     }
 
-    const moodMeta = MOODS.find(m => m.id === moodId || m.name.toLowerCase() === moodName.toLowerCase()) || {
+    const moodMeta = MOODS.find(m => m.id === moodId || m.name.toLowerCase() === (moodName || '').toLowerCase()) || {
       name: moodName,
       emoji: '🎵',
       gradient: 'linear-gradient(135deg, #FF4757, #FF6B35)'

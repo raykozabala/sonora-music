@@ -426,6 +426,60 @@ public class MainActivity extends Activity {
             activity.requestAudioPermission();
         }
 
+        /**
+         * Compartir nativo. El WebView no soporta navigator.share ni
+         * navigator.clipboard sobre file://, así que usamos el Intent del
+         * sistema (comparte con WhatsApp, Gmail, etc.).
+         */
+        @android.webkit.JavascriptInterface
+        public boolean shareText(String title, String text) {
+            try {
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setType("text/plain");
+                if (title != null && !title.isEmpty()) {
+                    send.putExtra(Intent.EXTRA_SUBJECT, title);
+                }
+                send.putExtra(Intent.EXTRA_TEXT, text != null ? text : "");
+                Intent chooser = Intent.createChooser(send,
+                        (title != null && !title.isEmpty()) ? title : "Compartir");
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                activity.startActivity(chooser);
+                return true;
+            } catch (Exception e) {
+                Log.e(TAG, "shareText: " + e.getMessage());
+                return false;
+            }
+        }
+
+        /** Copiar al portapapeles del sistema (para códigos de playlist). */
+        @android.webkit.JavascriptInterface
+        public boolean copyToClipboard(String text) {
+            try {
+                android.content.ClipboardManager cb =
+                        (android.content.ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cb == null) return false;
+                cb.setPrimaryClip(android.content.ClipData.newPlainText("Sonora Music", text != null ? text : ""));
+                return true;
+            } catch (Exception e) {
+                Log.e(TAG, "copyToClipboard: " + e.getMessage());
+                return false;
+            }
+        }
+
+        /** Abrir un enlace en el navegador externo. */
+        @android.webkit.JavascriptInterface
+        public boolean openExternalUrl(String url) {
+            try {
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                activity.startActivity(intent);
+                return true;
+            } catch (Exception e) {
+                Log.e(TAG, "openExternalUrl: " + e.getMessage());
+                return false;
+            }
+        }
+
         @android.webkit.JavascriptInterface
         public String getDeviceMusicFiles() {
             JSONArray arr = new JSONArray();

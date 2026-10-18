@@ -215,7 +215,7 @@
               justify-content: center;
               font-size: 34px;
               font-weight: 800;
-              color: #ffffff;
+              color: var(--color-on-primary, #fff);
               box-shadow: 0 6px 20px rgba(var(--color-primary-rgb, 255, 71, 87), 0.35);
               border: 3px solid var(--color-surface-elevated, #22253d);
             }
@@ -227,7 +227,7 @@
               height: 32px;
               border-radius: 50%;
               background: var(--color-primary, #FF4757);
-              color: #ffffff;
+              color: var(--color-text-primary);
               display: flex;
               align-items: center;
               justify-content: center;
@@ -391,7 +391,7 @@
               justify-content: center;
               font-size: 12px;
               font-weight: 800;
-              color: #ffffff;
+              color: var(--color-text-primary);
               box-shadow: 0 3px 8px rgba(0,0,0,0.3);
             }
             .medal-gold {
@@ -404,7 +404,7 @@
             }
             .medal-bronze {
               background: linear-gradient(135deg, #CD7F32, #8D4004);
-              color: #fff;
+              color: var(--color-on-primary, #fff);
             }
             .podium-info {
               text-align: center;
@@ -590,7 +590,7 @@
               transform: translateX(-50%) translateY(20px);
               background: rgba(26, 26, 46, 0.95);
               border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.15));
-              color: #ffffff;
+              color: var(--color-text-primary);
               padding: 10px 20px;
               border-radius: 30px;
               font-size: 13px;
@@ -688,7 +688,7 @@
               </div>
               <div class="modal-body">
                 <div style="display:flex;flex-direction:column;align-items:center;margin-bottom:10px;">
-                  <div style="width:80px;height:80px;position:relative;border-radius:50%;overflow:hidden;background:#22253d;margin-bottom:8px;">
+                  <div style="width:80px;height:80px;position:relative;border-radius:50%;overflow:hidden;background:var(--color-surface-elevated);margin-bottom:8px;">
                     <img id="edit-avatar-preview" src="" alt="Avatar" style="width:100%;height:100%;object-fit:cover;display:none;" />
                     <div id="edit-avatar-placeholder" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:bold;color:#fff;background:linear-gradient(135deg, var(--color-primary), var(--color-secondary));">SM</div>
                   </div>

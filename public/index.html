@@ -64,7 +64,7 @@
   <div id="splash-screen">
     <img class="splash-note" src="./icons/icon-192.png" style="border-radius:20px; box-shadow:0 8px 30px rgba(0,0,0,0.4);" alt="Logo">
     <div class="splash-title">Sonora Music</div>
-    <div class="splash-subtitle">v7.6.3</div>
+    <div class="splash-subtitle">v7.7.0</div>
     <div class="splash-loader"></div>
   </div>
 
@@ -262,21 +262,21 @@
           <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
           <polyline points="9 22 9 12 15 12 15 22"/>
         </svg>
-        <span>Inicio</span>
+        <span data-i18n="nav.home">Inicio</span>
       </button>
       <button data-page="search" class="nav-item" aria-label="Buscar">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="11" cy="11" r="8"/>
           <line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
-        <span>Buscar</span>
+        <span data-i18n="nav.search">Buscar</span>
       </button>
       <button data-page="library" class="nav-item" aria-label="Biblioteca">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
           <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
         </svg>
-        <span>Biblioteca</span>
+        <span data-i18n="nav.library">Biblioteca</span>
       </button>
       <button data-page="playlists" class="nav-item" aria-label="Listas">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -287,14 +287,14 @@
           <line x1="3" y1="12" x2="3.01" y2="12"/>
           <line x1="3" y1="18" x2="3.01" y2="18"/>
         </svg>
-        <span>Listas</span>
+        <span data-i18n="nav.playlists">Listas</span>
       </button>
       <button data-page="discover" class="nav-item" aria-label="Descubrir">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"/>
           <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>
         </svg>
-        <span>Descubrir</span>
+        <span data-i18n="nav.discover">Descubrir</span>
       </button>
     </nav>
 
@@ -367,6 +367,7 @@
 
   <!-- ═══════════════ SCRIPTS (load order matters) ═══════════════ -->
   <script src="./js/store.js"></script>
+  <script src="./js/i18n.js"></script>
   <script src="./js/router.js"></script>
   <script src="./js/db.js"></script>
   <script src="./js/api.js"></script>

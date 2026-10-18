@@ -535,7 +535,7 @@
                         : (item.speed + ' • Restante: ' + item.eta +
                            (item.total ? ' • ' + formatBytes(item.bytes) + ' de ' + formatBytes(item.total) : '')));
                     return `
-                    <div style="background:#1e1e2d; border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px;">
+                    <div style="background:var(--color-surface); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px;">
                       <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;">
                         <span style="font-weight:700; font-size:14px; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:200px;">
                           ${item.title}
@@ -587,7 +587,7 @@
                         <button type="button" class="btn-dl-play" data-track-id="${item.trackId}" style="background:var(--color-primary, #FF4757); border:none; color:#fff; border-radius:14px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer;">
                           ▶ Sonora
                         </button>
-                        <button type="button" class="btn-dl-lark" data-title="${encodeURIComponent(item.title)}" data-artist="${encodeURIComponent(item.artist)}" style="background:#22253d; border:1px solid rgba(255,255,255,0.1); color:#4fc3f7; border-radius:14px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer;">
+                        <button type="button" class="btn-dl-lark" data-title="${encodeURIComponent(item.title)}" data-artist="${encodeURIComponent(item.artist)}" style="background:var(--color-surface-elevated); border:1px solid rgba(255,255,255,0.1); color:#4fc3f7; border-radius:14px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer;">
                           📱 Abrir con
                         </button>
                       </div>

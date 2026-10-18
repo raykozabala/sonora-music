@@ -360,32 +360,73 @@
    */
   var _autoplayEnabled = true;
 
+  // Precarga de la siguiente recomendación: en cuanto la canción llega al 90%
+  // la pedimos en segundo plano, así al terminar suena casi al instante.
+  var _prefetchedNext = null;
+  var _prefetchedForId = null;
+  var _prefetchInFlight = false;
+
+  async function requestRecommendations(track) {
+    if (!track) return [];
+    try {
+      var recs = [];
+      if (Sonora.API && typeof Sonora.API.getRecommendations === 'function') {
+        recs = await Sonora.API.getRecommendations(track.artist || '', track.title || '');
+      }
+      if (!recs || recs.length === 0) return [];
+      var nextRec = recs.find(function (r) {
+        return !_queue.some(function (q) { return q.title === r.title; });
+      }) || recs[0];
+      return nextRec ? [nextRec] : [];
+    } catch (e) {
+      console.warn('[Player] Error fetching recommendation:', e);
+      return [];
+    }
+  }
+
+  function prefetchNextRecommendation(track) {
+    if (!track || _prefetchInFlight) return;
+    var key = String(track.id || track.title || '');
+    if (!key || _prefetchedForId === key) return;
+
+    _prefetchInFlight = true;
+    _prefetchedForId = key;
+    requestRecommendations(track).then(function (recs) {
+      _prefetchInFlight = false;
+      if (recs.length > 0 && _prefetchedForId === key) {
+        _prefetchedNext = recs[0];
+      }
+    });
+  }
+
   async function fetchNextRecommendation(track) {
     if (!track) return;
     try {
-      showToast('Obteniendo siguiente recomendación...', 'info');
-      var artist = track.artist || '';
-      var title = track.title || '';
-      var recs = [];
-      if (Sonora.API && typeof Sonora.API.getRecommendations === 'function') {
-        recs = await Sonora.API.getRecommendations(artist, title);
-      }
-      if (recs && recs.length > 0) {
-        var nextRec = recs.find(function (r) {
-          return !_queue.some(function (q) { return q.title === r.title; });
-        }) || recs[0];
+      var nextRec = null;
 
-        if (nextRec) {
-          _queue.push(nextRec);
-          _originalQueue.push(nextRec);
-          _queueIndex = _queue.length - 1;
-          updateState('queue', _queue);
-          updateState('queueIndex', _queueIndex);
-          emitStoreEvent('queueChanged', _queue);
-          showToast('Siguiente: "' + nextRec.title + '" (' + nextRec.artist + ')', 'info');
-          Sonora.Player.play(nextRec);
-          return;
-        }
+      // Usa la que ya veníamos precargando al 90% de la canción
+      var key = String(track.id || track.title || '');
+      if (_prefetchedNext && _prefetchedForId === key) {
+        nextRec = _prefetchedNext;
+      } else {
+        showToast('Obteniendo siguiente recomendación...', 'info');
+        var recs = await requestRecommendations(track);
+        nextRec = recs[0] || null;
+      }
+
+      _prefetchedNext = null;
+      _prefetchedForId = null;
+
+      if (nextRec) {
+        _queue.push(nextRec);
+        _originalQueue.push(nextRec);
+        _queueIndex = _queue.length - 1;
+        updateState('queue', _queue);
+        updateState('queueIndex', _queueIndex);
+        emitStoreEvent('queueChanged', _queue);
+        showToast('Siguiente: "' + nextRec.title + '" (' + nextRec.artist + ')', 'info');
+        Sonora.Player.play(nextRec);
+        return;
       }
     } catch (e) {
       console.warn('[Player] Error fetching recommendation:', e);
@@ -629,6 +670,15 @@
       var prog = Sonora.Player.getProgress();
       updateState('progress', prog);
       updateMediaSessionPosition();
+
+      // Al 90% de la canción preparamos la siguiente recomendación, pero sólo
+      // si es la última de la cola (si hay siguiente ya está lista).
+      try {
+        var isLast = _queueIndex >= _queue.length - 1;
+        if (_autoplayEnabled && isLast && _currentTrack && prog && prog.percent >= 0.9) {
+          prefetchNextRecommendation(_currentTrack);
+        }
+      } catch (e) {}
     }, 250);
   }
 
@@ -1423,7 +1473,7 @@
       if (mins <= 0) {
         _sleepTimerEndTime = null;
         updateState('sleepTimer', null);
-        showToast('Sleep timer turned off', 'info');
+        showToast('Temporizador de sueño desactivado', 'info');
         return;
       }
 
@@ -1434,7 +1484,7 @@
         Sonora.Player.pause();
         _sleepTimerEndTime = null;
         updateState('sleepTimer', null);
-        showToast('Sleep timer expired. Playback paused.', 'info');
+        showToast('Se acabó el tiempo: reproducción pausada', 'info');
       }, mins * 60 * 1000);
 
       // Periodically update remaining time in Store
@@ -1452,7 +1502,7 @@
         }
       }, 30000);
 
-      showToast('Sleep timer set for ' + mins + ' min', 'info');
+      showToast('Temporizador activado: ' + mins + ' min', 'info');
     },
 
     /**

@@ -186,7 +186,7 @@
           <div class="empty-icon">🎵</div>
           <h3>Tu biblioteca está vacía</h3>
           <p>Busca tus canciones favoritas en YouTube o SoundCloud para comenzar a escuchar y descargar.</p>
-          <button type="button" class="btn btn--primary" data-action="go-search" style="margin-top:16px; background:var(--color-primary, #FF4757); color:#fff; border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
+          <button type="button" class="btn btn--primary" data-action="go-search" style="margin-top:16px; background:var(--color-primary, #FF4757); color:var(--color-text-primary); border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
             🔍 Buscar música para comenzar
           </button>
         </div>
@@ -418,7 +418,7 @@
           <h3>Falta el permiso</h3>
           <p>Sonora necesita permiso para leer los archivos de audio del teléfono.</p>
           <button type="button" class="btn btn--primary" data-action="request-storage"
-                  style="margin-top:16px; background:var(--color-primary, #FF4757); color:#fff; border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
+                  style="margin-top:16px; background:var(--color-primary, #FF4757); color:var(--color-text-primary); border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
             🔓 Conceder permiso
           </button>
         </div>
@@ -443,11 +443,11 @@
           <p>No hay archivos de audio visibles en el teléfono. Copia música a la memoria y vuelve a escanear.</p>
           <div style="display:flex; gap:10px; justify-content:center; margin-top:16px; flex-wrap:wrap;">
             <button type="button" class="btn btn--primary" data-action="scan-device"
-                    style="background:var(--color-primary, #FF4757); color:#fff; border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
+                    style="background:var(--color-primary, #FF4757); color:var(--color-text-primary); border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
               🔄 Escanear de nuevo
             </button>
             <button type="button" class="btn" data-action="request-storage"
-                    style="background:#25253a; color:#fff; border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
+                    style="background:var(--color-surface-elevated); color:var(--color-text-primary); border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
               🔓 Permisos
             </button>
           </div>
@@ -465,11 +465,11 @@
           Reproducir todo (${sorted.length})
         </button>
         <button type="button" class="btn" data-action="scan-device" title="Escanear de nuevo"
-                style="background:#25253a; color:#fff; border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
+                style="background:var(--color-surface-elevated); color:var(--color-text-primary); border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
           🔄
         </button>
         <button type="button" class="btn" data-action="request-storage" title="Permisos"
-                style="background:#25253a; color:#fff; border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
+                style="background:var(--color-surface-elevated); color:var(--color-text-primary); border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
           🔓
         </button>
       </div>
@@ -490,7 +490,7 @@
           <div class="empty-icon">💾</div>
           <h3>Sin descargas</h3>
           <p>Descarga canciones desde el buscador para disfrutarlas sin conexión a internet o con Lark Player.</p>
-          <button type="button" class="btn btn--primary" data-action="go-search" style="margin-top:16px; background:var(--color-primary, #FF4757); color:#fff; border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
+          <button type="button" class="btn btn--primary" data-action="go-search" style="margin-top:16px; background:var(--color-primary, #FF4757); color:var(--color-text-primary); border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
             🔍 Buscar canciones para descargar
           </button>
         </div>
@@ -705,7 +705,7 @@
               font-size: 28px;
               font-weight: 800;
               margin: 0 0 16px;
-              color: #ffffff;
+              color: var(--color-text-primary);
               letter-spacing: -0.5px;
             }
             .library-tabs-nav {
@@ -721,9 +721,9 @@
             }
             .library-tab-btn {
               flex: 0 0 auto;
-              background: #1e1e28;
-              border: 1px solid rgba(255, 255, 255, 0.08);
-              color: #8e8e93;
+              background: var(--color-surface);
+              border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.08));
+              color: var(--color-text-secondary);
               font-size: 14px;
               font-weight: 600;
               padding: 8px 16px;
@@ -733,7 +733,7 @@
             }
             .library-tab-btn.active {
               background: var(--primary, #FF4757);
-              color: #ffffff;
+              color: var(--color-text-primary);
               border-color: var(--primary, #FF4757);
               box-shadow: 0 4px 12px rgba(255, 71, 87, 0.35);
             }
@@ -746,7 +746,7 @@
             }
             .sort-label {
               font-size: 13px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               font-weight: 600;
             }
             .sort-chips {
@@ -756,7 +756,7 @@
             .sort-chip {
               background: transparent;
               border: 1px solid rgba(255, 255, 255, 0.15);
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               font-size: 12px;
               font-weight: 600;
               padding: 4px 10px;
@@ -788,12 +788,12 @@
               gap: 12px;
               padding: 8px 10px;
               border-radius: 10px;
-              background: #181822;
+              background: var(--color-surface);
               cursor: pointer;
               transition: background 0.15s ease;
             }
             .lib-track-item:active {
-              background: #232332;
+              background: var(--color-surface-elevated);
             }
             .lib-track-art-wrap {
               width: 48px;
@@ -802,7 +802,7 @@
               overflow: hidden;
               position: relative;
               flex-shrink: 0;
-              background: #252535;
+              background: var(--color-surface-elevated);
             }
             .lib-track-art {
               width: 100%;
@@ -816,7 +816,7 @@
               display: flex;
               align-items: center;
               justify-content: center;
-              color: #fff;
+              color: var(--color-text-primary);
               font-size: 12px;
               opacity: 0;
               transition: opacity 0.15s ease;
@@ -831,14 +831,14 @@
             .lib-track-title {
               font-size: 15px;
               font-weight: 600;
-              color: #ffffff;
+              color: var(--color-text-primary);
               white-space: nowrap;
               overflow: hidden;
               text-overflow: ellipsis;
             }
             .lib-track-meta {
               font-size: 12px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               white-space: nowrap;
               overflow: hidden;
               text-overflow: ellipsis;
@@ -868,12 +868,12 @@
             }
             .lib-track-duration {
               font-size: 12px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
             }
             .btn-icon {
               background: none;
               border: none;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               cursor: pointer;
               padding: 6px;
               display: flex;
@@ -907,7 +907,7 @@
               aspect-ratio: 1;
               border-radius: 12px;
               overflow: hidden;
-              background: #1f1f2c;
+              background: var(--color-surface);
               box-shadow: 0 4px 14px rgba(0,0,0,0.35);
             }
             .lib-album-art {
@@ -918,7 +918,7 @@
             .lib-album-title {
               font-size: 14px;
               font-weight: 700;
-              color: #ffffff;
+              color: var(--color-text-primary);
               margin-top: 8px;
               white-space: nowrap;
               overflow: hidden;
@@ -926,7 +926,7 @@
             }
             .lib-album-artist {
               font-size: 12px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               margin-top: 2px;
               white-space: nowrap;
               overflow: hidden;
@@ -950,19 +950,19 @@
               gap: 16px;
               padding: 10px 12px;
               border-radius: 12px;
-              background: #181822;
+              background: var(--color-surface);
               cursor: pointer;
               transition: background 0.15s ease;
             }
             .lib-artist-item:active {
-              background: #232332;
+              background: var(--color-surface-elevated);
             }
             .lib-artist-avatar-wrap {
               width: 56px;
               height: 56px;
               border-radius: 50%;
               overflow: hidden;
-              background: #252535;
+              background: var(--color-surface-elevated);
               flex-shrink: 0;
               box-shadow: 0 4px 10px rgba(0,0,0,0.3);
             }
@@ -978,11 +978,11 @@
             .lib-artist-name {
               font-size: 16px;
               font-weight: 700;
-              color: #ffffff;
+              color: var(--color-text-primary);
             }
             .lib-artist-meta {
               font-size: 13px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               margin-top: 3px;
             }
             .lib-artist-arrow {
@@ -1003,7 +1003,7 @@
             .btn-back {
               background: rgba(255, 255, 255, 0.1);
               border: none;
-              color: #ffffff;
+              color: var(--color-text-primary);
               font-size: 14px;
               font-weight: 600;
               padding: 6px 14px;
@@ -1027,7 +1027,7 @@
               overflow: hidden;
               flex-shrink: 0;
               box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-              background: #252535;
+              background: var(--color-surface-elevated);
             }
             .detail-hero-art {
               width: 100%;
@@ -1041,7 +1041,7 @@
               overflow: hidden;
               flex-shrink: 0;
               box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-              background: #252535;
+              background: var(--color-surface-elevated);
             }
             .detail-hero-avatar {
               width: 100%;
@@ -1062,18 +1062,18 @@
               font-size: 22px;
               font-weight: 800;
               margin: 4px 0 2px;
-              color: #ffffff;
+              color: var(--color-text-primary);
               line-height: 1.2;
             }
             .detail-subtitle {
               font-size: 14px;
-              color: #ffffff;
+              color: var(--color-text-primary);
               margin: 0 0 4px;
               font-weight: 500;
             }
             .detail-meta {
               font-size: 12px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               margin: 0;
             }
             .detail-bio {
@@ -1092,7 +1092,7 @@
             .detail-section-title {
               font-size: 17px;
               font-weight: 700;
-              color: #ffffff;
+              color: var(--color-text-primary);
               padding: 0 20px 8px;
               margin: 8px 0 0;
             }
@@ -1109,11 +1109,11 @@
               font-size: 19px;
               font-weight: 700;
               margin: 0 0 8px;
-              color: #ffffff;
+              color: var(--color-text-primary);
             }
             .lib-empty-state p {
               font-size: 14px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               margin: 0;
             }
             /* Bottom Sheet Overlay */
@@ -1139,7 +1139,7 @@
               bottom: 0;
               left: 0;
               right: 0;
-              background: #1c1c28;
+              background: var(--color-surface);
               border-radius: 20px 20px 0 0;
               padding: 12px 20px 32px;
               max-height: 85vh;
@@ -1175,7 +1175,7 @@
               height: 52px;
               border-radius: 10px;
               overflow: hidden;
-              background: #252535;
+              background: var(--color-surface-elevated);
               flex-shrink: 0;
             }
             .sheet-art {
@@ -1190,14 +1190,14 @@
             .sheet-track-title {
               font-size: 16px;
               font-weight: 700;
-              color: #ffffff;
+              color: var(--color-text-primary);
               white-space: nowrap;
               overflow: hidden;
               text-overflow: ellipsis;
             }
             .sheet-track-artist {
               font-size: 13px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               margin-top: 2px;
               white-space: nowrap;
               overflow: hidden;
@@ -1236,11 +1236,11 @@
               background: rgba(255, 255, 255, 0.08);
             }
             .sheet-menu-item svg {
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               flex-shrink: 0;
             }
             .sheet-menu-item.sheet-cancel {
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               justify-content: center;
               margin-top: 8px;
               font-weight: 600;
@@ -1252,7 +1252,7 @@
               left: 50%;
               transform: translateX(-50%) translateY(20px);
               background: rgba(30, 30, 40, 0.95);
-              color: #ffffff;
+              color: var(--color-text-primary);
               border: 1px solid rgba(255, 255, 255, 0.15);
               backdrop-filter: blur(8px);
               padding: 10px 20px;
@@ -1280,7 +1280,7 @@
 
           <!-- Tab Body Content -->
           <div id="library-tab-content">
-            <div class="lib-loading-skeleton" style="padding: 20px; text-align: center; color: #8e8e93;">
+            <div class="lib-loading-skeleton" style="padding: 20px; text-align: center; color: var(--color-text-secondary);">
               Cargando biblioteca...
             </div>
           </div>

@@ -13,6 +13,15 @@
     const s = Math.floor(sec % 60);
     return m + ':' + (s < 10 ? '0' : '') + s;
   }
+  /** Duración larga legible: "1 h 32 min" (para audios de horas) */
+  function formatLongDuration(sec) {
+    const total = Math.floor(Number(sec) || 0);
+    if (total <= 0) return '';
+    const h = Math.floor(total / 3600);
+    const m = Math.round((total % 3600) / 60);
+    if (h > 0) return h + ' h' + (m > 0 ? ' ' + m + ' min' : '');
+    return m + ' min';
+  }
   function generateArtwork(id, title) {
     const numId = typeof id === 'number' ? id : (typeof id === 'string' ? (parseInt(id, 10) || id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)) : 1);
     const hue = Math.abs(numId * 47) % 360;
@@ -187,17 +196,21 @@
             const platformLabel = isYT ? 'YouTube' : 'SoundCloud';
             const platformColor = isYT ? '#FF0000' : '#FF5500';
             const dur = item.durationText || formatTime(item.duration);
+            const longSec = Number(item.duration) || 0;
+            const isLong = longSec >= 1200; // audios de 20 min o más
+            const longLabel = isLong ? formatLongDuration(longSec) : '';
 
             return `
               <div class="external-track-card" data-idx="${idx}">
                 <div class="external-track-art-wrap">
                   <img src="${escapeHtml(item.thumbnail || generateArtwork(idx, item.title))}" alt="" class="external-track-art" loading="lazy" onerror="this.src=''" />
                   <span class="external-track-duration">${dur}</span>
+                  ${isLong ? `<span class="external-track-warn" title="Audio muy largo (posible recopilación)">⚠️ ${longLabel}</span>` : ''}
                 </div>
                 <div class="external-track-info">
                   <div class="external-track-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
                   <div class="external-track-meta">
-                    <span class="platform-badge" style="background: ${platformColor}; color: #fff;">${platformLabel}</span>
+                    <span class="platform-badge" style="background: ${platformColor}; color: var(--color-text-primary);">${platformLabel}</span>
                     <span class="external-track-artist">${escapeHtml(item.artist || 'Artista')}</span>
                   </div>
                   <div class="external-track-actions">
@@ -231,7 +244,7 @@
             <div class="format-modal-info">
               <div class="format-modal-title">${escapeHtml(track.title)}</div>
               <div class="format-modal-artist">${escapeHtml(track.artist)} • ${dur}</div>
-              <span class="platform-badge" style="background:${isYT ? '#FF0000' : '#FF5500'}; color:#fff; display:inline-block; margin-top:4px;">${isYT ? 'YouTube Music' : 'SoundCloud'}</span>
+              <span class="platform-badge" style="background:${isYT ? '#FF0000' : '#FF5500'}; color:var(--color-text-primary); display:inline-block; margin-top:4px;">${isYT ? 'YouTube Music' : 'SoundCloud'}</span>
             </div>
             <button id="btn-close-format-modal" class="modal-close-btn">&times;</button>
           </div>
@@ -357,7 +370,7 @@
               position: relative;
               display: flex;
               align-items: center;
-              background: #20202c;
+              background: var(--color-surface-elevated);
               border-radius: 12px;
               padding: 0 12px;
               height: 48px;
@@ -369,7 +382,7 @@
               box-shadow: 0 0 0 2px rgba(255, 71, 87, 0.25);
             }
             .search-bar__icon {
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               margin-right: 10px;
               display: flex;
               align-items: center;
@@ -379,18 +392,18 @@
               background: transparent;
               border: none;
               outline: none;
-              color: #ffffff;
+              color: var(--color-text-primary);
               font-size: 15px;
               font-weight: 500;
               height: 100%;
             }
             .search-bar__input::placeholder {
-              color: #8e8e93;
+              color: var(--color-text-secondary);
             }
             .search-bar__clear {
               background: rgba(255, 255, 255, 0.15);
               border: none;
-              color: #ffffff;
+              color: var(--color-text-primary);
               width: 24px;
               height: 24px;
               border-radius: 50%;
@@ -412,8 +425,8 @@
               overflow-x: auto;
             }
             .filter-pill {
-              background: #252535;
-              border: 1px solid rgba(255,255,255,0.08);
+              background: var(--color-surface-elevated);
+              border: 1px solid var(--color-card-border, rgba(255,255,255,0.08));
               color: #b0b0b8;
               font-size: 12px;
               font-weight: 600;
@@ -426,14 +439,14 @@
             .filter-pill.active {
               background: var(--color-primary, #FF4757);
               border-color: var(--color-primary, #FF4757);
-              color: #ffffff;
+              color: var(--color-text-primary);
             }
 
             /* Direct URL Downloader Bar */
             .direct-url-box {
               margin: 8px 16px 14px;
               background: rgba(255, 255, 255, 0.03);
-              border: 1px solid rgba(255, 255, 255, 0.08);
+              border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.08));
               border-radius: 12px;
               padding: 10px 14px;
             }
@@ -470,7 +483,7 @@
             .search-history-title {
               font-size: 12px;
               font-weight: 700;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               text-transform: uppercase;
               letter-spacing: 0.5px;
             }
@@ -488,8 +501,8 @@
               gap: 8px;
             }
             .search-chip {
-              background: #20202c;
-              border: 1px solid rgba(255, 255, 255, 0.08);
+              background: var(--color-surface-elevated);
+              border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.08));
               border-radius: 20px;
               padding: 5px 12px;
               display: inline-flex;
@@ -502,7 +515,7 @@
             .chip-delete {
               background: none;
               border: none;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               font-size: 14px;
               cursor: pointer;
               padding: 0;
@@ -515,7 +528,7 @@
             .search-section-title {
               font-size: 17px;
               font-weight: 700;
-              color: #ffffff;
+              color: var(--color-text-primary);
             }
             .genre-grid {
               display: grid;
@@ -539,7 +552,7 @@
             .genre-card__name {
               font-size: 15px;
               font-weight: 700;
-              color: #ffffff;
+              color: var(--color-text-primary);
             }
             .genre-card__icon {
               font-size: 24px;
@@ -555,8 +568,8 @@
             .external-track-card {
               display: flex;
               gap: 12px;
-              background: #1c1c28;
-              border: 1px solid rgba(255, 255, 255, 0.06);
+              background: var(--color-surface);
+              border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.06));
               border-radius: 12px;
               padding: 10px;
               align-items: center;
@@ -568,7 +581,7 @@
               border-radius: 8px;
               overflow: hidden;
               position: relative;
-              background: #111;
+              background: var(--color-surface-elevated);
               flex-shrink: 0;
             }
             .external-track-art {
@@ -587,6 +600,19 @@
               padding: 2px 4px;
               border-radius: 4px;
             }
+            /* Aviso de audio muy largo (recopilaciones de 1 h o más) */
+            .external-track-warn {
+              position: absolute;
+              top: 4px;
+              left: 4px;
+              background: rgba(255, 152, 0, 0.95);
+              color: #1a1200;
+              font-size: 9.5px;
+              font-weight: 800;
+              padding: 2px 5px;
+              border-radius: 6px;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.45);
+            }
             .external-track-info {
               flex: 1;
               min-width: 0;
@@ -594,7 +620,7 @@
             .external-track-title {
               font-size: 14px;
               font-weight: 700;
-              color: #ffffff;
+              color: var(--color-text-primary);
               line-height: 1.3;
               display: -webkit-box;
               -webkit-line-clamp: 2;
@@ -617,7 +643,7 @@
             }
             .external-track-artist {
               font-size: 12px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               white-space: nowrap;
               overflow: hidden;
               text-overflow: ellipsis;
@@ -630,7 +656,7 @@
             }
             .btn-action-download {
               background: var(--color-primary, #FF4757);
-              color: #ffffff;
+              color: var(--color-text-primary);
               border: none;
               border-radius: 18px;
               padding: 6px 12px;
@@ -640,7 +666,7 @@
             }
             .btn-action-play {
               background: rgba(255, 255, 255, 0.1);
-              color: #ffffff;
+              color: var(--color-text-primary);
               border: 1px solid rgba(255, 255, 255, 0.15);
               border-radius: 18px;
               padding: 6px 12px;
@@ -661,12 +687,12 @@
             .search-empty-title {
               font-size: 16px;
               font-weight: 700;
-              color: #ffffff;
+              color: var(--color-text-primary);
               margin-bottom: 4px;
             }
             .search-empty-desc {
               font-size: 13px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
             }
 
             /* Format Modal Sheet */
@@ -681,7 +707,7 @@
               animation: fadeIn 0.2s ease;
             }
             .format-modal-sheet {
-              background: #1c1c28;
+              background: var(--color-surface);
               border-radius: 20px 20px 0 0;
               padding: 16px 20px 32px;
               max-height: 85vh;
@@ -709,7 +735,7 @@
               height: 60px;
               border-radius: 8px;
               object-fit: cover;
-              background: #111;
+              background: var(--color-surface-elevated);
               flex-shrink: 0;
             }
             .format-modal-info {
@@ -719,20 +745,20 @@
             .format-modal-title {
               font-size: 14px;
               font-weight: 700;
-              color: #ffffff;
+              color: var(--color-text-primary);
               white-space: nowrap;
               overflow: hidden;
               text-overflow: ellipsis;
             }
             .format-modal-artist {
               font-size: 12px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               margin-top: 2px;
             }
             .modal-close-btn {
               background: rgba(255,255,255,0.1);
               border: none;
-              color: #fff;
+              color: var(--color-text-primary);
               width: 28px;
               height: 28px;
               border-radius: 50%;
@@ -744,7 +770,7 @@
               display: flex;
               gap: 8px;
               margin: 16px 0;
-              background: #14141e;
+              background: var(--color-surface);
               padding: 4px;
               border-radius: 12px;
             }
@@ -752,7 +778,7 @@
               flex: 1;
               background: none;
               border: none;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               font-size: 13px;
               font-weight: 700;
               padding: 10px;
@@ -762,7 +788,7 @@
             }
             .fmt-tab-btn.active {
               background: var(--color-primary, #FF4757);
-              color: #ffffff;
+              color: var(--color-text-primary);
             }
 
             .quality-options-list {
@@ -776,7 +802,7 @@
               align-items: center;
               gap: 12px;
               background: rgba(255,255,255,0.03);
-              border: 1px solid rgba(255,255,255,0.08);
+              border: 1px solid var(--color-card-border, rgba(255,255,255,0.08));
               border-radius: 10px;
               padding: 10px 14px;
               cursor: pointer;
@@ -792,11 +818,11 @@
             .quality-label {
               font-size: 13px;
               font-weight: 700;
-              color: #ffffff;
+              color: var(--color-text-primary);
             }
             .quality-sub {
               font-size: 11px;
-              color: #8e8e93;
+              color: var(--color-text-secondary);
               margin-top: 2px;
             }
             .quality-badge {
@@ -833,7 +859,7 @@
             }
             .btn-both-dl {
               background: linear-gradient(135deg, #FF4757 0%, #FF6B35 50%, #FFA502 100%);
-              color: #ffffff;
+              color: var(--color-on-primary, #fff);
               box-shadow: 0 4px 18px rgba(255, 71, 87, 0.45);
               border: 1px solid rgba(255, 255, 255, 0.2);
             }
@@ -843,16 +869,16 @@
             }
             .btn-device-dl {
               background: #2ed573;
-              color: #ffffff;
+              color: var(--color-text-primary);
             }
             .btn-sonora-save {
               background: var(--color-primary, #FF4757);
-              color: #ffffff;
+              color: var(--color-text-primary);
             }
             .btn-listen-now {
               background: rgba(255,255,255,0.12);
               border: 1px solid rgba(255,255,255,0.15);
-              color: #ffffff;
+              color: var(--color-text-primary);
               text-align: center;
               align-items: center;
             }
@@ -923,8 +949,8 @@
             </div>
             <div id="direct-url-pane" class="hidden" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
               <div style="display:flex; gap:8px;">
-                <input type="url" id="direct-url-input" placeholder="https://www.youtube.com/watch?v=..." style="flex:1; background:#14141e; border:1px solid rgba(255,255,255,0.2); border-radius:8px; padding:8px 12px; font-size:12px; color:#fff;" />
-                <button type="button" id="btn-direct-resolve" style="background:var(--color-primary, #FF4757); color:#fff; border:none; border-radius:8px; padding:0 14px; font-size:12px; font-weight:700; cursor:pointer;">Buscar</button>
+                <input type="url" id="direct-url-input" placeholder="https://www.youtube.com/watch?v=..." style="flex:1; background:var(--color-surface); border:1px solid rgba(255,255,255,0.2); border-radius:8px; padding:8px 12px; font-size:12px; color:var(--color-text-primary);" />
+                <button type="button" id="btn-direct-resolve" style="background:var(--color-primary, #FF4757); color:var(--color-text-primary); border:none; border-radius:8px; padding:0 14px; font-size:12px; font-weight:700; cursor:pointer;">Buscar</button>
               </div>
             </div>
           </div>
@@ -1197,8 +1223,8 @@
         ${renderFilterPills()}
         <div style="padding: 40px 20px; text-align: center; color: #aaa;">
           <div style="font-size: 32px; margin-bottom: 12px; animation: pulseGlow 1.2s infinite;">🌐</div>
-          <div style="font-size: 15px; font-weight: 700; color: #fff;">Buscando en YouTube y SoundCloud...</div>
-          <div style="font-size: 12px; color: #8e8e93; margin-top: 4px;">Conectando con servidores de Sonora</div>
+          <div style="font-size: 15px; font-weight: 700; color: var(--color-text-primary);">Buscando en YouTube y SoundCloud...</div>
+          <div style="font-size: 12px; color: var(--color-text-secondary); margin-top: 4px;">Conectando con servidores de Sonora</div>
         </div>
       `;
     }

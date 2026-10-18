@@ -400,27 +400,38 @@
         playlist.updatedAt = new Date().toISOString();
         return putToStore('playlists', playlist);
       },
-      delete: function (id) { return deleteFromStore('playlists', Number(id)); },
+      delete: function (id) {
+        // Los ids de playlist son numéricos, pero los de canciones pueden ser
+        // texto ("it_...", "dev_..."): comparamos siempre como texto.
+        return getAllFromStore('playlists').then(function (all) {
+          var match = (all || []).filter(function (p) { return String(p.id) === String(id); });
+          if (match.length === 0) return deleteFromStore('playlists', Number(id));
+          return Promise.all(match.map(function (p) { return deleteFromStore('playlists', p.id); }));
+        }).catch(function () { return deleteFromStore('playlists', Number(id)); });
+      },
       addTrack: function (playlistId, trackId) {
-        return getByIdFromStore('playlists', Number(playlistId)).then(function (pl) {
+        return getAllFromStore('playlists').then(function (all) {
+          var pl = (all || []).find(function (p) { return String(p.id) === String(playlistId); });
           if (!pl) return;
           var ids = pl.trackIds || [];
-          if (ids.indexOf(Number(trackId)) === -1) ids.push(Number(trackId));
+          if (!ids.some(function (id) { return String(id) === String(trackId); })) ids.push(trackId);
           pl.trackIds = ids;
           pl.updatedAt = new Date().toISOString();
           return putToStore('playlists', pl);
         });
       },
       removeTrack: function (playlistId, trackId) {
-        return getByIdFromStore('playlists', Number(playlistId)).then(function (pl) {
+        return getAllFromStore('playlists').then(function (all) {
+          var pl = (all || []).find(function (p) { return String(p.id) === String(playlistId); });
           if (!pl) return;
-          pl.trackIds = (pl.trackIds || []).filter(function (id) { return id !== Number(trackId); });
+          pl.trackIds = (pl.trackIds || []).filter(function (id) { return String(id) !== String(trackId); });
           pl.updatedAt = new Date().toISOString();
           return putToStore('playlists', pl);
         });
       },
       reorderTracks: function (playlistId, trackIds) {
-        return getByIdFromStore('playlists', Number(playlistId)).then(function (pl) {
+        return getAllFromStore('playlists').then(function (all) {
+          var pl = (all || []).find(function (p) { return String(p.id) === String(playlistId); });
           if (!pl) return;
           pl.trackIds = trackIds;
           pl.updatedAt = new Date().toISOString();
