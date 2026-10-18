@@ -740,7 +740,7 @@
             <div class="setting-item-row">
               <div class="setting-label-box">
                 <span class="setting-label-title" data-i18n="settings.theme">Tema de colores</span>
-                <span class="setting-label-sub">Selecciona el color de acento principal</span>
+                <span class="setting-label-sub" data-i18n="settings.theme.sub">Selecciona el color de acento principal</span>
               </div>
               <div class="theme-circles-grid" id="theme-circles-container">
                 <!-- Rendered dynamically -->
@@ -824,7 +824,7 @@
             <div class="setting-item-row">
               <div class="setting-label-box">
                 <span class="setting-label-title" data-i18n="settings.quality">Calidad de audio</span>
-                <span class="setting-label-sub">Streaming y compresión sonora</span>
+                <span class="setting-label-sub" data-i18n="settings.quality.sub">Streaming y compresión sonora</span>
               </div>
               <div class="segmented-control" id="control-audio-quality">
                 <button class="segmented-btn" data-quality="low">Baja (96 kbps)</button>
@@ -836,7 +836,7 @@
             <div class="setting-item-row">
               <div class="setting-label-box">
                 <span class="setting-label-title" data-i18n="settings.sleep">Temporizador de sueño</span>
-                <span class="setting-label-sub">Pausar la reproducción automáticamente</span>
+                <span class="setting-label-sub" data-i18n="settings.sleep.sub">Pausar la reproducción automáticamente</span>
               </div>
               <div class="segmented-control" id="control-sleep-timer" style="flex-wrap:wrap;">
                 <button class="segmented-btn active" data-timer="0">Off</button>
