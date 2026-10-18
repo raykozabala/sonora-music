@@ -774,72 +774,111 @@ const YT_CLIENT_FALLBACKS = [
 const YTDLP_CLIENT_TIMEOUT = 30000;
 
 /**
- * Resuelve la URL directa de audio de un video con yt-dlp (--get-url).
- * Prueba varios "player clients" hasta que uno funcione.
+ * Ejecuta yt-dlp (--get-url) con un "player client" concreto.
+ * Devuelve la URL directa del audio, o null si ese cliente falla.
+ */
+function ytdlpResolveWithClient(targetUrl, client) {
+  return new Promise((resolve) => {
+    const args = [
+      '--no-playlist',
+      '--no-warnings',
+      '--quiet',
+      '--no-check-certificates',
+      '-f', 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
+      '--get-url'
+    ];
+    if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
+    const finalArgs = withCookies(args);
+    finalArgs.push(targetUrl);
+
+    const proc = spawn(YTDLP_BIN, finalArgs);
+    let out = '';
+    let err = '';
+    let done = false;
+
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      try { proc.kill('SIGKILL'); } catch (e) {}
+      console.warn('[yt-dlp] client=' + (client || 'default') + ' timeout');
+      resolve(null);
+    }, YTDLP_CLIENT_TIMEOUT);
+
+    proc.stdout.on('data', (d) => { out += d.toString(); });
+    proc.stderr.on('data', (d) => { err += d.toString(); });
+
+    proc.on('error', () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(null);
+    });
+
+    proc.on('close', (code) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      const first = out.trim().split('\n').map(s => s.trim()).filter(Boolean)[0];
+      if (code === 0 && first && /^https?:\/\//.test(first)) return resolve(first);
+      const msg = err.trim().split('\n').pop() || ('yt-dlp salió con código ' + code);
+      console.warn('[yt-dlp] client=' + (client || 'default') + ' falló: ' + msg);
+      resolve(null);
+    });
+  });
+}
+
+/**
+ * Resuelve la URL directa de audio probando varios "player clients".
+ * Se lanzan en oleadas paralelas: si el primero va lento, los siguientes ya
+ * están trabajando. (Antes: 9 clientes en serie => hasta 270 s de espera.)
  */
 function ytdlpResolveAudioUrl(targetUrl) {
   return new Promise((resolve, reject) => {
+    const CONCURRENCY = 3;
     let idx = 0;
-    let lastError = '';
+    let pending = 0;
+    let settled = false;
 
-    function attempt() {
-      if (idx >= YT_CLIENT_FALLBACKS.length) {
-        return reject(new Error(lastError || 'yt-dlp no devolvió ninguna URL'));
+    function launch() {
+      while (!settled && pending < CONCURRENCY && idx < YT_CLIENT_FALLBACKS.length) {
+        const client = YT_CLIENT_FALLBACKS[idx++];
+        pending++;
+        ytdlpResolveWithClient(targetUrl, client).then((url) => {
+          if (settled) return;
+          pending--;
+          if (url) {
+            settled = true;
+            return resolve(url);
+          }
+          if (pending === 0 && idx >= YT_CLIENT_FALLBACKS.length) {
+            settled = true;
+            return reject(new Error('yt-dlp no devolvió ninguna URL (ningún player client funcionó)'));
+          }
+          launch();
+        });
       }
-      const client = YT_CLIENT_FALLBACKS[idx++];
-
-      const args = [
-        '--no-playlist',
-        '--no-warnings',
-        '--quiet',
-        '--no-check-certificates',
-        '-f', 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
-        '--get-url'
-      ];
-      if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
-      const finalArgs = withCookies(args);
-      finalArgs.push(targetUrl);
-
-      const proc = spawn(YTDLP_BIN, finalArgs);
-      let out = '';
-      let err = '';
-      let done = false;
-
-      const timer = setTimeout(() => {
-        if (done) return;
-        done = true;
-        try { proc.kill('SIGKILL'); } catch (e) {}
-        lastError = 'tiempo de espera agotado';
-        console.warn('[yt-dlp] client=' + (client || 'default') + ' timeout');
-        attempt();
-      }, YTDLP_CLIENT_TIMEOUT);
-
-      proc.stdout.on('data', (d) => { out += d.toString(); });
-      proc.stderr.on('data', (d) => { err += d.toString(); });
-
-      proc.on('error', (spawnErr) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        reject(spawnErr);
-      });
-
-      proc.on('close', (code) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        const first = out.trim().split('\n').map(s => s.trim()).filter(Boolean)[0];
-        if (code === 0 && first && /^https?:\/\//.test(first)) {
-          return resolve(first);
-        }
-        lastError = (err.trim().split('\n').pop() || ('yt-dlp salió con código ' + code));
-        console.warn('[yt-dlp] client=' + (client || 'default') + ' falló: ' + lastError);
-        attempt();
-      });
     }
 
-    attempt();
+    launch();
   });
+}
+
+// Caché de URLs de audio ya resueltas. La resolución es lenta (yt-dlp + deno +
+// cookies), así que se reutiliza durante 20 min: hace instantáneos los
+// "seeks" y las repeticiones que hace el reproductor.
+const RESOLVED_URL_CACHE = new Map();
+const RESOLVED_URL_TTL = 20 * 60 * 1000;
+
+function getResolvedUrl(key) {
+  const e = RESOLVED_URL_CACHE.get(key);
+  if (!e) return null;
+  if (e.exp <= Date.now()) { RESOLVED_URL_CACHE.delete(key); return null; }
+  return e.url;
+}
+
+function setResolvedUrl(key, url) {
+  if (RESOLVED_URL_CACHE.size > 300) RESOLVED_URL_CACHE.clear();
+  RESOLVED_URL_CACHE.set(key, { url: url, exp: Date.now() + RESOLVED_URL_TTL });
 }
 
 /**
@@ -848,8 +887,10 @@ function ytdlpResolveAudioUrl(targetUrl) {
 function proxyAudioStream(directUrl, req, res) {
   const lib = directUrl.startsWith('https') ? https : http;
   const headers = {
-    'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Sonora Music)',
-    'Accept': '*/*'
+    'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': 'https://www.youtube.com/'
   };
   if (req.headers.range) headers['Range'] = req.headers.range;
 
@@ -1155,12 +1196,17 @@ app.get('/api/stream/external', async (req, res) => {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
 
     // Resolvemos la URL directa del audio y hacemos proxy (soporta Range => seek).
-    // Plan A: yt-dlp. Plan B: Invidious (por si YouTube bloquea la IP del servidor).
-    let directUrl = null;
-    try {
-      directUrl = await ytdlpResolveAudioUrl(targetUrl);
-    } catch (ytErr) {
-      console.warn('[Stream] yt-dlp falló: ' + ytErr.message);
+    // Plan A: caché. Plan B: yt-dlp. Plan C: Invidious (por si YouTube bloquea la IP).
+    let directUrl = getResolvedUrl(targetUrl);
+    if (directUrl) {
+      console.log('[Stream] URL de audio reutilizada de la caché');
+    } else {
+      try {
+        directUrl = await ytdlpResolveAudioUrl(targetUrl);
+        if (directUrl) setResolvedUrl(targetUrl, directUrl);
+      } catch (ytErr) {
+        console.warn('[Stream] yt-dlp falló: ' + ytErr.message);
+      }
     }
     if (!directUrl) {
       const vid = extractYouTubeId(targetUrl);
