@@ -1965,6 +1965,7 @@ body.light .skeleton {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  flex: 0 0 auto;
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.2px;
