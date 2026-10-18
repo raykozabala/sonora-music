@@ -154,6 +154,32 @@ Google las renueva cada cierto tiempo (semanas o meses). Si vuelve a aparecer
 
 ---
 
+## Paso 7 — Runtime de JavaScript (deno) ⚙️
+
+YouTube protege sus vídeos con **desafíos de JavaScript**. yt-dlp necesita un
+*runtime* para resolverlos y, si no lo tiene, **YouTube no entrega ningún
+formato** y todo falla con:
+
+```
+ERROR: Requested format is not available
+```
+
+⚠️ **`node` no sirve** si es la versión 20 (yt-dlp exige **22 o superior**).
+El runtime recomendado es **deno** (mínimo 2.3) y viene **habilitado por
+defecto** en yt-dlp, así que basta con instalarlo: no hay que pasar ningún flag.
+
+El **Dockerfile del proyecto ya lo instala** ✅. Solo tienes que actuar si
+despliegas con otro método (p. ej. runtime *Node/Python* en lugar de Docker):
+instala deno en el servidor.
+
+Comprobar en `/api/system`:
+
+```json
+"deno": { "available": true, "version": "deno 2.x.x (stable, ...)" }
+```
+
+---
+
 ## Opción manual (sin Docker) — si el Blueprint falla
 
 Si prefieres no usar Docker, puedes crear el servicio a mano:
@@ -231,7 +257,8 @@ Si Render te pide tarjeta y prefieres otra opción:
 | Primera visita lenta (~50 s)         | El plan gratis se duerme; es normal, luego va rápido                   |
 | La app no conecta                    | Revisa que la URL empiece con `https://` y no lleve `/` al final       |
 | "Sign in to confirm you're not a bot" | Faltan las **cookies de YouTube** → mira el Paso 6                    |
+| `Requested format is not available`   | Falta el runtime **deno** → el Docker ya lo instala (ver Paso 7)       |
 | `'utf-8' codec can't decode`          | El base64 se cortó al pegarlo → usa un **Secret File** en vez de la variable |
 | `Read-only file system` en cookies.py | Ya resuelto: el servidor copia las cookies a `/tmp` antes de usarlas   |
-| YouTube no descarga                  | El Docker ya instala `yt-dlp` + `ffmpeg`; si usas otro runtime, instálalos |
-| "No se pudo descargar" fuera de casa  | Revisa `/api/system` → `cookies.valid` debe ser `true`                  |
+| YouTube no descarga                  | El Docker ya instala `yt-dlp` + `ffmpeg` + `deno`; si usas otro runtime, instálalos |
+| "No se pudo descargar" fuera de casa  | Revisa `/api/system` → `cookies.valid` y `deno.available` deben ser `true` |
