@@ -213,6 +213,38 @@
 
   Sonora.Download = {
     /**
+     * Guarda un archivo de texto (p. ej. la letra) en el teléfono.
+     * En Android usa el mismo puente nativo que las descargas (carpeta
+     * Descargas) y en web cae a una descarga normal del navegador.
+     */
+    saveTextFile: async function (text, filename, mime) {
+      mime = mime || 'text/plain';
+      var blob = new Blob([text], { type: mime + ';charset=utf-8' });
+      try {
+        var ok = await saveBlobToDevice(blob, filename, mime, 'txt_' + Date.now());
+        if (ok) return true;
+      } catch (e) {}
+      try {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () {
+          if (a.parentElement) a.parentElement.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 4000);
+        return true;
+      } catch (e2) {
+        return false;
+      }
+    },
+
+    safeFileName: safeFileName,
+
+    /**
      * Descarga real de una canción:
      *  - Copia offline dentro de la app (IndexedDB) para reproducir sin internet
      *  - Archivo real en el teléfono vía el gestor de descargas de Android

@@ -28,6 +28,7 @@
 
   // Internal module state for cleanup
   let rootElement = null;
+  let profileUnsub = null;
   let clickHandler = null;
   let scrollDebounceTimer = null;
   let skeletonTimeout = null;
@@ -35,15 +36,61 @@
   function getGreeting() {
     const hour = new Date().getHours();
     if (hour >= 5 && hour < 12) {
-      return { text: 'Buenos días' };
+      return { text: 'Buenos días', icon: '☀️' };
     } else if (hour >= 12 && hour < 20) {
-      return { text: 'Buenas tardes' };
+      return { text: 'Buenas tardes', icon: '🌇' };
     } else {
-      return { text: 'Buenas noches' };
+      return { text: 'Buenas noches', icon: '🌙' };
     }
   }
 
+  function updateGreetingHeader() {
+    try {
+      const root = rootElement || document.querySelector('.page-home');
+      if (!root) return;
+      const greeting = getGreeting();
+      const name = getUserName();
+      const textEl = root.querySelector('.greeting-text');
+      if (textEl) textEl.textContent = greeting.text + ', ' + name + ' ' + greeting.icon;
+      const avatarEl = root.querySelector('#home-greeting-avatar') || root.querySelector('.greeting-avatar');
+      if (avatarEl) {
+        avatarEl.setAttribute('title', name);
+        avatarEl.innerHTML = renderAvatarInner();
+      }
+    } catch (e) {
+      console.warn('[Home] updateGreetingHeader failed:', e);
+    }
+  }
+
+  /**
+   * Lee un ajuste guardado por la app. El perfil se guarda con
+   * Sonora.DB.settings.set, que además lo replica en Sonora.Store y en
+   * localStorage, así que podemos leerlo de forma síncrona al pintar el inicio.
+   */
+  function readSetting(key) {
+    try {
+      if (Sonora.Store && typeof Sonora.Store.get === 'function') {
+        const v = Sonora.Store.get(key);
+        if (v !== undefined && v !== null && v !== '') return v;
+      }
+    } catch (e) {}
+    try {
+      const ls = localStorage.getItem('sonora_' + key);
+      if (ls !== null) {
+        try {
+          const parsed = JSON.parse(ls);
+          if (parsed !== undefined && parsed !== null) return parsed;
+        } catch (e2) {
+          return ls.replace(/^"|"$/g, '');
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
   function getUserName() {
+    const saved = readSetting('profile_name');
+    if (saved && String(saved).trim()) return String(saved).trim();
     try {
       if (Sonora.Store && typeof Sonora.Store.get === 'function') {
         const user = Sonora.Store.get('user');
@@ -53,6 +100,53 @@
       console.warn('[Home] Could not get user name:', e);
     }
     return 'Melómano';
+  }
+
+  function getUserAvatar() {
+    const saved = readSetting('profile_avatar');
+    if (saved && typeof saved === 'string' && saved.length > 8) return saved;
+    return null;
+  }
+
+  // Grupo amplio de artistas: en cada visita se muestran al azar.
+  const ARTIST_POOL = [
+    'Nirvana', 'Soda Stereo', 'Queen', 'Daft Punk', 'Arctic Monkeys',
+    'Pink Floyd', 'Bad Bunny', 'Rosalía', 'Radiohead', 'Gorillaz',
+    'The Beatles', 'Michael Jackson', 'Led Zeppelin', 'Dua Lipa',
+    'The Weeknd', 'Coldplay', 'Metallica', 'Shakira', 'Bruno Mars',
+    'Green Day', 'Red Hot Chili Peppers', 'David Bowie', 'Luis Miguel',
+    'Muse', 'Linkin Park', 'Tame Impala', 'Fleetwood Mac', 'Eminem',
+    'Billie Eilish', 'Deftones', 'System of a Down', 'Maná',
+    'Café Tacvba', 'Kendrick Lamar', 'Karol G', 'Feid', 'Guns N Roses',
+    'The Strokes', 'Mac DeMarco', 'Fito Páez', 'Héroes del Silencio',
+    'Juanes', 'Marc Anthony', 'Aventura', 'Romeo Santos', 'Oasis',
+    'The Cure', 'Depeche Mode', 'New Order', 'Toto', 'Sade',
+    'Los Prisioneros', 'Vilma Palma', 'Bersuit Vergarabat', 'Los Fabulosos Cadillacs'
+  ];
+
+  function pickRandomArtists(count) {
+    const pool = ARTIST_POOL.slice();
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool.slice(0, count || 8);
+  }
+
+  function renderSuggestedArtistChips() {
+    const artists = pickRandomArtists(8);
+    const chipStyle = 'background: #1e1e2a; border: 1px solid rgba(255,255,255,0.08); color: #ffffff; border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s;';
+    return artists.map(function (a) {
+      return `<button class="quick-suggest-chip" data-quick-search="${escapeHtml(a)}" style="${chipStyle}">${escapeHtml(a)}</button>`;
+    }).join('');
+  }
+
+  function renderAvatarInner() {
+    const avatar = getUserAvatar();
+    if (avatar) {
+      return `<img src="${escapeHtml(avatar)}" alt="${escapeHtml(getUserName())}" class="greeting-avatar__img" />`;
+    }
+    return escapeHtml((getUserName() || 'M').charAt(0).toUpperCase());
   }
 
   function renderSkeleton() {
@@ -107,14 +201,7 @@
         <div style="text-align: left; max-width: 440px; margin: 0 auto;">
           <div style="font-size: 12px; font-weight: 700; color: #8e8e93; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px;">Artistas sugeridos</div>
           <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-            <button class="quick-suggest-chip" data-quick-search="Nirvana" style="background: #1e1e2a; border: 1px solid rgba(255,255,255,0.08); color: #ffffff; border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s;">Nirvana</button>
-            <button class="quick-suggest-chip" data-quick-search="Soda Stereo" style="background: #1e1e2a; border: 1px solid rgba(255,255,255,0.08); color: #ffffff; border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s;">Soda Stereo</button>
-            <button class="quick-suggest-chip" data-quick-search="Queen" style="background: #1e1e2a; border: 1px solid rgba(255,255,255,0.08); color: #ffffff; border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s;">Queen</button>
-            <button class="quick-suggest-chip" data-quick-search="Daft Punk" style="background: #1e1e2a; border: 1px solid rgba(255,255,255,0.08); color: #ffffff; border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s;">Daft Punk</button>
-            <button class="quick-suggest-chip" data-quick-search="Arctic Monkeys" style="background: #1e1e2a; border: 1px solid rgba(255,255,255,0.08); color: #ffffff; border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s;">Arctic Monkeys</button>
-            <button class="quick-suggest-chip" data-quick-search="Pink Floyd" style="background: #1e1e2a; border: 1px solid rgba(255,255,255,0.08); color: #ffffff; border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s;">Pink Floyd</button>
-            <button class="quick-suggest-chip" data-quick-search="Bad Bunny" style="background: #1e1e2a; border: 1px solid rgba(255,255,255,0.08); color: #ffffff; border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s;">Bad Bunny</button>
-            <button class="quick-suggest-chip" data-quick-search="Rosalía" style="background: #1e1e2a; border: 1px solid rgba(255,255,255,0.08); color: #ffffff; border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s;">Rosalía</button>
+            ${renderSuggestedArtistChips()}
           </div>
         </div>
       </div>
@@ -144,7 +231,9 @@
   Sonora.Pages.Home = {
     render() {
       const greeting = getGreeting();
-      const userName = escapeHtml(getUserName());
+      const rawName = getUserName();
+      const userName = escapeHtml(rawName);
+      const avatarInner = renderAvatarInner();
 
       return `
         <div class="page page-home">
@@ -196,7 +285,17 @@
               font-size: 16px;
               box-shadow: 0 4px 12px rgba(255, 71, 87, 0.35);
               flex-shrink: 0;
+              overflow: hidden;
+              border: 2px solid rgba(255, 255, 255, 0.18);
             }
+            .greeting-avatar__img {
+              width: 100%;
+              height: 100%;
+              object-fit: cover;
+              display: block;
+              border-radius: 50%;
+            }
+            .greeting-copy { min-width: 0; flex: 1; padding-right: 12px; }
             .section {
               margin-top: 24px;
               position: relative;
@@ -655,12 +754,12 @@
           <!-- Greeting Banner -->
           <header class="greeting-banner">
             <div class="greeting-header">
-              <div>
+              <div class="greeting-copy">
                 <h1 class="greeting-text">${greeting.text}, ${userName} ${greeting.icon}</h1>
                 <p class="greeting-sub">Tu música personalizada de hoy</p>
               </div>
-              <div class="greeting-avatar" title="${userName}">
-                ${userName.charAt(0).toUpperCase()}
+              <div class="greeting-avatar" id="home-greeting-avatar" title="${userName}">
+                ${avatarInner}
               </div>
             </div>
           </header>
@@ -679,6 +778,23 @@
 
       const dynamicContainer = $('#home-dynamic-content', rootElement);
       if (!dynamicContainer) return;
+
+      // Si el usuario cambia su nombre o su foto en el perfil, refrescamos
+      // el saludo del inicio sin recargar toda la página.
+      try {
+        if (profileUnsub) { profileUnsub(); profileUnsub = null; }
+        var unsubs = [];
+        if (Sonora.Store && typeof Sonora.Store.subscribe === 'function') {
+          unsubs.push(Sonora.Store.subscribe('profile_name', updateGreetingHeader));
+          unsubs.push(Sonora.Store.subscribe('profile_avatar', updateGreetingHeader));
+        }
+        if (Sonora.Store && typeof Sonora.Store.on === 'function') {
+          unsubs.push(Sonora.Store.on('profile_updated', updateGreetingHeader));
+        }
+        profileUnsub = function () {
+          unsubs.forEach(function (u) { try { u(); } catch (e) {} });
+        };
+      } catch (e) {}
 
       // Bind delegated click events
       clickHandler = async (e) => {
@@ -1000,6 +1116,10 @@
 
     destroy() {
       try {
+        if (profileUnsub) {
+          profileUnsub();
+          profileUnsub = null;
+        }
         if (rootElement && clickHandler) {
           rootElement.removeEventListener('click', clickHandler);
           clickHandler = null;

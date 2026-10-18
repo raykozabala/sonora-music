@@ -64,7 +64,7 @@
   <div id="splash-screen">
     <img class="splash-note" src="./icons/icon-192.png" style="border-radius:20px; box-shadow:0 8px 30px rgba(0,0,0,0.4);" alt="Logo">
     <div class="splash-title">Sonora Music</div>
-    <div class="splash-subtitle">v7.6.2</div>
+    <div class="splash-subtitle">v7.6.3</div>
     <div class="splash-loader"></div>
   </div>
 
@@ -313,9 +313,18 @@
 
     <!-- Lyrics Panel -->
     <div id="lyrics-panel" class="panel hidden">
-      <div class="panel__header">
-        <h3>Letra</h3>
-        <div style="display:flex; align-items:center; gap:6px;">
+      <div class="lyrics__bg-blur" id="lyrics-bg-blur" aria-hidden="true"></div>
+      <div class="lyrics__bg-tint" aria-hidden="true"></div>
+      <div class="lyrics-panel__header">
+        <div class="lyrics-disc" id="lyrics-disc" aria-hidden="true">
+          <img id="lyrics-disc-img" class="lyrics-disc__img" src="" alt="" />
+          <span class="lyrics-disc__hole"></span>
+        </div>
+        <div class="lyrics-panel__titles">
+          <div class="lyrics-panel__title" id="lyrics-track-title">Letra</div>
+          <div class="lyrics-panel__artist" id="lyrics-track-artist"></div>
+        </div>
+        <div class="lyrics-panel__actions">
           <button class="btn--icon" id="lyrics-menu-btn" aria-label="Opciones de letra" title="Opciones de letra">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/>

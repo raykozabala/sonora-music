@@ -1151,6 +1151,15 @@
             if (currentNewAvatarData !== undefined) {
               await setSetting('profile_avatar', currentNewAvatarData);
             }
+            // Refrescar el saludo del inicio con el nuevo nombre/foto
+            try {
+              if (Sonora.Store && typeof Sonora.Store.emit === 'function') {
+                Sonora.Store.emit('profile_updated', {
+                  name: newName,
+                  avatar: currentNewAvatarData
+                });
+              }
+            } catch (e) {}
             showToast('Perfil actualizado correctamente');
             closeModal();
             await this.loadProfileHeader();

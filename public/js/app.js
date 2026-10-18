@@ -237,6 +237,15 @@
     if (track.artworkUrl) {
       Sonora.Themes.applyArtworkColor(track.artworkUrl);
     }
+
+    // Si el panel de letras está abierto, refresca cabecera y disco girando
+    var lyrPanel = $('#lyrics-panel');
+    if (lyrPanel && !lyrPanel.classList.contains('hidden')) {
+      updateLyricsHeader(track);
+      if (track.artworkUrl) {
+        try { Sonora.Themes.applyArtworkColor(track.artworkUrl); } catch (e) {}
+      }
+    }
   }
 
   function updateFullProgress() {
@@ -439,6 +448,43 @@
     '</div>';
   }
 
+  function escHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function lyricsArtUrl(track) {
+    if (!track) return '';
+    return track.artworkUrl || generateArtwork(track.id || 0, track.title);
+  }
+
+  /* ── Cabecera del panel de letras: disco con la portada + título ── */
+  function updateLyricsHeader(track) {
+    var discImg = $('#lyrics-disc-img');
+    var disc = $('#lyrics-disc');
+    var titleEl = $('#lyrics-track-title');
+    var artistEl = $('#lyrics-track-artist');
+    var bgBlur = $('#lyrics-bg-blur');
+
+    if (!track) {
+      if (titleEl) titleEl.textContent = 'Letra';
+      if (artistEl) artistEl.textContent = '';
+      return;
+    }
+
+    var art = lyricsArtUrl(track);
+    if (discImg) discImg.src = art;
+    if (bgBlur) bgBlur.style.backgroundImage = 'url(' + art + ')';
+    if (titleEl) titleEl.textContent = track.title || 'Letra';
+    if (artistEl) artistEl.textContent = track.artist || '';
+    if (disc) disc.classList.toggle('spinning', !!(Sonora.Player && Sonora.Player.isPlaying && Sonora.Player.isPlaying()));
+  }
+
   /* ── Lyrics Panel ── */
   async function showLyricsPanel() {
     var panel = $('#lyrics-panel');
@@ -449,6 +495,12 @@
     var content = $('#lyrics-content');
     if (!content) return;
 
+    // Portada difuminada + disco girando con el título pequeño en la cabecera
+    updateLyricsHeader(track);
+    if (track && track.artworkUrl) {
+      try { Sonora.Themes.applyArtworkColor(track.artworkUrl); } catch (e) {}
+    }
+
     if (!track) {
       content.innerHTML = renderFloatingNotesAnimation();
       return;
@@ -458,6 +510,24 @@
 
     var syncedLyricsText = track.syncedLyrics || null;
     var plainLyricsText = track.lyrics || null;
+
+    // 0) Letras guardadas en la app (modo "usar letras guardadas").
+    //    Se comprueba antes de salir a internet para respetar las ediciones
+    //    del usuario y funcionar sin conexión.
+    if (!syncedLyricsText && !plainLyricsText && track.id !== undefined &&
+        Sonora.DB && Sonora.DB.tracks && typeof Sonora.DB.tracks.getById === 'function') {
+      try {
+        var savedTrack = await Sonora.DB.tracks.getById(track.id);
+        if (savedTrack) {
+          if (savedTrack.syncedLyrics) syncedLyricsText = savedTrack.syncedLyrics;
+          if (savedTrack.lyrics) plainLyricsText = savedTrack.lyrics;
+          if (syncedLyricsText) track.syncedLyrics = syncedLyricsText;
+          if (plainLyricsText) track.lyrics = plainLyricsText;
+        }
+      } catch (e) {
+        console.warn('[Lyrics] no se pudo leer la letra guardada:', e);
+      }
+    }
 
     if (!syncedLyricsText) {
       var cleanTitle = (track.title || '').replace(/\(.*?\)|\{.*?\}|\[.*?\]/g, '').trim();
@@ -499,10 +569,16 @@
         if (lrcData.plainLyrics && !plainLyricsText) plainLyricsText = lrcData.plainLyrics;
       }
 
+      // Cachear en el objeto en memoria para no volver a pedirla al abrir
+      if (syncedLyricsText) track.syncedLyrics = syncedLyricsText;
+      if (plainLyricsText) track.lyrics = plainLyricsText;
+
       // Guardar la letra en la base local para tenerla sin conexión
       if ((syncedLyricsText || plainLyricsText) && Sonora.DB && Sonora.DB.tracks && track.id !== undefined) {
         Sonora.DB.tracks.getById(track.id).then(function (dbTrack) {
-          if (dbTrack && !dbTrack.syncedLyrics) {
+          // No pisar nunca una letra editada por el usuario.
+          if (dbTrack && dbTrack.lyricsEdited) return;
+          if (dbTrack && !dbTrack.syncedLyrics && !dbTrack.lyrics) {
             dbTrack.syncedLyrics = syncedLyricsText || '';
             dbTrack.lyrics = dbTrack.lyrics || plainLyricsText || '';
             if (typeof Sonora.DB.tracks.update === 'function') Sonora.DB.tracks.update(dbTrack);
@@ -537,17 +613,34 @@
         }
 
         // ── Sincronización ──
-        // Si el usuario mueve la letra a mano, dejamos de arrastrarla y le
-        // ofrecemos el botón "Sincronizar" para volver a la línea que suena.
+        // La letra se arrastra sola siguiendo la música, pero el usuario puede
+        // desplazarla libremente para leer TODA la canción. Si lo hace, aparece
+        // el botón "Sincronizar" para volver a la línea que suena.
         var syncBtn = $('#lyrics-sync');
         var autoScroll = true;
         var programmatic = false;
         var scrollTimer = null;
+        var expectedTop = null;
 
-        function markProgrammatic() {
+        function scrollLineToCenter(el, smooth) {
+          if (!el || !content.clientHeight) return;
+          var cRect = content.getBoundingClientRect();
+          var lRect = el.getBoundingClientRect();
+          // Coloca la línea activa en el centro vertical del panel.
+          var delta = (lRect.top - cRect.top) + (lRect.height / 2) - (content.clientHeight / 2);
+          var target = Math.max(0, content.scrollTop + delta);
+          expectedTop = target;
           programmatic = true;
           clearTimeout(scrollTimer);
-          scrollTimer = setTimeout(function () { programmatic = false; }, 900);
+          scrollTimer = setTimeout(function () {
+            programmatic = false;
+            expectedTop = null;
+          }, 1400);
+          try {
+            content.scrollTo({ top: target, behavior: smooth ? 'smooth' : 'auto' });
+          } catch (e) {
+            content.scrollTop = target;
+          }
         }
 
         function setAutoScroll(on) {
@@ -556,7 +649,10 @@
         }
 
         content.onscroll = function () {
-          if (programmatic || !autoScroll) return;
+          if (!autoScroll) return;
+          if (programmatic) return;
+          // Ignora el desplazamiento que hemos provocado nosotros mismos.
+          if (expectedTop !== null && Math.abs(content.scrollTop - expectedTop) < 6) return;
           setAutoScroll(false);
         };
 
@@ -564,10 +660,7 @@
           syncBtn.onclick = function () {
             setAutoScroll(true);
             var el = content.querySelector('.lyrics-line.active') || content.querySelector('.lyrics-line');
-            if (el) {
-              markProgrammatic();
-              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
+            scrollLineToCenter(el, true);
           };
         }
         setAutoScroll(true);
@@ -591,16 +684,32 @@
             allLines.forEach(function (el, idx) {
               if (idx === activeIdx) {
                 el.classList.add('active');
-                if (autoScroll) {
-                  markProgrammatic();
-                  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
+                if (autoScroll) scrollLineToCenter(el, true);
               } else {
                 el.classList.remove('active');
               }
             });
           }
         });
+
+        // Al abrir, centra la línea que está sonando.
+        try {
+          var initialProg = Sonora.Player.getProgress && Sonora.Player.getProgress();
+          if (initialProg && typeof initialProg.current === 'number') {
+            var startIdx = -1;
+            for (var k = 0; k < _syncedLines.length; k++) {
+              if (_syncedLines[k].time <= initialProg.current + 0.2) startIdx = k; else break;
+            }
+            if (startIdx >= 0) {
+              lastActiveIdx = startIdx;
+              var startEl = content.querySelectorAll('.lyrics-line')[startIdx];
+              if (startEl) {
+                startEl.classList.add('active');
+                scrollLineToCenter(startEl, false);
+              }
+            }
+          }
+        } catch (e) {}
         return;
       }
     }
@@ -612,6 +721,207 @@
 
     content.innerHTML = renderFloatingNotesAnimation();
   }
+
+  /* ── Menú de opciones de la letra (botón 3 puntos) ── */
+  function buildLyricsLrc() {
+    var track = Sonora.Player.getCurrentTrack();
+    if (!track) return '';
+    if (track.syncedLyrics && /\d{2}:\d{2}/.test(track.syncedLyrics)) return track.syncedLyrics;
+    if (_syncedLines && _syncedLines.length) {
+      return _syncedLines.map(function (l) {
+        var m = Math.floor(l.time / 60);
+        var s = Math.floor(l.time % 60);
+        var mm = (m < 10 ? '0' : '') + m;
+        var ss = (s < 10 ? '0' : '') + s;
+        return '[' + mm + ':' + ss + '.00]' + l.text;
+      }).join('\n');
+    }
+    return track.lyrics || '';
+  }
+
+  function buildLyricsPlain() {
+    var track = Sonora.Player.getCurrentTrack();
+    if (!track) return '';
+    if (track.lyrics) return track.lyrics;
+    if (track.syncedLyrics) {
+      return track.syncedLyrics
+        .split('\n')
+        .map(function (l) { return l.replace(/^\[\d{2}:\d{2}(?:\.\d{1,3})?\]\s?/, ''); })
+        .filter(function (l) { return l.trim().length > 0; })
+        .join('\n');
+    }
+    return '';
+  }
+
+  async function downloadLyricsFile(kind) {
+    var track = Sonora.Player.getCurrentTrack();
+    if (!track) return;
+    var content = kind === 'lrc' ? buildLyricsLrc() : buildLyricsPlain();
+    if (!content) {
+      Sonora.Store.emit('toast', { message: 'Todavía no hay letra para descargar', type: 'warning' });
+      return;
+    }
+    var base = Sonora.Download && Sonora.Download.safeFileName
+      ? Sonora.Download.safeFileName(track.artist, track.title, kind)
+      : ((track.artist || 'Sonora') + ' - ' + (track.title || 'Cancion') + '.' + kind);
+    var mime = kind === 'lrc' ? 'text/plain' : 'text/plain';
+    var ok = false;
+    if (Sonora.Download && typeof Sonora.Download.saveTextFile === 'function') {
+      ok = await Sonora.Download.saveTextFile(content, base, mime);
+    }
+    Sonora.Store.emit('toast', {
+      message: ok ? ('Letra guardada: ' + base) : 'No se pudo guardar la letra',
+      type: ok ? 'success' : 'error'
+    });
+  }
+
+  function saveLyricsForCurrentTrack(text) {
+    var track = Sonora.Player.getCurrentTrack();
+    if (!track) return Promise.resolve(false);
+
+    var isSynced = /\[\d{2}:\d{2}/.test(text);
+    if (isSynced) {
+      track.syncedLyrics = text;
+    } else {
+      track.lyrics = text;
+      track.syncedLyrics = null;
+    }
+    track.lyricsEdited = 1;
+
+    _syncedLines = isSynced ? parseLrc(text) : [];
+
+    if (track.id === undefined || !Sonora.DB || !Sonora.DB.tracks) return Promise.resolve(true);
+
+    return Sonora.DB.tracks.getById(track.id).then(function (dbTrack) {
+      var record = dbTrack || {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album || '',
+        duration: track.duration || 0,
+        artworkUrl: track.artworkUrl || '',
+        filePath: track.filePath || null,
+        streamUrl: track.streamUrl || null,
+        sourceUrl: track.sourceUrl || null,
+        platform: track.platform || 'local'
+      };
+      if (isSynced) {
+        record.syncedLyrics = text;
+      } else {
+        record.lyrics = text;
+        record.syncedLyrics = '';
+      }
+      record.lyricsEdited = 1;
+      return Sonora.DB.tracks.update(record).then(function () { return true; });
+    }).catch(function () { return false; });
+  }
+
+  function openLyricsEditor() {
+    var track = Sonora.Player.getCurrentTrack();
+    if (!track) return;
+    var current = buildLyricsLrc() || '';
+
+    var modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML =
+      '<div class="modal__backdrop"></div>' +
+      '<div class="modal__content" style="max-width: 420px; width: calc(100% - 32px); border-radius: 20px; padding: 18px; background: #1a1a24; border: 1px solid rgba(255,255,255,0.12);">' +
+        '<h3 style="font-size: 16px; margin: 0 0 4px; text-align: center; color: #fff;">Editar letra</h3>' +
+        '<p style="font-size: 11px; color: #8e8e93; text-align: center; margin: 0 0 12px;">' +
+          'Usa <b>[mm:ss.xx]</b> al inicio de cada línea para sincronizarla. Si escribes texto normal, se guardará como letra sin sincronizar.' +
+        '</p>' +
+        '<textarea id="lyrics-editor-text" spellcheck="false" style="width: 100%; height: 42vh; min-height: 220px; resize: vertical; box-sizing: border-box; background: #101018; color: #fff; border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; padding: 12px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; line-height: 1.6;">' + escHtml(current) + '</textarea>' +
+        '<div style="display: flex; gap: 8px; margin-top: 14px;">' +
+          '<button id="lyrics-editor-cancel" class="btn" style="flex: 1; background: #252536; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 11px; border-radius: 12px; cursor: pointer;">Cancelar</button>' +
+          '<button id="lyrics-editor-save" class="btn" style="flex: 1.4; background: var(--artwork-color, var(--color-primary)); border: none; color: #fff; font-weight: 700; padding: 11px; border-radius: 12px; cursor: pointer;">Guardar letra</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(modal);
+
+    var close = function () { if (modal.parentElement) modal.parentElement.removeChild(modal); };
+    modal.querySelector('.modal__backdrop').onclick = close;
+    var cancelBtn = modal.querySelector('#lyrics-editor-cancel');
+    if (cancelBtn) cancelBtn.onclick = close;
+    var saveBtn = modal.querySelector('#lyrics-editor-save');
+    if (saveBtn) {
+      saveBtn.onclick = async function () {
+        var ta = modal.querySelector('#lyrics-editor-text');
+        var text = ta ? ta.value.trim() : '';
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Guardando...';
+        var ok = await saveLyricsForCurrentTrack(text);
+        close();
+        Sonora.Store.emit('toast', {
+          message: ok ? 'Letra guardada' : 'No se pudo guardar la letra',
+          type: ok ? 'success' : 'error'
+        });
+        showLyricsPanel();
+      };
+    }
+  }
+
+  function resetLyricsForCurrentTrack() {
+    var track = Sonora.Player.getCurrentTrack();
+    if (!track) return Promise.resolve(false);
+    track.syncedLyrics = null;
+    track.lyrics = null;
+    track.lyricsEdited = 0;
+    _syncedLines = [];
+    if (track.id === undefined || !Sonora.DB || !Sonora.DB.tracks) return Promise.resolve(true);
+    return Sonora.DB.tracks.getById(track.id).then(function (dbTrack) {
+      if (!dbTrack) return true;
+      dbTrack.syncedLyrics = '';
+      dbTrack.lyrics = '';
+      dbTrack.lyricsEdited = 0;
+      return Sonora.DB.tracks.update(dbTrack).then(function () { return true; });
+    }).catch(function () { return false; });
+  }
+
+  function openLyricsMenu() {
+    if (!Sonora.Player.getCurrentTrack()) {
+      Sonora.Store.emit('toast', { message: 'Reproduce una canción para usar las opciones de letra', type: 'info' });
+      return;
+    }
+
+    var modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML =
+      '<div class="modal__backdrop"></div>' +
+      '<div class="modal__content" style="max-width: 320px; border-radius: 20px; padding: 18px; background: #1a1a24; border: 1px solid rgba(255,255,255,0.12);">' +
+        '<h3 style="font-size: 16px; margin: 0 0 14px; text-align: center; color: #fff;">Opciones de letra</h3>' +
+        '<div style="display: flex; flex-direction: column; gap: 9px;">' +
+          '<button data-lyr-action="edit" class="btn" style="' + lyricsMenuBtnStyle + '">✏️ Editar letra</button>' +
+          '<button data-lyr-action="dl-lrc" class="btn" style="' + lyricsMenuBtnStyle + '">🎵 Descargar letra (.lrc)</button>' +
+          '<button data-lyr-action="dl-txt" class="btn" style="' + lyricsMenuBtnStyle + '">📄 Descargar letra (.txt)</button>' +
+          '<button data-lyr-action="reset" class="btn" style="' + lyricsMenuBtnStyle + '">🔄 Restablecer y buscar de nuevo</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(modal);
+
+    var close = function () { if (modal.parentElement) modal.parentElement.removeChild(modal); };
+    modal.querySelector('.modal__backdrop').onclick = close;
+
+    modal.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-lyr-action]');
+      if (!btn) return;
+      var action = btn.getAttribute('data-lyr-action');
+      if (action === 'edit') {
+        close();
+        openLyricsEditor();
+      } else if (action === 'dl-lrc' || action === 'dl-txt') {
+        close();
+        downloadLyricsFile(action === 'dl-lrc' ? 'lrc' : 'txt');
+      } else if (action === 'reset') {
+        close();
+        resetLyricsForCurrentTrack().then(function () {
+          Sonora.Store.emit('toast', { message: 'Buscando la letra original…', type: 'info' });
+          showLyricsPanel();
+        });
+      }
+    });
+  }
+
+  var lyricsMenuBtnStyle = 'background: #252536; border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;';
 
   /* ── Sleep Timer ── */
   function showSleepTimer() {
@@ -842,11 +1152,19 @@
     var queueClose = $('#queue-close');
     if (queueClose) queueClose.addEventListener('click', function () { $('#queue-panel').classList.add('hidden'); });
 
+    var lyricsMenuBtn = $('#lyrics-menu-btn');
+    if (lyricsMenuBtn) lyricsMenuBtn.addEventListener('click', openLyricsMenu);
+
     var lyricsClose = $('#lyrics-close');
     if (lyricsClose) lyricsClose.addEventListener('click', function () {
       $('#lyrics-panel').classList.add('hidden');
       var syncBtn = $('#lyrics-sync');
       if (syncBtn) syncBtn.classList.add('hidden');
+      var disc = $('#lyrics-disc');
+      if (disc) disc.classList.remove('spinning');
+      var lyricsContent = $('#lyrics-content');
+      if (lyricsContent) lyricsContent.onscroll = null;
+      if (_lyricsUnsub) { try { _lyricsUnsub(); } catch (e) {} _lyricsUnsub = null; }
     });
 
     // Sleep timer options

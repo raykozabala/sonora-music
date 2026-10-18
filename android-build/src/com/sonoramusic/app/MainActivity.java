@@ -286,15 +286,25 @@ public class MainActivity extends Activity {
                 String mime = (mimetype != null && !mimetype.isEmpty()) ? mimetype : "audio/mpeg";
 
                 if (Build.VERSION.SDK_INT >= 29) {
+                    String lowerMime = mime.toLowerCase();
+                    boolean isMedia = lowerMime.startsWith("audio/") || lowerMime.startsWith("video/");
+                    // Los archivos de audio/vídeo van a la colección de música y
+                    // el resto (letras .lrc/.txt) a Descargas, para que no
+                    // aparezcan como canciones en el reproductor del sistema.
+                    Uri collection = isMedia
+                            ? MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                            : MediaStore.Downloads.EXTERNAL_CONTENT_URI;
+
                     ContentValues values = new ContentValues();
-                    values.put(MediaStore.Audio.Media.DISPLAY_NAME, clean);
-                    values.put(MediaStore.Audio.Media.MIME_TYPE, mime);
-                    values.put(MediaStore.Audio.Media.RELATIVE_PATH,
+                    values.put(MediaStore.MediaColumns.DISPLAY_NAME, clean);
+                    values.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+                    values.put(MediaStore.MediaColumns.RELATIVE_PATH,
                             Environment.DIRECTORY_DOWNLOADS + "/Sonora Music");
-                    values.put(MediaStore.Audio.Media.IS_MUSIC, 1);
-                    values.put(MediaStore.Audio.Media.IS_PENDING, 1);
-                    Uri uri = activity.getContentResolver()
-                            .insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values);
+                    values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+                    if (isMedia) {
+                        values.put(MediaStore.Audio.Media.IS_MUSIC, 1);
+                    }
+                    Uri uri = activity.getContentResolver().insert(collection, values);
                     if (uri == null) { Log.e(TAG, "startSave: MediaStore devolvió null"); return ""; }
                     OutputStream os = activity.getContentResolver().openOutputStream(uri);
                     if (os == null) { Log.e(TAG, "startSave: sin stream"); return ""; }

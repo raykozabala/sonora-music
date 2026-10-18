@@ -3,7 +3,7 @@
  * Offline caching for PWA functionality
  */
 
-const CACHE_NAME = 'sonora-v4';
+const CACHE_NAME = 'sonora-7.6.3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -74,6 +74,12 @@ self.addEventListener('fetch', function (event) {
   // Skip non-GET requests
   if (event.request.method !== 'GET') return;
 
+  // Stream requests — network only (audio files).
+  // Debe ir ANTES del bloque /api/ para no guardar el audio en caché.
+  if (url.pathname.startsWith('/api/stream/')) {
+    return; // Let browser handle normally
+  }
+
   // API requests — network first, fallback to cache
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
@@ -96,11 +102,6 @@ self.addEventListener('fetch', function (event) {
       })
     );
     return;
-  }
-
-  // Stream requests — network only (audio files)
-  if (url.pathname.startsWith('/api/stream/')) {
-    return; // Let browser handle normally
   }
 
   // Static assets — cache first, network fallback

@@ -9,6 +9,7 @@
 
   var _routes = {};
   var _currentPath = '';
+  var _currentRaw = '';
   var _params = {};
   var _beforeHooks = [];
 
@@ -16,6 +17,30 @@
     var h = (hash || window.location.hash).replace(/^#\/?/, '/');
     if (h === '' || h === '/') h = '/';
     return h;
+  }
+
+  /**
+   * Separa la ruta de la cadena de consulta (p. ej. "/search?q=Nirvana").
+   * Sin esto, la ruta no coincidía con ninguna y el router volvía al inicio.
+   */
+  function splitPath(raw) {
+    var idx = raw.indexOf('?');
+    if (idx === -1) return { path: raw, query: {} };
+    var path = raw.substring(0, idx);
+    var queryString = raw.substring(idx + 1);
+    var query = {};
+    queryString.split('&').forEach(function (pair) {
+      if (!pair) return;
+      var eq = pair.indexOf('=');
+      var key = eq === -1 ? pair : pair.substring(0, eq);
+      var value = eq === -1 ? '' : pair.substring(eq + 1);
+      try {
+        key = decodeURIComponent(key.replace(/\+/g, ' '));
+        value = decodeURIComponent(value.replace(/\+/g, ' '));
+      } catch (e) {}
+      if (key) query[key] = value;
+    });
+    return { path: path || '/', query: query };
   }
 
   function matchRoute(path) {
@@ -47,8 +72,10 @@
   }
 
   function handleRoute() {
-    var path = parsePath();
-    if (path === _currentPath) return;
+    var raw = parsePath();
+    var split = splitPath(raw);
+    var path = split.path;
+    if (raw === _currentRaw) return;
 
     var match = matchRoute(path);
     if (!match) {
@@ -64,8 +91,9 @@
       } catch (e) { console.error('[Router] Before hook error:', e); }
     }
 
+    _currentRaw = raw;
     _currentPath = path;
-    _params = match ? match.params : {};
+    _params = Object.assign({}, match ? match.params : {}, split.query);
 
     if (match && match.handler) {
       try {
@@ -153,6 +181,7 @@
      */
     refresh: function () {
       _currentPath = ''; // reset so it re-runs
+      _currentRaw = '';
       handleRoute();
     },
 
