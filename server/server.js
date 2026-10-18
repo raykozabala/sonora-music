@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.8.0
+ * Sonora Music Server v7.9.0
  * Dual-mode backend server (Local PC & Render.com compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -634,7 +634,7 @@ app.get('/api/health', (req, res) => {
       status: 'ok',
       server: isRender ? 'render' : 'local',
       uptime: Math.floor(process.uptime()),
-      version: '7.8.0'
+      version: '7.9.0'
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
@@ -1120,7 +1120,7 @@ app.get('/api/system', (req, res) => {
     mode: isRender ? 'render' : 'local',
     node: process.version,
     platform: process.platform,
-    version: '7.8.0',
+    version: '7.9.0',
     ytdlp: {
       path: YTDLP_BIN,
       available: !!ytdlpVersion,
@@ -1217,7 +1217,7 @@ const lyricsCache = new Map();
 async function fetchLrclib(url) {
   const resp = await fetch(url, {
     headers: {
-      'User-Agent': 'SonoraMusic/7.8.0 (+https://github.com/raykozabala/sonora-music)'
+      'User-Agent': 'SonoraMusic/7.9.0 (+https://github.com/raykozabala/sonora-music)'
     }
   });
   if (resp.status === 404) return null;
@@ -1290,24 +1290,65 @@ app.get('/api/search/external', async (req, res) => {
 
     const results = [];
 
-    // 1. YouTube & YouTube Music search using yt-search
+    // 1. YouTube & YouTube Music — buscamos varias variantes y las mezclamos
+    //    para que el resultado sea AMPLIO: lo oficial, las versiones largas
+    //    (1–3 h), los covers y las versiones en español. Antes se hacía una
+    //    sola búsqueda y sólo salían los primeros resultados oficiales.
     try {
       const yts = require('yt-search');
-      const r = await yts(q);
-      if (r && r.videos && r.videos.length > 0) {
-        for (const v of r.videos.slice(0, 18)) {
-          results.push({
-            id: 'yt_' + v.videoId,
-            videoId: v.videoId,
-            title: v.title,
-            artist: v.author ? v.author.name : 'YouTube Music',
-            duration: v.seconds || 210,
-            durationText: v.timestamp || '3:30',
-            thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-            platform: 'youtube',
-            url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`
-          });
+
+      const variants = [];
+      const seenVariant = new Set();
+      const pushVariant = (v) => {
+        const t = String(v || '').replace(/\s+/g, ' ').trim();
+        if (t && t.length > 1 && !seenVariant.has(t.toLowerCase())) {
+          seenVariant.add(t.toLowerCase());
+          variants.push(t);
         }
+      };
+
+      pushVariant(q);
+      if (/\b(full|completo|completa|hours?|hora|cover|covers|espa|letra|lyric|mix)\b/i.test(q)) {
+        // Ya pide algo concreto: basta con quitar matices para ampliar.
+        pushVariant(q.replace(/\b(full|completo|completa|hours?|hora|cover|covers)\b/gi, ''));
+      } else {
+        pushVariant(q + ' cover');
+        pushVariant(q + ' full');
+        pushVariant(q + ' espa\u00f1ol');
+      }
+      pushVariant(q + ' lyrics');
+
+      const batches = await Promise.allSettled(variants.slice(0, 4).map(v => yts(v)));
+      const lists = batches.map(r => (r.status === 'fulfilled' && r.value && r.value.videos) ? r.value.videos : []);
+
+      // Mezcla "por rondas": la 1ª de cada búsqueda, luego la 2ª, etc. Así
+      // conviven oficiales, covers y versiones largas en vez de copar la lista
+      // los 18 primeros de una única consulta.
+      const merged = [];
+      const seen = new Set();
+      const maxLen = lists.reduce((m, l) => Math.max(m, l.length), 0);
+      for (let round = 0; round < maxLen && merged.length < 44; round++) {
+        for (const list of lists) {
+          const v = list[round];
+          if (!v || !v.videoId || seen.has(v.videoId)) continue;
+          seen.add(v.videoId);
+          merged.push(v);
+          if (merged.length >= 44) break;
+        }
+      }
+
+      for (const v of merged) {
+        results.push({
+          id: 'yt_' + v.videoId,
+          videoId: v.videoId,
+          title: v.title,
+          artist: v.author ? v.author.name : 'YouTube Music',
+          duration: v.seconds || 210,
+          durationText: v.timestamp || '3:30',
+          thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+          platform: 'youtube',
+          url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`
+        });
       }
     } catch(err) {
       console.warn('[Search] yt-search fallback:', err.message);
@@ -1581,7 +1622,7 @@ async function resolveViaInvidious(videoId) {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 12000);
       const r = await fetch(base + '/api/v1/videos/' + videoId, {
-        headers: { 'User-Agent': 'SonoraMusic/7.8.0' },
+        headers: { 'User-Agent': 'SonoraMusic/7.9.0' },
         signal: ctrl.signal
       });
       clearTimeout(t);
@@ -2883,7 +2924,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('----------------------------------------------------');
-  console.log('🎵 Sonora Music Server v7.8.0');
+  console.log('🎵 Sonora Music Server v7.9.0');
   console.log(`📡 Mode: ${isRender ? 'Render' : 'Local'}`);
   console.log(`🌐 Port: ${PORT}`);
   console.log(`📁 Music directory: ${musicDir}`);

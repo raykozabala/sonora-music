@@ -1422,8 +1422,13 @@
               <h3>Añadir Canciones</h3>
               <button class="btn-close-modal" id="btn-close-add-modal">&times;</button>
             </div>
-            <div style="padding:12px 20px 0 20px;">
-              <input type="text" id="search-tracks-input" class="form-input" placeholder="🔍 Buscar por título o artista..." />
+            <div style="padding:12px 20px 0 20px; display:flex; gap:8px; align-items:center;">
+              <input type="text" id="search-tracks-input" class="form-input" placeholder="🔍 Buscar por título o artista..." style="flex:1; min-width:0;" />
+              <button type="button" class="btn-action btn-action--secondary" id="btn-toggle-device-lock"
+                      title="Mostrar u ocultar las canciones del teléfono"
+                      style="flex-shrink:0; font-size:12px; padding:9px 12px; white-space:nowrap;">
+                🔒 Solo Sonora
+              </button>
             </div>
             <div class="modal-body" id="add-tracks-list" style="padding-top:10px;">
               <div class="empty-state">
@@ -2460,25 +2465,38 @@
       const renderAddTracksList = (filterText) => {
         if (!addTracksList) return;
         const q = (filterText || '').toLowerCase().trim();
-        const filtered = allTracks.filter(t => {
+        const match = (t) => {
           if (!q) return true;
           return (t.title && t.title.toLowerCase().includes(q)) ||
                  (t.artist && t.artist.toLowerCase().includes(q)) ||
                  (t.album && t.album.toLowerCase().includes(q));
-        });
+        };
+
+        // El candado (🔒) oculta las canciones del teléfono en este selector,
+        // así se pueden elegir con libertad las canciones de Sonora.
+        const locked = !!(Sonora.DeviceLock && Sonora.DeviceLock.isLocked());
+        const local = allTracks.filter(t => t && !t.isDeviceTrack && match(t));
+        const device = locked ? [] : allTracks.filter(t => t && t.isDeviceTrack && match(t));
 
         let html = '';
 
-        if (filtered.length > 0) {
-          html += `<div class="add-tracks-section-label">En Sonora (${filtered.length})</div>`;
-          html += filtered.slice(0, 80).map(t => trackRowHtml(t, false)).join('');
+        if (local.length > 0) {
+          html += `<div class="add-tracks-section-label">En Sonora (${local.length})</div>`;
+          html += local.slice(0, 120).map(t => trackRowHtml(t, false)).join('');
         } else if (!q) {
           html += `
             <div class="empty-state">
               <div class="empty-state__icon">🎵</div>
-              <h4 class="empty-state__title">Tu biblioteca está vacía</h4>
+              <h4 class="empty-state__title">Tu biblioteca de Sonora está vacía</h4>
               <p style="margin:0;font-size:13px;color:var(--color-text-secondary);">Escribe arriba para buscar en YouTube y SoundCloud y añadir cualquier canción.</p>
             </div>`;
+        }
+
+        if (device.length > 0) {
+          html += `<div class="add-tracks-section-label">📱 En tu teléfono (${device.length})</div>`;
+          html += device.slice(0, 120).map(t => trackRowHtml(t, false)).join('');
+        } else if (locked && !q) {
+          html += `<div style="padding:12px 4px 4px;font-size:12px;color:var(--color-text-secondary);text-align:center;">🔒 Las canciones de tu teléfono están ocultas. Pulsa el candado para incluirlas.</div>`;
         }
 
         if (_onlineResults.length > 0) {
@@ -2499,6 +2517,25 @@
         addTracksList.innerHTML = html;
         bindToggleButtons();
       };
+
+      // Candado de las canciones del teléfono dentro de este panel
+      const toggleDeviceLockBtn = $('#btn-toggle-device-lock');
+      const refreshDeviceLockButton = () => {
+        if (!toggleDeviceLockBtn) return;
+        const locked = !!(Sonora.DeviceLock && Sonora.DeviceLock.isLocked());
+        toggleDeviceLockBtn.textContent = locked ? '🔒 Solo Sonora' : '📱 Incluir teléfono';
+        toggleDeviceLockBtn.className = 'btn-action ' + (locked ? 'btn-action--secondary' : 'btn-action--primary');
+        toggleDeviceLockBtn.title = locked
+          ? 'Las canciones del teléfono están ocultas en esta lista'
+          : 'Las canciones del teléfono se muestran (pulsa para ocultarlas)';
+      };
+      if (toggleDeviceLockBtn) {
+        addTrackedListener(toggleDeviceLockBtn, 'click', () => {
+          if (Sonora.DeviceLock) Sonora.DeviceLock.set(!Sonora.DeviceLock.isLocked());
+          refreshDeviceLockButton();
+          renderAddTracksList(searchInput ? searchInput.value : '');
+        });
+      }
 
       const bindToggleButtons = () => {
         $$('.btn-toggle-add-track', addTracksList).forEach(btn => {
@@ -2572,7 +2609,11 @@
         if (modalAdd) {
           if (searchInput) searchInput.value = '';
           _onlineResults = [];
-          renderAddTracksList('');
+          // Aseguramos que el candado esté cargado antes de pintar la lista.
+          const render = () => { refreshDeviceLockButton(); renderAddTracksList(''); };
+          const lockReady = (Sonora.DeviceLock && Sonora.DeviceLock.refresh)
+            ? Sonora.DeviceLock.refresh() : Promise.resolve();
+          Promise.resolve(lockReady).then(render).catch(render);
           modalAdd.classList.add('active');
           setTimeout(() => searchInput && searchInput.focus(), 150);
         }

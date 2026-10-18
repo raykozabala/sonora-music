@@ -1441,6 +1441,11 @@
           }).catch(function () { Sonora.i18n.setLang('es'); }));
         }
 
+        // Candado de las canciones del teléfono (biblioteca y playlists)
+        if (Sonora.DeviceLock && typeof Sonora.DeviceLock.refresh === 'function') {
+          inits.push(Sonora.DeviceLock.refresh());
+        }
+
         return Promise.all(inits);
       })
       .then(function () {

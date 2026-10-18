@@ -302,6 +302,15 @@
   }
 
   /**
+   * Clave de caché de carátulas: por álbum cuando se conoce y, si no, por
+   * pista (hay archivos sueltos sin álbum que sí traen su propia foto).
+   */
+  function artworkCacheKey(t) {
+    const albumId = String((t && t.albumId) || '0');
+    return (albumId && albumId !== '0') ? ('a:' + albumId) : ('t:' + String(t && t.id));
+  }
+
+  /**
    * Guarda en la base de datos las pistas del teléfono.
    * Así pueden añadirse a playlists y reproducirse sin servidor (su filePath
    * es un content:// que el reproductor usa directamente).
@@ -331,7 +340,7 @@
           albumId: t.albumId || 1,
           artistId: 1,
           duration: t.duration || 180,
-          artworkUrl: t.artworkUrl || deviceArtworkCache[String(t.albumId || '')] || '',
+          artworkUrl: t.artworkUrl || deviceArtworkCache[artworkCacheKey(t)] || '',
           filePath: t.filePath,
           rawPath: t.rawPath || '',
           sourceUrl: '',
@@ -381,7 +390,7 @@
         await mergeStoredArtwork(deviceTracks);
         deviceTracks.forEach(function (t) {
           if (t && !t.artworkUrl) {
-            const c = deviceArtworkCache[String(t.albumId || '')];
+            const c = deviceArtworkCache[artworkCacheKey(t)];
             if (c) t.artworkUrl = c;
           }
         });
@@ -407,7 +416,9 @@
   let _artworkFilling = false;
 
   function deviceArtworkBridgeAvailable() {
-    return !!(window.SonoraNative && typeof window.SonoraNative.getAlbumArtwork === 'function');
+    return !!(window.SonoraNative && (
+      typeof window.SonoraNative.getTrackArtwork === 'function' ||
+      typeof window.SonoraNative.getAlbumArtwork === 'function'));
   }
 
   /** Recupera las portadas ya guardadas (para que no salgan sin foto). */
@@ -421,18 +432,16 @@
         if (!t) return;
         if (t.id !== undefined && t.id !== null) byId[String(t.id)] = t;
         if (t.isDeviceTrack && t.artworkUrl) {
-          const key = String(t.albumId || '');
-          if (key) {
-            byAlbum[key] = t.artworkUrl;
-            deviceArtworkCache[key] = t.artworkUrl;
-          }
+          const key = artworkCacheKey(t);
+          byAlbum[key] = t.artworkUrl;
+          deviceArtworkCache[key] = t.artworkUrl;
         }
       });
       (list || []).forEach(function (t) {
         if (!t || t.artworkUrl) return;
         const stored = byId[String(t.id)];
         if (stored && stored.artworkUrl) { t.artworkUrl = stored.artworkUrl; return; }
-        const byAl = byAlbum[String(t.albumId || '')];
+        const byAl = byAlbum[artworkCacheKey(t)];
         if (byAl) t.artworkUrl = byAl;
       });
     } catch (e) {
@@ -494,32 +503,61 @@
     }
   }
 
-  /** Pide a Android las portadas que falten y las va mostrando. */
+  /**
+   * Pide a Android las portadas que falten y las va mostrando.
+   * Se pide una vez por álbum (y por pista cuando no hay álbum) y Android
+   * devuelve la foto incrustada del propio archivo de música.
+   */
   async function fillDeviceArtwork() {
     if (_artworkFilling || !deviceArtworkBridgeAvailable()) return;
     if (!(deviceTracks && deviceTracks.length)) return;
     _artworkFilling = true;
     try {
-      const pending = [];
-      for (let i = 0; i < deviceTracks.length && pending.length < 220; i++) {
+      const keys = [];
+      const sample = {};
+      for (let i = 0; i < deviceTracks.length && keys.length < 240; i++) {
         const t = deviceTracks[i];
         if (!t || t.artworkUrl) continue;
-        const key = String(t.albumId || '');
-        if (!key || key === '0') continue;
-        if (deviceArtworkCache[key] === undefined && pending.indexOf(key) === -1) pending.push(key);
+        const key = artworkCacheKey(t);
+        if (deviceArtworkCache[key] === undefined && !sample[key]) {
+          sample[key] = t;
+          keys.push(key);
+        }
       }
 
       let changed = 0;
-      for (let i = 0; i < pending.length; i++) {
-        const key = pending[i];
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        const t = sample[key];
         let url = '';
-        try { url = window.SonoraNative.getAlbumArtwork(key, 160) || ''; } catch (e) { url = ''; }
+        try {
+          // 1ª opción: la foto incrustada del archivo (funciona en cualquier
+          // Android y también con archivos sueltos descargados).
+          if (typeof window.SonoraNative.getTrackArtwork === 'function') {
+            url = window.SonoraNative.getTrackArtwork(t.filePath || '', String(t.albumId || '0'), 192) || '';
+          }
+          // 2ª opción: la carátula del álbum (si la anterior no dio nada).
+          if (!url && typeof window.SonoraNative.getAlbumArtwork === 'function' && t.albumId) {
+            url = window.SonoraNative.getAlbumArtwork(String(t.albumId), 192) || '';
+          }
+        } catch (e) { url = ''; }
+
         deviceArtworkCache[key] = url;
         if (url) {
-          deviceTracks.forEach(function (t) { if (String(t.albumId || '') === key) t.artworkUrl = url; });
+          const albumId = String(t.albumId || '0');
+          const perAlbum = !!(albumId && albumId !== '0');
+          deviceTracks.forEach(function (x) {
+            if (!x) return;
+            if (perAlbum) {
+              if (String(x.albumId || '0') === albumId) x.artworkUrl = url;
+            } else if (String(x.id) === String(t.id)) {
+              x.artworkUrl = url;
+            }
+          });
           changed++;
         }
-        if (i % 5 === 4) {
+
+        if (i % 4 === 3) {
           if (changed) refreshVisibleArtwork();
           await new Promise(function (r) { setTimeout(r, 0); });
         }
@@ -533,6 +571,46 @@
       _artworkFilling = false;
     }
   }
+
+  // ── Candado de las canciones del teléfono ─────────────────────────────────
+  // Cuando está ACTIVO (🔒), las canciones del dispositivo NO se ofrecen al
+  // crear o editar playlists. Así se pueden elegir con libertad las canciones
+  // de Sonora sin que las del teléfono copen la lista. El candado sólo afecta
+  // al selector de playlists: la música del teléfono se sigue escuchando y las
+  // playlists ya combinadas siguen funcionando.
+  var deviceLockedInPlaylists = false;
+  var _deviceLockLoaded = false;
+
+  function refreshDeviceLock() {
+    if (_deviceLockLoaded) return Promise.resolve(deviceLockedInPlaylists);
+    _deviceLockLoaded = true;
+    try {
+      if (Sonora.DB && Sonora.DB.settings && Sonora.DB.settings.get) {
+        return Promise.resolve(Sonora.DB.settings.get('lockDeviceTracks')).then(function (v) {
+          deviceLockedInPlaylists = (v === 1 || v === '1' || v === true || v === 'true');
+          return deviceLockedInPlaylists;
+        }).catch(function () { return deviceLockedInPlaylists; });
+      }
+    } catch (e) {}
+    return Promise.resolve(deviceLockedInPlaylists);
+  }
+
+  Sonora.DeviceLock = {
+    isLocked: function () { return deviceLockedInPlaylists; },
+    refresh: refreshDeviceLock,
+    /** Activa/desactiva el candado y lo guarda. */
+    set: function (locked) {
+      deviceLockedInPlaylists = !!locked;
+      _deviceLockLoaded = true;
+      try { Sonora.DB.settings.set('lockDeviceTracks', locked ? 1 : 0); } catch (e) {}
+      try {
+        showToast(locked
+          ? '🔒 Canciones del teléfono bloqueadas en las playlists'
+          : '🔓 Ya puedes añadir canciones del teléfono a tus playlists');
+      } catch (e) {}
+      return deviceLockedInPlaylists;
+    }
+  };
 
   // Android nos avisa cuando el usuario concede/niega el permiso de audio
   window.onSonoraPermissionResult = function (granted) {
@@ -608,6 +686,11 @@
         <button class="btn btn--primary play-all-btn" data-action="play-tab-all">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           Reproducir todo (${sorted.length})
+        </button>
+        <button type="button" class="btn" data-action="toggle-device-lock"
+                title="${deviceLockedInPlaylists ? 'Las canciones del teléfono están bloqueadas en las playlists' : 'Bloquear las canciones del teléfono en las playlists'}"
+                style="background:${deviceLockedInPlaylists ? 'var(--color-surface-elevated)' : 'rgba(255,255,255,0.06)'}; color:var(--color-text-primary); border:1px solid ${deviceLockedInPlaylists ? 'var(--color-primary, #FF4757)' : 'rgba(255,255,255,0.15)'}; border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
+          ${deviceLockedInPlaylists ? '🔒 Bloqueadas' : '🔓 En playlists'}
         </button>
         <button type="button" class="btn" data-action="scan-device" title="Escanear de nuevo"
                 style="background:var(--color-surface-elevated); color:var(--color-text-primary); border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
@@ -1564,6 +1647,15 @@
           const scanBtn = target.closest('[data-action="scan-device"]');
           if (scanBtn) {
             loadDeviceTracks();
+            return;
+          }
+
+          // 1b-bis. Candado: bloquear/desbloquear las canciones del teléfono
+          // en las playlists (no afecta a la reproducción).
+          const lockBtn = target.closest('[data-action="toggle-device-lock"]');
+          if (lockBtn) {
+            Sonora.DeviceLock.set(!Sonora.DeviceLock.isLocked());
+            renderCurrentView();
             return;
           }
 

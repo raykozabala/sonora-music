@@ -1039,14 +1039,15 @@
 
     try {
       const online = view.query ? await fetchOnlineTracks(view.query) : [];
-      // Descartamos sólo las recopilaciones enormes (más de media hora).
-      const fresh = (online || []).filter(t => t && !(t.duration > 1800));
+      // Se conservan también las versiones largas (hasta 3 h); sólo se
+      // descartan duraciones imposibles. Las canciones normales van primero.
+      const fresh = (online || []).filter(t => t && !(t.duration > 10800));
 
-      // Preferimos canciones "normales" (1-10 min) antes que mixes largos.
       const songRank = (t) => {
         const d = (t && t.duration) || 0;
-        if (d >= 75 && d <= 600) return 2;
-        if (d > 0 && d < 1500) return 1;
+        if (d >= 75 && d <= 600) return 3;      // canción normal
+        if (d > 600 && d < 1800) return 2;      // versión extendida
+        if (d > 0 && d < 10800) return 1;       // recopilación / hora completa
         return 0;
       };
 

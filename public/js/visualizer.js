@@ -336,34 +336,54 @@
   // ==========================================
   // Visualizer 3: Particle Visualizer ('particle')
   // ==========================================
-  // Límite duro: evita que la lista crezca sin control y se vea "una fila
-  // fila de partículas" cuando la velocidad subía demasiado.
-  var MAX_PARTICLES = 260;
+  // Ahora todas las partículas NACEN DEL CENTRO, salen repartidas hacia
+  // afuera, rebotan suavemente en los bordes y se van DESVANECIENDO. Además
+  // hay una emisión continua (no sólo en los graves) para que el flujo nunca
+  // se detenga. Las muertas se reciclan por otras nuevas desde el centro.
+  var MAX_PARTICLES = 240;
+  var _particleSpawnAcc = 0;
+
+  /** Crea una partícula nueva naciendo en el centro y saliendo hacia afuera. */
+  function makeParticle(opts) {
+    opts = opts || {};
+    var cx = _width / 2;
+    var cy = _height / 2;
+    var angle = Math.random() * Math.PI * 2;
+    var spread = 4 + Math.random() * 14;
+    var speed = (opts.fast ? 0.9 : 0.35) + Math.random() * (opts.fast ? 1.5 : 1.0);
+    return {
+      x: cx + Math.cos(angle) * spread,
+      y: cy + Math.sin(angle) * spread,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      // Caída muy leve: se alejan en todas direcciones sin desplomarse.
+      gravity: 0.002 + Math.random() * 0.006,
+      baseRadius: (opts.fast ? 1.8 : 1.1) + Math.random() * 2.0,
+      alpha: opts.fast ? 0.9 : 0.5 + Math.random() * 0.35,
+      fadeIn: opts.fast ? 1 : 0,
+      // Ritmo de desvanecido (cada partícula dura 1,5 – 5 s aprox.)
+      life: (opts.fast ? 0.0042 : 0.0022) + Math.random() * 0.0034,
+      bounces: 0,
+      colorIndex: Math.floor(Math.random() * 3)
+    };
+  }
 
   function initParticleSystem() {
     _particleList = [];
-    var totalParticles = 130;
-    for (var i = 0; i < totalParticles; i++) {
-      _particleList.push({
-        x: Math.random() * _width,
-        y: Math.random() * _height,
-        vx: (Math.random() - 0.5) * 0.45,
-        vy: (Math.random() - 0.5) * 0.45,
-        // Cada partícula tiene su propia caída: antes todas caían igual y
-        // por eso se alineaban en filas.
-        gravity: 0.004 + Math.random() * 0.010,
-        baseRadius: 1.2 + Math.random() * 2.2,
-        alpha: 0.22 + Math.random() * 0.45,
-        colorIndex: i % 3
-      });
+    _particleSpawnAcc = 0;
+    for (var i = 0; i < 70; i++) {
+      var p = makeParticle();
+      // Las iniciales ya van repartidas y con distinta vida para que no
+      // aparezcan ni desaparezcan todas exactamente a la vez.
+      var t = Math.random();
+      p.x += p.vx * 90 * t;
+      p.y += p.vy * 90 * t;
+      p.alpha = Math.max(0.05, p.alpha - p.life * 90 * t);
+      _particleList.push(p);
     }
   }
 
   function renderParticle(colors) {
-    if (_particleList.length === 0) {
-      initParticleSystem();
-    }
-
     var bass = getBassEnergy();
     var now = Date.now();
     var palette = [colors.primary, colors.secondary, colors.tertiary];
@@ -374,95 +394,98 @@
     } catch (e) { isPlaying = false; }
 
     // Estela suave SIN pintar un fondo oscuro. El canvas es transparente, así
-    // que borrar con 'destination-out' deja sólo la estela de las partículas
-    // (antes se rellenaba con un gris y se veía un recuadro apagado detrás).
+    // que borrar con 'destination-out' deja sólo la estela de las partículas.
     _ctx.save();
     _ctx.globalCompositeOperation = 'destination-out';
-    _ctx.fillStyle = 'rgba(0, 0, 0, 0.34)';
+    _ctx.fillStyle = 'rgba(0, 0, 0, 0.30)';
     _ctx.fillRect(0, 0, _width, _height);
     _ctx.restore();
 
-    // Estallido desde el centro sólo en picos de graves reales y con pausa
-    // mínima entre uno y otro, para que no se sature de partículas.
-    if (isPlaying && bass > 0.62 && (now - _lastBeatTime > 480) && _particleList.length < MAX_PARTICLES) {
-      _lastBeatTime = now;
-      var spawnCount = 16;
-      var cx = _width / 2;
-      var cy = _height / 2;
-      for (var b = 0; b < spawnCount; b++) {
-        var burstAngle = Math.random() * Math.PI * 2;
-        // Velocidad inicial mucho más lenta (antes 2 – 6.5 → se disparaban)
-        var burstSpeed = 0.7 + Math.random() * 1.5;
-        _particleList.push({
-          x: cx + Math.cos(burstAngle) * 8,
-          y: cy + Math.sin(burstAngle) * 8,
-          vx: Math.cos(burstAngle) * burstSpeed,
-          vy: Math.sin(burstAngle) * burstSpeed,
-          gravity: 0.003 + Math.random() * 0.007,
-          baseRadius: 1.8 + Math.random() * 2.2,
-          alpha: 0.85,
-          colorIndex: Math.floor(Math.random() * 3),
-          ephemeral: true,
-          life: 0.006 + Math.random() * 0.007
-        });
+    // En pausa y sin partículas: nada que dibujar.
+    if (_particleList.length === 0 && !isPlaying) return;
+    if (_particleList.length === 0) initParticleSystem();
+
+    if (isPlaying) {
+      // ── Emisión continua desde el centro ─────────────────────────────────
+      // Mantiene un chorro constante de partículas (más con los graves) para
+      // que no dependa únicamente de los "estallidos".
+      _particleSpawnAcc += 0.55 + bass * 1.9;
+      var emission = Math.floor(_particleSpawnAcc);
+      if (emission > 6) emission = 6;
+      _particleSpawnAcc -= emission;
+      for (var s = 0; s < emission; s++) {
+        if (_particleList.length >= MAX_PARTICLES) break;
+        _particleList.push(makeParticle());
+      }
+
+      // ── Estallido extra en picos de graves ───────────────────────────────
+      if (bass > 0.68 && (now - _lastBeatTime > 520)) {
+        _lastBeatTime = now;
+        for (var b = 0; b < 14; b++) {
+          if (_particleList.length >= MAX_PARTICLES) break;
+          _particleList.push(makeParticle({ fast: true }));
+        }
       }
     }
 
-    var connectionDistance = 60;
+    var connectionDistance = 62;
     var len = _particleList.length;
-    // Antes 1.0 + bass * 1.6: a velocidad alta se veían "rayas" de partículas.
-    var speedMultiplier = 1.0 + bass * 0.40;
+    // Velocidad contenida: nada de "rayos" atravesando la pantalla.
+    var speedMultiplier = 1.0 + bass * 0.45;
 
     for (var i = len - 1; i >= 0; i--) {
       var p = _particleList[i];
 
       if (isPlaying) {
         p.vy += p.gravity;
-        p.vy -= bass * 0.045;            // empuje suave, ya no saltan hacia arriba
+        p.vy -= bass * 0.03;             // empuje suave hacia arriba con los graves
         p.x += p.vx * speedMultiplier;
         p.y += p.vy * speedMultiplier;
-        // Viscosidad: frena cualquier velocidad alta y evita el efecto "rayo".
-        p.vx *= 0.994;
-        p.vy *= 0.994;
+        // Viscosidad: frena velocidades altas y evita el efecto "rayo".
+        p.vx *= 0.995;
+        p.vy *= 0.995;
       } else {
-        // Al pausar no caen ni se disparan: se van frenando suavemente.
-        p.vx *= 0.94;
-        p.vy *= 0.94;
+        // Al pausar no caen ni se disparan: se van frenando solas.
+        p.vx *= 0.95;
+        p.vy *= 0.95;
         p.x += p.vx;
         p.y += p.vy;
       }
 
-      if (p.ephemeral) {
-        p.alpha -= p.life;
-        if (p.alpha <= 0 || p.x < -30 || p.x > _width + 30 || p.y < -30 || p.y > _height + 30) {
+      // Rebote suave en los bordes (con freno, sin ir a lo loco).
+      if (p.x < 0) { p.x = 0; p.vx = Math.abs(p.vx) * 0.9; }
+      else if (p.x > _width) { p.x = _width; p.vx = -Math.abs(p.vx) * 0.9; }
+      if (p.y < 0) { p.y = 0; p.vy = Math.abs(p.vy) * 0.9; }
+      else if (p.y > _height) { p.y = _height; p.vy = -Math.abs(p.vy) * 0.9; }
+
+      // Aparición y desvanecido
+      if (p.fadeIn < 1) p.fadeIn = Math.min(1, p.fadeIn + 0.08);
+      p.alpha -= p.life;
+
+      if (p.alpha <= 0) {
+        // Se acabó: si suena música se recicla por una nueva desde el centro.
+        if (isPlaying) {
+          _particleList[i] = makeParticle();
+        } else {
           _particleList.splice(i, 1);
-          continue;
         }
-      } else {
-        // Rebote en los bordes en lugar de "teletransporte" al lado opuesto
-        // (el salto brusco generaba esas bandas ordenadas).
-        if (p.x < 0) { p.x = 0; p.vx = Math.abs(p.vx); }
-        if (p.x > _width) { p.x = _width; p.vx = -Math.abs(p.vx); }
-        if (p.y < 0) { p.y = 0; p.vy = Math.abs(p.vy); }
-        if (p.y > _height) { p.y = _height; p.vy = -Math.abs(p.vy); }
+        continue;
       }
 
-      // Crece con los graves, pero con menos exageración
-      var currentRadius = p.baseRadius * (1.0 + bass * 1.1);
+      // Crece con los graves, pero sin exagerar
+      var currentRadius = p.baseRadius * (1.0 + bass * 1.0);
       var pColor = palette[p.colorIndex];
 
-      _ctx.fillStyle = hexToRgba(pColor, p.alpha);
+      _ctx.fillStyle = hexToRgba(pColor, p.alpha * p.fadeIn);
       _ctx.beginPath();
       _ctx.arc(p.x, p.y, currentRadius, 0, Math.PI * 2);
       _ctx.fill();
 
-      // Constelación: sólo entre las partículas "base" (no las de estallido)
-      // y saltando de 2 en 2 para no saturar la pantalla ni la CPU.
-      if (p.ephemeral) continue;
+      // Constelación entre partículas cercanas (líneas tenues).
       var checkLimit = Math.min(i + 14, len);
       for (var j = i + 1; j < checkLimit; j++) {
         var p2 = _particleList[j];
-        if (!p2 || p2.ephemeral) continue;
+        if (!p2) continue;
         var dx = p.x - p2.x;
         var dy = p.y - p2.y;
         var dist = Math.sqrt(dx * dx + dy * dy);

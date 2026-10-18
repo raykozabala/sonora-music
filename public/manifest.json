@@ -1,7 +1,7 @@
 {
   "name": "Sonora Music",
   "short_name": "Sonora",
-  "description": "Sonora Music v7.8.0 — Tu reproductor de música profesional",
+  "description": "Sonora Music v7.9.0 — Tu reproductor de música profesional",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",

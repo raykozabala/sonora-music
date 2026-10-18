@@ -553,6 +553,58 @@ public class MainActivity extends Activity {
         }
 
         /**
+         * Carátula REAL de un archivo de música del teléfono.
+         * Primero lee la foto incrustada en el propio archivo (MP3/M4A/FLAC),
+         * que es la que el usuario ve en su reproductor, y si el archivo no
+         * trae ninguna recurre a la carátula del álbum.
+         * Devuelve un data URL JPEG en base64 o "" si no hay foto.
+         */
+        @android.webkit.JavascriptInterface
+        public String getTrackArtwork(String contentUri, String albumId, int size) {
+            if (!activity.hasAudioPermission()) return "";
+            int px = size > 0 ? size : 192;
+            if (px > 512) px = 512;
+
+            android.graphics.Bitmap bmp = null;
+
+            // 1) Foto incrustada dentro del archivo de audio
+            if (contentUri != null && !contentUri.isEmpty()) {
+                android.media.MediaMetadataRetriever mmr = new android.media.MediaMetadataRetriever();
+                try {
+                    mmr.setDataSource(activity, Uri.parse(contentUri));
+                    byte[] art = mmr.getEmbeddedPicture();
+                    if (art != null && art.length > 0) {
+                        bmp = android.graphics.BitmapFactory.decodeByteArray(art, 0, art.length);
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    try { mmr.release(); } catch (Exception ignored) {}
+                }
+            }
+
+            // 2) Si el archivo no trae foto, la carátula del álbum
+            if (bmp == null) {
+                return getAlbumArtwork(albumId, px);
+            }
+
+            try {
+                int w = bmp.getWidth(), h = bmp.getHeight();
+                if (w > px || h > px) {
+                    float scale = Math.min((float) px / w, (float) px / h);
+                    bmp = android.graphics.Bitmap.createScaledBitmap(
+                        bmp, Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale)), true);
+                }
+                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, out);
+                String b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+                return "data:image/jpeg;base64," + b64;
+            } catch (Exception e) {
+                Log.w(TAG, "getTrackArtwork error: " + e.getMessage());
+                return "";
+            }
+        }
+
+        /**
          * Devuelve la carátula del álbum como data URL (PNG en base64) para
          * que el WebView pueda mostrarla. Antes las canciones del teléfono
          * salían sin foto porque el WebView no puede leer content://albumart.

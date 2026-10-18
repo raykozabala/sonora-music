@@ -1,6 +1,6 @@
 {
   "name": "sonora-music-server",
-  "version": "7.8.0",
+  "version": "7.9.0",
   "description": "Sonora Music dual-mode server (local + Render compatible)",
   "main": "server.js",
   "scripts": {
