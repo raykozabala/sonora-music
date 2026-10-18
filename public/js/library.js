@@ -557,10 +557,12 @@
           changed++;
         }
 
-        if (i % 4 === 3) {
-          if (changed) refreshVisibleArtwork();
+        // Se cede el hilo cada 2 carátulas para que la lista siga respondiendo
+        // (la lectura de la foto incrustada bloquea un momento al WebView).
+        if (i % 2 === 1) {
           await new Promise(function (r) { setTimeout(r, 0); });
         }
+        if (changed && i % 6 === 5) refreshVisibleArtwork();
       }
 
       if (changed) {
@@ -690,7 +692,7 @@
         <button type="button" class="btn" data-action="toggle-device-lock"
                 title="${deviceLockedInPlaylists ? 'Las canciones del teléfono están bloqueadas en las playlists' : 'Bloquear las canciones del teléfono en las playlists'}"
                 style="background:${deviceLockedInPlaylists ? 'var(--color-surface-elevated)' : 'rgba(255,255,255,0.06)'}; color:var(--color-text-primary); border:1px solid ${deviceLockedInPlaylists ? 'var(--color-primary, #FF4757)' : 'rgba(255,255,255,0.15)'}; border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
-          ${deviceLockedInPlaylists ? '🔒 Bloqueadas' : '🔓 En playlists'}
+          ${deviceLockedInPlaylists ? '🔒 No en playlists' : '🔓 Sí en playlists'}
         </button>
         <button type="button" class="btn" data-action="scan-device" title="Escanear de nuevo"
                 style="background:var(--color-surface-elevated); color:var(--color-text-primary); border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">

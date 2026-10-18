@@ -1424,10 +1424,10 @@
             </div>
             <div style="padding:12px 20px 0 20px; display:flex; gap:8px; align-items:center;">
               <input type="text" id="search-tracks-input" class="form-input" placeholder="🔍 Buscar por título o artista..." style="flex:1; min-width:0;" />
-              <button type="button" class="btn-action btn-action--secondary" id="btn-toggle-device-lock"
+              <button type="button" class="btn-action btn-action--primary" id="btn-toggle-device-lock"
                       title="Mostrar u ocultar las canciones del teléfono"
                       style="flex-shrink:0; font-size:12px; padding:9px 12px; white-space:nowrap;">
-                🔒 Solo Sonora
+                📱 Con teléfono
               </button>
             </div>
             <div class="modal-body" id="add-tracks-list" style="padding-top:10px;">
@@ -2523,11 +2523,11 @@
       const refreshDeviceLockButton = () => {
         if (!toggleDeviceLockBtn) return;
         const locked = !!(Sonora.DeviceLock && Sonora.DeviceLock.isLocked());
-        toggleDeviceLockBtn.textContent = locked ? '🔒 Solo Sonora' : '📱 Incluir teléfono';
+        toggleDeviceLockBtn.textContent = locked ? '🔒 Sin teléfono' : '📱 Con teléfono';
         toggleDeviceLockBtn.className = 'btn-action ' + (locked ? 'btn-action--secondary' : 'btn-action--primary');
         toggleDeviceLockBtn.title = locked
-          ? 'Las canciones del teléfono están ocultas en esta lista'
-          : 'Las canciones del teléfono se muestran (pulsa para ocultarlas)';
+          ? 'Ahora sólo se muestran las canciones de Sonora (pulsa para incluir las del teléfono)'
+          : 'Se muestran también las canciones del teléfono (pulsa para ocultarlas)';
       };
       if (toggleDeviceLockBtn) {
         addTrackedListener(toggleDeviceLockBtn, 'click', () => {
