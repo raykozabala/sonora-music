@@ -1449,7 +1449,7 @@
                 <label>Foto de la playlist</label>
                 <div style="display:flex;align-items:center;gap:14px;">
                   <img id="edit-playlist-art-preview" alt="Portada"
-                       src=""
+                       src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
                        style="width:86px;height:86px;border-radius:16px;object-fit:cover;background:var(--color-surface-elevated);box-shadow:0 6px 18px rgba(0,0,0,.35);" />
                   <div style="display:flex;flex-direction:column;gap:8px;">
                     <button type="button" class="btn-action btn-action--secondary" id="btn-pick-playlist-art">🖼️ Elegir foto</button>
@@ -2310,6 +2310,7 @@
         if (!artPreview) return;
         artPreview.src = (url && url.trim()) ? url : generateArtwork(playlist.id || 1, playlist.name || 'Playlist');
       };
+      setArtPreview(pendingArtwork);
 
       const openEditModal = () => {
         if (modalEdit) {
