@@ -764,18 +764,18 @@ const YT_CLIENT_FALLBACKS = [
   null,             // "default" (web + deno + cookies): verificado OK en Render
   'tv_embedded',    // verificado OK en Render
   'android_vr',
-  'android',
-  'mweb',
-  'ios',
-  'web_safari',
-  'tv',
-  'web_embedded'
+  'web_safari'
 ];
-const YTDLP_CLIENT_TIMEOUT = 30000;
+// Para STREAMING sólo tienen sentido los dos que funcionan desde datacenter;
+// probar los demás sólo añade espera (piden PO token y fallan).
+const YT_RESOLVE_CLIENTS = [null, 'tv_embedded'];
+// Presupuesto por cliente: deno tarda ~40 s en la CPU del plan gratuito de
+// Render, y el streaming debe dejar margen para la red de seguridad (plan D).
+const YTDLP_CLIENT_TIMEOUT = 45000;
 
 /**
  * Ejecuta yt-dlp (--get-url) con un "player client" concreto.
- * Devuelve la URL directa del audio, o null si ese cliente falla.
+ * Devuelve { url, error }: url si funcionó, o el motivo del fallo.
  */
 function ytdlpResolveWithClient(targetUrl, client) {
   return new Promise((resolve) => {
@@ -788,71 +788,96 @@ function ytdlpResolveWithClient(targetUrl, client) {
       '--get-url'
     ];
     if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
-    const finalArgs = withCookies(args);
+
+    // Copia única de las cookies por proceso: yt-dlp REESCRIBE el archivo de
+    // cookies, así que dos procesos en paralelo se pisarían entre sí.
+    let cookieCopy = null;
+    if (COOKIES_PATH) {
+      try {
+        cookieCopy = path.join(os.tmpdir(),
+          'sonora-ck-' + process.pid + '-' + Math.random().toString(36).slice(2, 8) + '.txt');
+        fs.copyFileSync(COOKIES_PATH, cookieCopy);
+        args.push('--cookies', cookieCopy);
+      } catch (e) { cookieCopy = null; }
+    }
+
+    const finalArgs = args.slice();
     finalArgs.push(targetUrl);
 
     const proc = spawn(YTDLP_BIN, finalArgs);
     let out = '';
     let err = '';
     let done = false;
+    const label = client || 'default';
+
+    const cleanup = () => {
+      if (cookieCopy) { try { fs.unlinkSync(cookieCopy); } catch (e) {} }
+    };
 
     const timer = setTimeout(() => {
       if (done) return;
       done = true;
       try { proc.kill('SIGKILL'); } catch (e) {}
-      console.warn('[yt-dlp] client=' + (client || 'default') + ' timeout');
-      resolve(null);
+      cleanup();
+      console.warn('[yt-dlp] client=' + label + ' timeout (' + Math.round(YTDLP_CLIENT_TIMEOUT / 1000) + 's)');
+      resolve({ url: null, error: label + ': tiempo de espera agotado' });
     }, YTDLP_CLIENT_TIMEOUT);
 
     proc.stdout.on('data', (d) => { out += d.toString(); });
     proc.stderr.on('data', (d) => { err += d.toString(); });
 
-    proc.on('error', () => {
+    proc.on('error', (e) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      resolve(null);
+      cleanup();
+      resolve({ url: null, error: label + ': ' + e.message });
     });
 
     proc.on('close', (code) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      cleanup();
       const first = out.trim().split('\n').map(s => s.trim()).filter(Boolean)[0];
-      if (code === 0 && first && /^https?:\/\//.test(first)) return resolve(first);
+      if (code === 0 && first && /^https?:\/\//.test(first)) {
+        return resolve({ url: first, error: null });
+      }
       const msg = err.trim().split('\n').pop() || ('yt-dlp salió con código ' + code);
-      console.warn('[yt-dlp] client=' + (client || 'default') + ' falló: ' + msg);
-      resolve(null);
+      console.warn('[yt-dlp] client=' + label + ' falló: ' + msg);
+      resolve({ url: null, error: label + ': ' + msg });
     });
   });
 }
 
 /**
  * Resuelve la URL directa de audio probando varios "player clients".
- * Se lanzan en oleadas paralelas: si el primero va lento, los siguientes ya
- * están trabajando. (Antes: 9 clientes en serie => hasta 270 s de espera.)
+ * Se lanzan de 2 en 2: el primero casi siempre es "default", que es el que
+ * funciona; el segundo va de reserva por si aquél se atasca.
  */
 function ytdlpResolveAudioUrl(targetUrl) {
   return new Promise((resolve, reject) => {
-    const CONCURRENCY = 3;
+    const CONCURRENCY = 2;
     let idx = 0;
     let pending = 0;
     let settled = false;
+    const errors = [];
 
     function launch() {
-      while (!settled && pending < CONCURRENCY && idx < YT_CLIENT_FALLBACKS.length) {
-        const client = YT_CLIENT_FALLBACKS[idx++];
+      while (!settled && pending < CONCURRENCY && idx < YT_RESOLVE_CLIENTS.length) {
+        const client = YT_RESOLVE_CLIENTS[idx++];
         pending++;
-        ytdlpResolveWithClient(targetUrl, client).then((url) => {
+        ytdlpResolveWithClient(targetUrl, client).then((res) => {
           if (settled) return;
           pending--;
-          if (url) {
+          if (res && res.url) {
             settled = true;
-            return resolve(url);
+            return resolve(res.url);
           }
-          if (pending === 0 && idx >= YT_CLIENT_FALLBACKS.length) {
+          if (res && res.error) errors.push(res.error);
+          if (pending === 0 && idx >= YT_RESOLVE_CLIENTS.length) {
             settled = true;
-            return reject(new Error('yt-dlp no devolvió ninguna URL (ningún player client funcionó)'));
+            return reject(new Error('ningún player client funcionó | ' + errors.join(' | ')));
           }
           launch();
         });
@@ -884,7 +909,7 @@ function setResolvedUrl(key, url) {
 /**
  * Hace proxy de una URL de audio respetando el header Range (permite "seek").
  */
-function proxyAudioStream(directUrl, req, res) {
+function proxyAudioStream(directUrl, req, res, onReject) {
   const lib = directUrl.startsWith('https') ? https : http;
   const headers = {
     'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
@@ -901,6 +926,10 @@ function proxyAudioStream(directUrl, req, res) {
       // El CDN de YouTube devolvió una página de error en lugar del audio.
       console.warn('[Stream] el CDN rechazó la URL: HTTP ' + up.statusCode + ' ' + (ct || 'sin content-type'));
       up.resume();
+      if (typeof onReject === 'function') {
+        try { onReject(up.statusCode, ct); } catch (e) {}
+        return;
+      }
       if (!res.headersSent) {
         res.status(502).json({
           error: 'El CDN de YouTube rechazó el audio',
@@ -928,6 +957,112 @@ function proxyAudioStream(directUrl, req, res) {
 
   upstream.setTimeout(45000, () => { upstream.destroy(new Error('timeout')); });
   req.on('close', () => { try { upstream.destroy(); } catch (e) {} });
+}
+
+/** Tipo MIME según la extensión del fichero de audio. */
+function audioContentType(filePath) {
+  const e = path.extname(String(filePath || '')).toLowerCase();
+  if (e === '.m4a' || e === '.mp4' || e === '.aac') return 'audio/mp4';
+  if (e === '.webm') return 'audio/webm';
+  if (e === '.opus' || e === '.ogg') return 'audio/ogg';
+  return 'audio/mpeg';
+}
+
+/** Sirve un fichero de audio local respetando Range (permite "seek"). */
+function serveAudioFileWithRanges(filePath, req, res) {
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+  const contentType = audioContentType(filePath);
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+
+  if (range) {
+    const parts = String(range).replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    if (isNaN(start) || start >= fileSize || end >= fileSize || start > end) {
+      res.status(416).set({ 'Content-Range': `bytes */${fileSize}` }).send('Requested Range Not Satisfiable');
+      return;
+    }
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': (end - start) + 1,
+      'Content-Type': contentType
+    });
+    fs.createReadStream(filePath, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, {
+      'Content-Length': fileSize,
+      'Accept-Ranges': 'bytes',
+      'Content-Type': contentType
+    });
+    fs.createReadStream(filePath).pipe(res);
+  }
+}
+
+/**
+ * Red de seguridad del streaming (plan D). Cuando YouTube no nos deja
+ * proxificar el audio desde una IP de datacenter, generamos el fichero en el
+ * servidor — la misma vía que usan las descargas, que sí funciona — y lo
+ * servimos desde disco. La primera vez tarda; después sale de la caché.
+ * Devuelve true si consiguió servir el audio.
+ */
+async function serveGeneratedAudio(targetUrl, req, res) {
+  try {
+    // 1) ¿Ya existe el MP3 de una descarga anterior? (instantáneo)
+    const mp3Path = downloadCachePath(targetUrl, 'mp3', '320k');
+    const cachedMp3 = getCachedDownload(mp3Path);
+    if (cachedMp3) {
+      console.log('[Stream] plan D: reutilizando el MP3 ya descargado');
+      serveAudioFileWithRanges(cachedMp3, req, res);
+      return true;
+    }
+
+    // 2) ¿Audio sin transcodificar guardado de antes?
+    const key = crypto.createHash('sha1').update('streamaudio|' + String(targetUrl)).digest('hex');
+    let cachedAudio = null;
+    try {
+      const hit = fs.readdirSync(CACHE_DIR).find((f) => f.indexOf(key + '.') === 0);
+      if (hit) cachedAudio = getCachedDownload(path.join(CACHE_DIR, hit));
+    } catch (e) {}
+    if (cachedAudio) {
+      console.log('[Stream] plan D: audio ya en caché');
+      serveAudioFileWithRanges(cachedAudio, req, res);
+      return true;
+    }
+
+    // 3) Descargarlo SIN transcodificar (bastante más rápido que convertir a MP3)
+    const tmpDir = path.join(os.tmpdir(), 'sonora-stream');
+    try { fs.mkdirSync(tmpDir, { recursive: true }); } catch (e) {}
+    const stamp = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    const args = [
+      '--no-playlist', '--no-warnings', '--no-check-certificates',
+      '-f', 'bestaudio[ext=m4a]/bestaudio/best'
+    ];
+    const generated = await ytdlpDownloadToFile(args, targetUrl, tmpDir, stamp);
+    if (!generated) return false;
+
+    // Guardamos en caché conservando la extensión (define el Content-Type)
+    let finalPath = generated;
+    try {
+      const ext = path.extname(generated) || '.m4a';
+      const cachedPath = path.join(CACHE_DIR, key + ext);
+      fs.copyFileSync(generated, cachedPath);
+      finalPath = cachedPath;
+    } catch (e) {}
+
+    console.log('[Stream] plan D: audio generado en el servidor');
+    serveAudioFileWithRanges(finalPath, req, res);
+    return true;
+  } catch (e) {
+    console.warn('[Stream] plan D falló: ' + e.message);
+    return false;
+  }
 }
 
 /**
@@ -1210,7 +1345,16 @@ app.get('/api/stream/external', async (req, res) => {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
 
     // Resolvemos la URL directa del audio y hacemos proxy (soporta Range => seek).
-    // Plan A: caché. Plan B: yt-dlp. Plan C: Invidious (por si YouTube bloquea la IP).
+    // Plan A: caché. Plan B: yt-dlp. Plan C: Invidious.
+    // Plan D (red de seguridad): generar el audio en el servidor y servirlo
+    // desde disco, que es la vía de las descargas y sí funciona desde Render.
+    if (String(req.query.force || '') === 'file') {
+      console.log('[Stream] forzado el plan D (diagnóstico)');
+      if (await serveGeneratedAudio(targetUrl, req, res)) return;
+      return res.status(502).json({ error: 'El plan D (generar el audio) falló' });
+    }
+
+    let lastResolveError = '';
     let directUrl = getResolvedUrl(targetUrl);
     if (directUrl) {
       console.log('[Stream] URL de audio reutilizada de la caché');
@@ -1219,21 +1363,36 @@ app.get('/api/stream/external', async (req, res) => {
         directUrl = await ytdlpResolveAudioUrl(targetUrl);
         if (directUrl) setResolvedUrl(targetUrl, directUrl);
       } catch (ytErr) {
+        lastResolveError = ytErr.message;
         console.warn('[Stream] yt-dlp falló: ' + ytErr.message);
       }
     }
     if (!directUrl) {
       const vid = extractYouTubeId(targetUrl);
-      if (vid) directUrl = await resolveViaInvidious(vid);
+      if (vid) {
+        try { directUrl = await resolveViaInvidious(vid); } catch (e) {}
+      }
     }
+
     if (!directUrl) {
+      if (await serveGeneratedAudio(targetUrl, req, res)) return;
       return res.status(502).json({
         error: 'No se pudo obtener el audio de esta canción',
-        detail: 'YouTube bloqueó la descarga y los servidores alternativos no respondieron'
+        detail: lastResolveError || 'YouTube bloqueó la descarga y los servidores alternativos no respondieron'
       });
     }
+
     console.log('[Stream] proxy ->', directUrl.substring(0, 80) + '...');
-    return proxyAudioStream(directUrl, req, res);
+    return proxyAudioStream(directUrl, req, res, async (status, ct) => {
+      console.warn('[Stream] el CDN rechazó el audio (HTTP ' + status + ' ' + ct + '); paso al plan D');
+      if (await serveGeneratedAudio(targetUrl, req, res)) return;
+      if (!res.headersSent) {
+        res.status(502).json({
+          error: 'El CDN de YouTube rechazó el audio',
+          detail: 'HTTP ' + (status || '?') + ' ' + (ct || 'sin content-type')
+        });
+      }
+    });
   } catch (outerErr) {
     console.error('[Stream] Fatal route error:', outerErr.message);
     if (!res.headersSent) {
