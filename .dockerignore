@@ -4,6 +4,10 @@
 server/sonora.db
 server/sonora.db-shm
 server/sonora.db-wal
+server/sonora-collaborative.json
+server/cookies.txt
+server/.env
+server/.env.*
 android-build
 *.apk
 *.idsig

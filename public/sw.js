@@ -3,7 +3,7 @@
  * Offline caching for PWA functionality
  */
 
-const CACHE_NAME = 'sonora-7.10.0';
+const CACHE_NAME = 'sonora-7.11.0';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -11,6 +11,7 @@ const STATIC_ASSETS = [
   '/css/themes.css',
   '/css/main.css',
   '/css/player.css',
+  '/css/video-player.css',
   '/css/animations.css',
   '/css/responsive.css',
   '/js/store.js',
@@ -21,6 +22,7 @@ const STATIC_ASSETS = [
   '/js/themes.js',
   '/js/player.js',
   '/js/visualizer.js',
+  '/js/video-player.js',
   '/js/download.js',
   '/js/notifications.js',
   '/js/home.js',
@@ -35,7 +37,7 @@ const STATIC_ASSETS = [
 
 // Install — cache all static assets
 self.addEventListener('install', function (event) {
-  console.log('[SW] Installing Sonora Music v4...');
+  console.log('[SW] Installing Sonora Music v7.11...');
   event.waitUntil(
     caches.open(CACHE_NAME).then(function (cache) {
       return cache.addAll(STATIC_ASSETS).catch(function (err) {

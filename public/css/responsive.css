@@ -19,6 +19,17 @@ button,
   min-height: 44px;
 }
 
+/* Los filtros del buscador son pastillas de texto: no deben encogerse ni
+   heredar el ancho mínimo de 44px (se cortaban como "Cov…", "Espa…"). */
+.filter-pill,
+.search-mode-btn,
+.sort-chip {
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 36px;
+  white-space: nowrap;
+}
+
 /* Safe Area Insets for notched displays and gesture navigation bars */
 #app-header {
   padding-top: max(env(safe-area-inset-top, 0px), 8px);

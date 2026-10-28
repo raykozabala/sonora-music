@@ -293,6 +293,27 @@
     });
   }
 
+  /**
+   * Convierte la carátula remota en data URL para poder verla sin internet.
+   * Si falla (CORS, sin red) devuelve ''.
+   */
+  async function fetchThumbnailData(url) {
+    if (!url || String(url).indexOf('data:') === 0) return url || '';
+    try {
+      var resp = await fetch(url, { mode: 'cors' });
+      if (!resp.ok) return '';
+      var blob = await resp.blob();
+      return await new Promise(function (resolve) {
+        var reader = new FileReader();
+        reader.onload = function () { resolve(String(reader.result || '')); };
+        reader.onerror = function () { resolve(''); };
+        reader.readAsDataURL(blob);
+      });
+    } catch (e) {
+      return '';
+    }
+  }
+
   Sonora.Download = {
     /**
      * Guarda un archivo de texto (p. ej. la letra) en el teléfono.
@@ -337,6 +358,12 @@
       format = (format || 'mp3').toLowerCase();
       quality = quality || (format === 'mp3' ? '320k' : '720p');
       mode = mode || 'both';
+
+      // Un MP4 no es una canción: va al gestor de video (biblioteca de videos,
+      // archivo real y reproducción con el reproductor de video).
+      if (format === 'mp4') {
+        return Sonora.Download.startVideoDownload(track, quality, mode);
+      }
 
       var taskId = 'dl_' + (track.id || Date.now());
       var title = track.title || 'Canción';
@@ -778,16 +805,16 @@
                           ${item.title}
                         </div>
                         <div style="font-size:11px; color:#888;">
-                          ${item.artist} • ${item.format.toUpperCase()}${item.size ? ' • ' + formatBytes(item.size) : ''}
+                          ${item.artist || 'Sonora'} • ${item.kind === 'video' ? '🎬 Video' : '🎵 Audio'} · ${item.format.toUpperCase()}${item.size ? ' • ' + formatBytes(item.size) : ''}
                         </div>
                       </div>
                       <div style="display:flex; gap:6px; flex-shrink:0; margin-left:10px;">
-                        <button type="button" class="btn-dl-play" data-track-id="${item.trackId}" style="background:var(--color-primary, #FF4757); border:none; color:#fff; border-radius:14px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer;">
-                          ▶ Sonora
+                        <button type="button" class="btn-dl-play" data-track-id="${item.trackId}" data-kind="${item.kind || 'audio'}" style="background:var(--color-primary, #FF4757); border:none; color:#fff; border-radius:14px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer;">
+                          ${item.kind === 'video' ? '▶ Video' : '▶ Sonora'}
                         </button>
-                        <button type="button" class="btn-dl-lark" data-title="${encodeURIComponent(item.title)}" data-artist="${encodeURIComponent(item.artist)}" style="background:var(--color-surface-elevated); border:1px solid rgba(255,255,255,0.1); color:#4fc3f7; border-radius:14px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer;">
+                        ${item.kind === 'video' ? '' : `<button type="button" class="btn-dl-lark" data-title="${encodeURIComponent(item.title)}" data-artist="${encodeURIComponent(item.artist)}" style="background:var(--color-surface-elevated); border:1px solid rgba(255,255,255,0.1); color:#4fc3f7; border-radius:14px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer;">
                           📱 Abrir con
-                        </button>
+                        </button>`}
                       </div>
                     </div>`;
                   }).join('')}
@@ -820,6 +847,16 @@
         modal.querySelectorAll('.btn-dl-play').forEach(function (btn) {
           btn.onclick = async function () {
             var tid = btn.getAttribute('data-track-id');
+            var kind = btn.getAttribute('data-kind');
+            if (kind === 'video') {
+              var v = await Sonora.DB.videos.getById(tid);
+              var blob = await Sonora.DB.videos.getFile(tid);
+              if (v && Sonora.VideoPlayer) {
+                modal.classList.remove('visible');
+                Sonora.VideoPlayer.open(v, { blob: blob || null });
+              }
+              return;
+            }
             if (Sonora.DB && Sonora.DB.tracks) {
               var tr = await Sonora.DB.tracks.getById(tid);
               if (tr && Sonora.Player) {
@@ -896,6 +933,313 @@
         opts.quality || (opts.format === 'mp4' ? '720p' : '320k'),
         opts.mode || 'both'
       );
+    },
+
+    /**
+     * Descarga un VIDEO de YouTube:
+     *  - 'sonora' -> lo guarda en la biblioteca de videos para verlo offline
+     *  - 'device' -> lo manda al gestor de Descargas del teléfono
+     *  - 'both'   -> las dos cosas
+     * Muestra progreso real (bytes / velocidad / restante).
+     */
+    startVideoDownload: async function (video, quality, mode) {
+      if (!video) return null;
+      quality = quality || '720p';
+      mode = mode || 'sonora';
+      var videoId = video.id || ('yt_' + (video.videoId || Date.now()));
+      var taskId = 'vdl_' + videoId;
+      var title = video.title || 'Video de YouTube';
+      var artist = video.artist || video.channel || 'YouTube';
+      var targetUrl = buildTargetUrl(video, title, artist);
+      var filename = safeFileName(artist, title, 'mp4');
+      var servers = getCandidateServers();
+
+      if (_activeDownloads[taskId]) {
+        if (Sonora.Store) Sonora.Store.emit('toast', { message: 'ℹ Ese video ya se está descargando', type: 'info' });
+        return null;
+      }
+
+      var mime = 'video/mp4';
+      _activeDownloads[taskId] = {
+        id: taskId,
+        trackId: videoId,
+        videoId: videoId,
+        kind: 'video',
+        title: title,
+        artist: artist,
+        format: 'mp4',
+        quality: quality,
+        mode: mode,
+        progress: 0,
+        phase: 'preparing',
+        speed: 'Preparando…',
+        eta: '--',
+        startTime: Date.now(),
+        bytes: 0,
+        total: 0
+      };
+      updateBadge();
+
+      if (Sonora.Store) {
+        Sonora.Store.emit('toast', { message: '🎬 Preparando video "' + title + '"...', type: 'info' });
+      }
+
+      function updateTask(progress) {
+        var t = _activeDownloads[taskId];
+        if (!t) return;
+        t.bytes = progress.loaded;
+        if (progress.indeterminate) {
+          t.phase = 'preparing';
+          t.speed = 'El servidor está preparando el MP4…';
+          t.eta = '--';
+        } else {
+          t.phase = 'downloading';
+          t.total = progress.total;
+          t.progress = Math.max(1, Math.min(99, Math.round(progress.ratio * 100)));
+          var elapsed = Math.max(0.5, (Date.now() - t.startTime) / 1000);
+          var bps = progress.loaded / elapsed;
+          t.speed = formatBytes(bps) + '/s';
+          t.eta = bps > 0 ? Math.max(0, Math.round((progress.total - progress.loaded) / bps)) + 's' : '--';
+        }
+        updateBadge();
+      }
+
+      try {
+        var blob = null;
+        var usedServer = null;
+        var lastError = null;
+
+        if (mode === 'device') {
+          // Directo al gestor de descargas del sistema (sin copia interna).
+          var directServer = await pickReachableServer();
+          if (!directServer) throw new Error('No hay servidor disponible');
+          var directUrl = buildDownloadUrl(directServer, targetUrl, 'mp4', quality, title, artist);
+          if (window.SonoraNative && typeof window.SonoraNative.downloadFile === 'function') {
+            if (!window.SonoraNative.downloadFile(directUrl, filename, mime)) {
+              throw new Error('El teléfono no pudo iniciar la descarga');
+            }
+          } else {
+            var aEl = document.createElement('a');
+            aEl.href = directUrl;
+            aEl.download = filename;
+            document.body.appendChild(aEl);
+            aEl.click();
+            document.body.removeChild(aEl);
+          }
+          delete _activeDownloads[taskId];
+          updateBadge();
+          if (Sonora.Store) Sonora.Store.emit('toast', { message: '📱 Descarga de video enviada al teléfono', type: 'success' });
+          return null;
+        }
+
+        // Modo Sonora o Ambos: primero traemos el MP4 completo para guardarlo.
+        for (var i = 0; i < servers.length; i++) {
+          try {
+            blob = await fetchBlobWithProgress(
+              buildDownloadUrl(servers[i], targetUrl, 'mp4', quality, title, artist),
+              updateTask
+            );
+            usedServer = servers[i];
+            break;
+          } catch (err) {
+            lastError = err;
+            console.warn('[VideoDownload] servidor ' + servers[i] + ' falló:', err.message);
+          }
+        }
+        if (!blob) throw new Error(lastError ? lastError.message : 'No se pudo descargar el video');
+
+        // Carátula offline (data URL) para que la biblioteca se vea sin internet.
+        var thumbData = await fetchThumbnailData(video.thumbnailData || video.thumbnail || '');
+
+        // Subtítulos offline (español e inglés) para ver el video sin internet.
+        var subtitlesData = [];
+        try {
+          var subsBase = (usedServer || servers[0] || '').replace(/\/+$/, '');
+          if (subsBase) {
+            var langs = ['es', 'en'];
+            for (var li = 0; li < langs.length; li++) {
+              try {
+                var subsResp = await fetch(subsBase + '/api/video/subtitles?url=' + encodeURIComponent(targetUrl) +
+                  '&lang=' + langs[li] + '&auto=1');
+                if (subsResp.ok) {
+                  var vttText = await subsResp.text();
+                  if (vttText && vttText.indexOf('WEBVTT') !== -1) {
+                    subtitlesData.push({ lang: langs[li], vtt: vttText });
+                  }
+                }
+              } catch (subsErr) {}
+            }
+          }
+        } catch (subsErr) {}
+
+        var meta = {
+          id: videoId,
+          videoId: video.videoId || (String(videoId).indexOf('yt_') === 0 ? String(videoId).slice(3) : ''),
+          title: title,
+          artist: artist,
+          channel: video.channel || artist,
+          thumbnail: video.thumbnail || '',
+          thumbnailData: thumbData || video.thumbnailData || '',
+          duration: Number(video.duration) || 0,
+          durationText: video.durationText || '',
+          views: video.views || 0,
+          url: targetUrl,
+          platform: video.platform || 'youtube',
+          quality: quality,
+          size: blob.size || 0,
+          subtitles: subtitlesData,
+          isDownloaded: 1,
+          dateAdded: new Date().toISOString(),
+          savedAt: new Date().toISOString(),
+          source: 'youtube'
+        };
+        await Sonora.DB.videos.add(meta);
+        await Sonora.DB.videos.saveFile(videoId, blob);
+
+        var savedToDevice = false;
+        if (mode === 'both') {
+          savedToDevice = await saveBlobToDevice(blob, filename, mime, taskId);
+        }
+
+        if (_activeDownloads[taskId]) {
+          _activeDownloads[taskId].progress = 100;
+          _activeDownloads[taskId].phase = 'done';
+        }
+
+        _completedHistory.unshift({
+          id: taskId,
+          kind: 'video',
+          videoId: videoId,
+          trackId: videoId,
+          title: title,
+          artist: artist,
+          format: 'mp4',
+          quality: quality,
+          filename: filename,
+          timestamp: Date.now(),
+          size: blob.size || 0,
+          deviceSaved: !!savedToDevice,
+          artworkUrl: thumbData || video.thumbnail || ''
+        });
+        saveHistory();
+        delete _activeDownloads[taskId];
+        updateBadge();
+
+        if (Sonora.Store) {
+          Sonora.Store.emit('toast', {
+            message: '✓ Video "' + title + '" guardado en Sonora' + (savedToDevice ? ' y en Descargas' : ''),
+            type: 'success'
+          });
+          Sonora.Store.emit('videosChanged', { video: meta });
+          Sonora.Store.emit('downloadsChanged', { active: [], completed: _completedHistory });
+        }
+        return meta;
+      } catch (err) {
+        delete _activeDownloads[taskId];
+        updateBadge();
+        console.error('[VideoDownload] error:', err);
+        if (Sonora.Store) {
+          Sonora.Store.emit('toast', {
+            message: '✗ No se pudo descargar el video: ' + (err.message || 'error de red'),
+            type: 'error'
+          });
+        }
+        return null;
+      }
+    },
+
+    /**
+     * Convierte un video guardado (o de YouTube) en una canción de Sonora.
+     * Si el MP4 ya está offline reutiliza su audio (no duplica espacio).
+     */
+    convertVideoToMusic: async function (videoId) {
+      if (!videoId || !Sonora.DB || !Sonora.DB.videos) return null;
+      var video = await Sonora.DB.videos.getById(videoId);
+      if (!video) throw new Error('No se encontró el video');
+
+      var trackId = 'vm_' + videoId;
+      var existing = await Sonora.DB.tracks.getById(trackId);
+      if (existing) {
+        if (Sonora.Store) Sonora.Store.emit('toast', { message: 'ℹ Ese video ya está convertido en música', type: 'info' });
+        return existing;
+      }
+
+      var videoBlob = await Sonora.DB.videos.getFile(videoId);
+      var audioBlob = null;
+      var reusesVideoFile = false;
+      var title = video.title || 'Video';
+      var artist = video.artist || video.channel || 'YouTube';
+
+      // Si el MP4 ya está descargado reutilizamos su pista de audio desde el
+      // mismo archivo: NO se guarda otra copia (antes se duplicaba el video
+      // entero como si fuera una canción).
+      if (videoBlob) {
+        reusesVideoFile = true;
+      } else {
+        if (!navigator.onLine) throw new Error('El video no está descargado y no hay internet');
+        var servers = getCandidateServers();
+        var target = buildTargetUrl(video, title, artist);
+        var lastErr = null;
+        for (var s = 0; s < servers.length; s++) {
+          try {
+            audioBlob = await fetchBlobWithProgress(
+              buildDownloadUrl(servers[s], target, 'mp3', '320k', title, artist),
+              function () {}
+            );
+            break;
+          } catch (e) { lastErr = e; }
+        }
+        if (!audioBlob) throw new Error(lastErr ? lastErr.message : 'No se pudo extraer el audio');
+      }
+
+      var track = {
+        id: trackId,
+        title: title + ' (Audio)',
+        artist: artist,
+        album: 'Videos convertidos',
+        albumId: 'videos',
+        artistId: 'youtube',
+        duration: video.duration || 0,
+        artworkUrl: video.thumbnailData || video.thumbnail || '',
+        sourceUrl: video.url || '',
+        streamUrl: '',
+        filePath: '',
+        isFavorite: 0,
+        playCount: 0,
+        lastPlayed: null,
+        dateAdded: new Date().toISOString(),
+        genre: 'Videos convertidos',
+        year: new Date().getFullYear(),
+        trackNumber: 1,
+        lyrics: '',
+        syncedLyrics: '',
+        isDownloaded: 1,
+        mediaType: 'audio-from-video',
+        convertedFromVideoId: videoId,
+        reusesVideoFile: reusesVideoFile
+      };
+
+      await Sonora.DB.tracks.add(track);
+      if (!reusesVideoFile && audioBlob && Sonora.DB.downloads && Sonora.DB.downloads.save) {
+        await Sonora.DB.downloads.save(trackId, audioBlob);
+      }
+      video.convertedTrackId = trackId;
+      await Sonora.DB.videos.add(video);
+
+      if (Sonora.Store) {
+        Sonora.Store.emit('toast', { message: '🎵 "' + title + '" convertida en música', type: 'success' });
+        Sonora.Store.emit('track:converted', { track: track, video: video });
+        Sonora.Store.emit('downloadsChanged', { active: Object.values(_activeDownloads), completed: _completedHistory });
+      }
+      return track;
+    },
+
+    /** Espacio usado por los videos offline. */
+    getVideoStorageUsed: function () {
+      if (Sonora.DB && Sonora.DB.videos && typeof Sonora.DB.videos.getStorageUsed === 'function') {
+        return Sonora.DB.videos.getStorageUsed().catch(function () { return 0; });
+      }
+      return Promise.resolve(0);
     },
 
     /**

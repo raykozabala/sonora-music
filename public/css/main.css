@@ -92,6 +92,16 @@ select:focus-visible,
   outline-offset: 2px;
 }
 
+/* El buscador ya muestra su propio anillo en .search-bar:focus-within.
+   Sin esto se sumaba un segundo outline rojo alrededor del input. */
+.search-bar input:focus-visible,
+.search-bar__input:focus-visible,
+.search-bar input:focus,
+.search-bar__input:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 /* ==========================================================================
    Scrollbar Styling
    ========================================================================== */
@@ -273,6 +283,19 @@ body.light ::-webkit-scrollbar-thumb {
   flex: 1;
   text-align: left;
   margin: 0 8px;
+  /* El logo es un <svg> y la regla global "svg { display:block }" lo partía
+     en dos líneas. Con flex el icono y el texto quedan alineados. */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.header-logo {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
 }
 
 .header-actions {

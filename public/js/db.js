@@ -8,7 +8,7 @@
   var Sonora = window.Sonora = window.Sonora || {};
 
   var DB_NAME = 'SonoraMusic';
-  var DB_VERSION = 4;
+  var DB_VERSION = 5;
   var _db = null;
 
   /* ── helpers ── */
@@ -19,7 +19,7 @@
       req.onerror = function () { reject(req.error); };
       req.onupgradeneeded = function (e) {
         var db = e.target.result;
-        var stores = ['tracks', 'albums', 'artists', 'playlists', 'mixes', 'history', 'downloads', 'settings'];
+        var stores = ['tracks', 'albums', 'artists', 'playlists', 'mixes', 'history', 'downloads', 'settings', 'videos', 'videoFiles'];
         stores.forEach(function (name) {
           if (!db.objectStoreNames.contains(name)) {
             var s = db.createObjectStore(name, { keyPath: name === 'history' ? 'id' : (name === 'settings' ? 'key' : 'id'), autoIncrement: name === 'history' });
@@ -38,6 +38,14 @@
             }
             if (name === 'mixes') {
               s.createIndex('type', 'type', { unique: false });
+            }
+            if (name === 'videos') {
+              s.createIndex('dateAdded', 'dateAdded', { unique: false });
+              s.createIndex('title', 'title', { unique: false });
+              s.createIndex('platform', 'platform', { unique: false });
+            }
+            if (name === 'videoFiles') {
+              s.createIndex('videoId', 'videoId', { unique: false });
             }
           }
         });
@@ -545,6 +553,74 @@
           txn.oncomplete = resolve;
           txn.onerror = function () { reject(txn.error); };
         });
+      }
+    },
+
+    videos: {
+      /**
+       * Videos de YouTube guardados en Sonora.
+       * La ficha (título, duración, carátula…) va en 'videos' y el archivo
+       * MP4/WebM en 'videoFiles' para no cargar cientos de MB al listar.
+       */
+      getAll: function () {
+        return getAllFromStore('videos').then(function (all) {
+          return (all || []).sort(function (a, b) {
+            return new Date(b.dateAdded || 0) - new Date(a.dateAdded || 0);
+          });
+        }).catch(function () { return []; });
+      },
+      getById: function (id) {
+        return getByIdFromStore('videos', id).catch(function () { return null; });
+      },
+      add: function (video) {
+        video = video || {};
+        video.dateAdded = video.dateAdded || new Date().toISOString();
+        return putToStore('videos', video);
+      },
+      update: function (video) {
+        video.updatedAt = new Date().toISOString();
+        return putToStore('videos', video);
+      },
+      saveFile: function (videoId, blob) {
+        return putToStore('videoFiles', {
+          id: 'vf_' + videoId,
+          videoId: videoId,
+          blob: blob,
+          size: blob ? blob.size || 0 : 0,
+          savedAt: new Date().toISOString()
+        });
+      },
+      getFile: function (videoId) {
+        return getByIdFromStore('videoFiles', 'vf_' + videoId).then(function (rec) {
+          return rec ? rec.blob : null;
+        }).catch(function () { return null; });
+      },
+      hasFile: function (videoId) {
+        return Sonora.DB.videos.getFile(videoId).then(function (blob) {
+          return !!blob;
+        });
+      },
+      deleteFile: function (videoId) {
+        return deleteFromStore('videoFiles', 'vf_' + videoId).catch(function () {});
+      },
+      delete: function (videoId) {
+        return Promise.all([
+          deleteFromStore('videos', videoId).catch(function () {}),
+          deleteFromStore('videoFiles', 'vf_' + videoId).catch(function () {})
+        ]);
+      },
+      getStorageUsed: function () {
+        return getAllFromStore('videoFiles').then(function (all) {
+          return (all || []).reduce(function (total, rec) {
+            return total + (rec.size || (rec.blob && rec.blob.size) || 0);
+          }, 0);
+        }).catch(function () { return 0; });
+      },
+      clearAll: function () {
+        return Promise.all([
+          new Promise(function (resolve) { var t = _db.transaction('videos', 'readwrite'); t.objectStore('videos').clear(); t.oncomplete = resolve; t.onerror = resolve; }),
+          new Promise(function (resolve) { var t = _db.transaction('videoFiles', 'readwrite'); t.objectStore('videoFiles').clear(); t.oncomplete = resolve; t.onerror = resolve; })
+        ]);
       }
     },
 

@@ -1,0 +1,501 @@
+/**
+ * Sonora Music — Reproductor de Video
+ * Estilos del overlay, controles, panel de ajustes y mini-reproductor.
+ */
+
+.svp-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overscroll-behavior: contain;
+  user-select: none;
+  -webkit-user-select: none;
+  animation: svpFadeIn 0.18s ease;
+}
+
+.svp-overlay.hidden { display: none; }
+
+@keyframes svpFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── Barra superior ───────────────────────────────────────────────────── */
+.svp-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: max(env(safe-area-inset-top, 0px), 8px) 12px 8px;
+  background: linear-gradient(180deg, rgba(0,0,0,0.85), rgba(0,0,0,0));
+  position: relative;
+  z-index: 3;
+  transition: opacity 0.25s ease;
+}
+
+.svp-titles {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.svp-title {
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.svp-subtitle {
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.65);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+/* ── Botones ──────────────────────────────────────────────────────────── */
+.svp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #fff;
+  border-radius: 10px;
+  min-width: 38px;
+  min-height: 38px;
+  padding: 0 8px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.svp-btn:hover { background: rgba(255,255,255,0.2); }
+.svp-btn:active { transform: scale(0.96); }
+.svp-btn.active {
+  background: #FF4757;
+  border-color: #FF4757;
+  color: #fff;
+}
+.svp-btn:disabled { opacity: 0.5; cursor: default; }
+
+.svp-text-btn {
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 44px;
+}
+
+.svp-play {
+  background: #FF4757;
+  border-color: #FF4757;
+  border-radius: 50%;
+  min-width: 46px;
+  min-height: 46px;
+}
+
+.svp-close { border-radius: 50%; }
+
+/* ── Escenario / video ────────────────────────────────────────────────── */
+.svp-stage {
+  flex: 1 1 auto;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.svp-video {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  background: #000;
+  outline: none;
+}
+
+.svp-video.hidden { display: none; }
+
+/* Pista de audio DASH (va sincronizada con el vídeo, no se ve). */
+.svp-audio { display: none; }
+
+.svp-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 42px;
+  height: 42px;
+  margin: -21px 0 0 -21px;
+  border: 3px solid rgba(255,255,255,0.25);
+  border-top-color: #FF4757;
+  border-radius: 50%;
+  animation: svpSpin 0.8s linear infinite;
+  z-index: 4;
+}
+.svp-spinner.hidden { display: none; }
+
+@keyframes svpSpin { to { transform: rotate(360deg); } }
+
+.svp-bigplay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 78px;
+  height: 78px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,71,87,0.92);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 4;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+}
+.svp-bigplay.hidden { display: none; }
+
+/* ── Mensaje de error ─────────────────────────────────────────────────── */
+.svp-message {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+  background: rgba(0,0,0,0.78);
+  z-index: 5;
+}
+.svp-message.hidden { display: none; }
+.svp-message__icon { font-size: 34px; }
+.svp-message__title { font-size: 15px; font-weight: 700; }
+.svp-message__sub {
+  font-size: 12px;
+  color: rgba(255,255,255,0.7);
+  max-width: 320px;
+}
+.svp-message__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.svp-msg-btn {
+  background: rgba(255,255,255,0.14);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #fff;
+  border-radius: 20px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.svp-msg-btn--yt { background: #FF0000; border-color: #FF0000; }
+
+/* ── Iframe de respaldo ───────────────────────────────────────────────── */
+.svp-iframe-wrap {
+  position: absolute;
+  inset: 0;
+  background: #000;
+}
+.svp-iframe-wrap iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* ── Controles ────────────────────────────────────────────────────────── */
+.svp-controls {
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(0deg, rgba(0,0,0,0.92), rgba(0,0,0,0.35));
+  position: relative;
+  z-index: 3;
+  transition: opacity 0.25s ease;
+}
+
+.svp-overlay.svp-controls-hidden .svp-topbar,
+.svp-overlay.svp-controls-hidden .svp-controls {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.svp-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.svp-time {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255,255,255,0.8);
+  flex: 0 0 auto;
+  min-width: 38px;
+  text-align: center;
+}
+
+.svp-progress-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  height: 26px;
+  display: flex;
+  align-items: center;
+}
+
+.svp-buffered {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 4px;
+  margin-top: -2px;
+  background: rgba(255,255,255,0.35);
+  border-radius: 2px;
+  pointer-events: none;
+  max-width: 100%;
+}
+
+.svp-seek {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 26px;
+  margin: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.svp-seek::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.22);
+}
+.svp-seek::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.22);
+}
+.svp-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: #FF4757;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.5);
+}
+.svp-seek::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #FF4757;
+  border: 2px solid #fff;
+}
+
+.svp-buttons-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.svp-spacer { flex: 1 1 auto; }
+
+.svp-volume {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.svp-volume-range {
+  width: 74px;
+  height: 22px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.svp-volume-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.3);
+}
+.svp-volume-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+/* ── Panel de ajustes ─────────────────────────────────────────────────── */
+.svp-panel {
+  position: absolute;
+  right: 12px;
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  width: min(330px, calc(100% - 24px));
+  max-height: 62vh;
+  overflow-y: auto;
+  background: rgba(24,24,28,0.98);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px;
+  padding: 14px;
+  z-index: 6;
+  box-shadow: 0 16px 44px rgba(0,0,0,0.6);
+  animation: svpPanelIn 0.16s ease;
+}
+.svp-panel.hidden { display: none; }
+
+@keyframes svpPanelIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+.svp-panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: rgba(255,255,255,0.55);
+  margin-bottom: 8px;
+}
+
+.svp-panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.svp-panel-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.svp-panel-item {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #fff;
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  min-height: 40px;
+}
+.svp-panel-item:hover { background: rgba(255,255,255,0.14); }
+.svp-panel-item.active {
+  background: rgba(255,71,87,0.22);
+  border-color: #FF4757;
+  color: #fff;
+}
+
+.svp-panel-note {
+  font-size: 12px;
+  color: rgba(255,255,255,0.65);
+  line-height: 1.5;
+}
+
+/* ── Mini reproductor ─────────────────────────────────────────────────── */
+.svp-mini {
+  position: fixed;
+  right: 12px;
+  bottom: calc(var(--mini-player-height, 68px) + var(--bottom-nav-height, 64px) + 14px);
+  width: 220px;
+  background: #111;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 12px;
+  overflow: hidden;
+  z-index: 8500;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.6);
+  animation: svpPanelIn 0.18s ease;
+}
+
+.svp-mini-video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+
+.svp-mini-video video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.svp-mini-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: rgba(255,255,255,0.06);
+}
+
+.svp-mini-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.svp-mini-expand,
+.svp-mini-close {
+  background: rgba(255,255,255,0.12);
+  border: none;
+  color: #fff;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.svp-mini-close { background: rgba(255,71,87,0.85); }
+
+/* ── Pantalla completa ────────────────────────────────────────────────── */
+.svp-overlay:fullscreen,
+.svp-overlay:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+}
+
+/* En horizontal los controles ocupan menos alto */
+@media (orientation: landscape) and (max-height: 520px) {
+  .svp-topbar { padding-top: 6px; padding-bottom: 4px; }
+  .svp-title { font-size: 12.5px; }
+  .svp-subtitle { display: none; }
+  .svp-controls { padding: 4px 10px calc(4px + env(safe-area-inset-bottom, 0px)); }
+  .svp-btn { min-width: 34px; min-height: 34px; }
+  .svp-play { min-width: 40px; min-height: 40px; }
+  .svp-progress-row { gap: 6px; }
+  .svp-time { font-size: 10px; min-width: 34px; }
+  .svp-panel { bottom: calc(78px + env(safe-area-inset-bottom, 0px)); max-height: 74vh; }
+}
+
+@media (max-width: 420px) {
+  .svp-volume-range { display: none; }
+  .svp-buttons-row { gap: 5px; }
+  .svp-btn { min-width: 36px; min-height: 36px; padding: 0 6px; }
+  .svp-mini { width: 184px; }
+}

@@ -27,6 +27,10 @@ import android.os.Environment;
 import android.content.Context;
 import android.content.Intent;
 import android.widget.Toast;
+import android.widget.FrameLayout;
+import android.view.ViewGroup;
+import android.graphics.Color;
+import android.content.pm.ActivityInfo;
 import android.util.Log;
 import android.database.Cursor;
 import android.provider.MediaStore;
@@ -46,6 +50,11 @@ public class MainActivity extends Activity {
 
     private WebView webView;
     private ValueCallback<Uri[]> uploadMessage;
+
+    // Pantalla completa de video (HTML5 <video> / fullscreen del WebView)
+    private View customView = null;
+    private FrameLayout customViewContainer = null;
+    private WebChromeClient.CustomViewCallback customViewCallback = null;
 
     // Instancia viva: el servicio de reproducción la usa para mandar órdenes
     // (play/pausa/siguiente...) al reproductor que vive en el WebView.
@@ -688,6 +697,16 @@ public class MainActivity extends Activity {
         }
 
         @Override
+        public void onShowCustomView(View view, CustomViewCallback callback) {
+            showCustomView(view, callback);
+        }
+
+        @Override
+        public void onHideCustomView() {
+            hideCustomView();
+        }
+
+        @Override
         public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
             if (uploadMessage != null) {
                 uploadMessage.onReceiveValue(null);
@@ -802,6 +821,78 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** Muestra una vista de video a pantalla completa (HTML5 fullscreen). */
+    public void showCustomView(View view, WebChromeClient.CustomViewCallback callback) {
+        if (customView != null) {
+            if (callback != null) callback.onCustomViewHidden();
+            return;
+        }
+        customView = view;
+        customViewCallback = callback;
+
+        FrameLayout container = new FrameLayout(this);
+        container.setBackgroundColor(Color.BLACK);
+        container.addView(view, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT));
+
+        getWindow().addContentView(container, new ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT));
+        customViewContainer = container;
+
+        if (webView != null) webView.setVisibility(View.GONE);
+
+        getWindow().getDecorView().setSystemUiVisibility(
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+
+        try {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        } catch (Exception e) {
+            Log.w(TAG, "orientación landscape: " + e.getMessage());
+        }
+    }
+
+    /** Cierra la vista de pantalla completa y vuelve al WebView. */
+    public void hideCustomView() {
+        if (customView == null) return;
+
+        try {
+            if (customViewContainer != null) {
+                customViewContainer.removeView(customView);
+                ViewGroup parent = (ViewGroup) customViewContainer.getParent();
+                if (parent != null) parent.removeView(customViewContainer);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "hideCustomView: " + e.getMessage());
+        }
+
+        customView = null;
+        customViewContainer = null;
+
+        if (webView != null) webView.setVisibility(View.VISIBLE);
+
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+
+        try {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
+        } catch (Exception e) {}
+
+        if (customViewCallback != null) {
+            customViewCallback.onCustomViewHidden();
+            customViewCallback = null;
+        }
+    }
+
+    public boolean isCustomViewShown() {
+        return customView != null;
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -861,6 +952,10 @@ public class MainActivity extends Activity {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if (isCustomViewShown()) {
+                hideCustomView();
+                return true;
+            }
             if (webView != null && webView.canGoBack()) {
                 webView.goBack();
                 return true;
@@ -874,6 +969,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (sInstance == this) sInstance = null;
+        try {
+            if (isCustomViewShown()) hideCustomView();
+        } catch (Exception e) {}
         try {
             PlaybackService.shutdown(this);
         } catch (Exception e) {

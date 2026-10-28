@@ -105,6 +105,12 @@
   let deviceLoading = false;
   let deviceLoadedOnce = false;
 
+  // Sección "Videos descargados"
+  let allVideos = [];
+  let videosLoading = false;
+  let videosLoadedOnce = false;
+  let videoStorageUsed = 0;
+
   // Tab definitions
   const TABS = [
     { id: 'canciones', label: 'Canciones' },
@@ -112,6 +118,7 @@
     { id: 'artistas', label: 'Artistas' },
     { id: 'favoritos', label: 'Favoritos' },
     { id: 'descargados', label: 'Descargados' },
+    { id: 'videos', label: 'Videos' },
     { id: 'dispositivo', label: 'Este dispositivo' }
   ];
 
@@ -788,8 +795,102 @@
     `;
   }
 
-  function renderAlbumDetail(album, tracks) {
-    const albumTracks = tracks.filter(t =>
+  function formatBytesLib(bytes) {
+    const b = Number(bytes) || 0;
+    if (!b) return '0 KB';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(0) + ' KB';
+    if (b < 1024 * 1024 * 1024) return (b / (1024 * 1024)).toFixed(1) + ' MB';
+    return (b / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  }
+
+  function renderVideosTab() {
+    if (videosLoading && allVideos.length === 0) {
+      return `
+        <div class="lib-empty-state">
+          <div class="empty-icon">🎬</div>
+          <h3>Cargando tus videos…</h3>
+          <p>Un momento.</p>
+        </div>
+      `;
+    }
+
+    if (!allVideos.length) {
+      return `
+        <div class="lib-empty-state">
+          <div class="empty-icon">🎬</div>
+          <h3>Sin videos descargados</h3>
+          <p>Busca en la pestaña <strong>Videos</strong> del buscador y pulsa “Guardar en Sonora” para verlos sin internet.</p>
+          <button type="button" class="btn btn--primary" data-action="go-search-videos" style="margin-top:16px; background:var(--color-primary, #FF4757); color:#fff; border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
+            🎬 Buscar videos en YouTube
+          </button>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="lib-video-summary">
+        <div class="lib-video-summary__count">
+          <span class="lib-video-summary__num">${allVideos.length}</span>
+          <span class="lib-video-summary__label">${allVideos.length === 1 ? 'video guardado' : 'videos guardados'}</span>
+        </div>
+        <div class="lib-video-summary__storage">💾 ${formatBytesLib(videoStorageUsed)} usados</div>
+      </div>
+      <div class="lib-videos-grid">
+        ${allVideos.map(v => {
+          const thumb = v.thumbnailData || v.thumbnail || generateArtwork(v.id || v.videoId, v.title);
+          const dur = v.durationText || formatTime(v.duration);
+          const date = v.dateAdded ? new Date(v.dateAdded).toLocaleDateString() : '';
+          const size = v.size ? formatBytesLib(v.size) : '';
+          return `
+            <div class="lib-video-card" data-video-id="${escapeHtml(v.id || v.videoId)}">
+              <div class="lib-video-thumb" data-action="play-video" data-video-id="${escapeHtml(v.id || v.videoId)}">
+                <img src="${escapeHtml(thumb)}" alt="" loading="lazy" onerror="this.onerror=null;this.src=''" />
+                <span class="lib-video-duration">${escapeHtml(dur)}</span>
+                <span class="lib-video-play-badge">▶</span>
+              </div>
+              <div class="lib-video-info">
+                <div class="lib-video-title" title="${escapeHtml(v.title)}">${escapeHtml(v.title)}</div>
+                <div class="lib-video-meta">${escapeHtml(v.channel || v.artist || 'YouTube')}</div>
+                <div class="lib-video-meta lib-video-meta--small">
+                  ${v.quality ? `<span class="lib-video-chip">${escapeHtml(v.quality)}</span>` : ''}
+                  ${size ? `<span class="lib-video-chip">${escapeHtml(size)}</span>` : ''}
+                  ${date ? `<span>${escapeHtml(date)}</span>` : ''}
+                </div>
+                <div class="lib-video-actions">
+                  <button type="button" class="lib-video-btn lib-video-btn--play" data-action="play-video" data-video-id="${escapeHtml(v.id || v.videoId)}">▶ Ver</button>
+                  <button type="button" class="lib-video-btn lib-video-btn--convert" data-action="convert-video" data-video-id="${escapeHtml(v.id || v.videoId)}">🎵 Música</button>
+                  <button type="button" class="lib-video-btn lib-video-btn--delete" data-action="delete-video" data-video-id="${escapeHtml(v.id || v.videoId)}" aria-label="Eliminar video">🗑</button>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  async function loadVideos(force) {
+    if (videosLoading) return;
+    if (videosLoadedOnce && !force) return;
+    if (!Sonora.DB || !Sonora.DB.videos) return;
+
+    videosLoading = true;
+    try {
+      allVideos = await Sonora.DB.videos.getAll();
+      try {
+        videoStorageUsed = await Sonora.DB.videos.getStorageUsed();
+      } catch (e) { videoStorageUsed = 0; }
+      videosLoadedOnce = true;
+    } catch (e) {
+      console.warn('[Library] No se pudieron cargar los videos:', e && e.message);
+      allVideos = [];
+    } finally {
+      videosLoading = false;
+      if (activeTab === 'videos') renderCurrentView();
+    }
+  }
+
+  function renderAlbumDetail(album, tracks) {    const albumTracks = tracks.filter(t =>
       (album.id && (String(t.albumId) === String(album.id) || String(t.album) === String(album.title))) ||
       (t.album && t.album.toLowerCase() === (album.title || '').toLowerCase())
     );
@@ -993,8 +1094,9 @@
             }
             .library-tabs-nav {
               display: flex;
+              flex-wrap: wrap;
               gap: 8px;
-              overflow-x: auto;
+              overflow-x: visible;
               padding-bottom: 8px;
               scrollbar-width: none;
               -webkit-overflow-scrolling: touch;
@@ -1379,6 +1481,164 @@
               padding: 0 20px 8px;
               margin: 8px 0 0;
             }
+            /* ── Biblioteca de videos ── */
+            .lib-video-summary {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              gap: 12px;
+              padding: 14px 20px 6px;
+              flex-wrap: wrap;
+            }
+            .lib-video-summary__count {
+              display: flex;
+              align-items: baseline;
+              gap: 6px;
+            }
+            .lib-video-summary__num {
+              font-size: 22px;
+              font-weight: 800;
+              color: var(--color-text-primary);
+            }
+            .lib-video-summary__label {
+              font-size: 12px;
+              color: var(--color-text-secondary);
+            }
+            .lib-video-summary__storage {
+              font-size: 12px;
+              font-weight: 600;
+              color: var(--color-text-secondary);
+              background: var(--color-surface);
+              border: 1px solid var(--color-card-border, rgba(255,255,255,0.08));
+              border-radius: 20px;
+              padding: 6px 12px;
+            }
+            .lib-videos-grid {
+              display: grid;
+              grid-template-columns: 1fr;
+              gap: 12px;
+              padding: 10px 16px 24px;
+            }
+            .lib-video-card {
+              display: flex;
+              gap: 12px;
+              background: var(--color-surface);
+              border: 1px solid var(--color-card-border, rgba(255,255,255,0.07));
+              border-radius: 14px;
+              padding: 10px;
+              box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+            }
+            .lib-video-thumb {
+              position: relative;
+              width: 128px;
+              height: 74px;
+              flex: 0 0 128px;
+              border-radius: 9px;
+              overflow: hidden;
+              background: #000;
+              cursor: pointer;
+            }
+            .lib-video-thumb img {
+              width: 100%;
+              height: 100%;
+              object-fit: cover;
+            }
+            .lib-video-duration {
+              position: absolute;
+              bottom: 4px;
+              right: 4px;
+              background: rgba(0,0,0,0.82);
+              color: #fff;
+              font-size: 10px;
+              font-weight: 700;
+              padding: 1px 5px;
+              border-radius: 4px;
+              max-width: calc(100% - 8px);
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+            }
+            .lib-video-play-badge {
+              position: absolute;
+              inset: 0;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              color: #fff;
+              font-size: 22px;
+              background: rgba(0,0,0,0.28);
+              opacity: 0;
+              transition: opacity 0.18s ease;
+            }
+            .lib-video-card:hover .lib-video-play-badge { opacity: 1; }
+            .lib-video-info {
+              flex: 1 1 auto;
+              min-width: 0;
+              display: flex;
+              flex-direction: column;
+            }
+            .lib-video-title {
+              font-size: 14px;
+              font-weight: 700;
+              color: var(--color-text-primary);
+              line-height: 1.3;
+              display: -webkit-box;
+              -webkit-line-clamp: 2;
+              -webkit-box-orient: vertical;
+              overflow: hidden;
+            }
+            .lib-video-meta {
+              font-size: 11.5px;
+              color: var(--color-text-secondary);
+              margin-top: 3px;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            }
+            .lib-video-meta--small {
+              display: flex;
+              align-items: center;
+              gap: 6px;
+              flex-wrap: wrap;
+              margin-top: 4px;
+            }
+            .lib-video-chip {
+              background: rgba(255,255,255,0.07);
+              border: 1px solid rgba(255,255,255,0.1);
+              border-radius: 6px;
+              padding: 1px 6px;
+              font-size: 10px;
+              font-weight: 700;
+            }
+            .lib-video-actions {
+              display: flex;
+              gap: 6px;
+              margin-top: auto;
+              padding-top: 8px;
+              flex-wrap: wrap;
+            }
+            .lib-video-btn {
+              border: none;
+              border-radius: 14px;
+              padding: 5px 10px;
+              font-size: 11px;
+              font-weight: 700;
+              cursor: pointer;
+              min-width: 0;
+              min-height: 30px;
+              color: #fff;
+            }
+            .lib-video-btn--play { background: var(--color-primary, #FF4757); }
+            .lib-video-btn--convert { background: rgba(76,175,80,0.22); color: #7ee08a; border: 1px solid rgba(76,175,80,0.4); }
+            .lib-video-btn--delete { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); }
+            @media (min-width: 720px) {
+              .lib-videos-grid { grid-template-columns: 1fr 1fr; }
+            }
+            @media (max-width: 370px) {
+              .lib-video-thumb { width: 104px; height: 60px; flex-basis: 104px; }
+              .lib-video-title { font-size: 13px; }
+            }
+
             /* Empty State */
             .lib-empty-state {
               padding: 60px 24px;
@@ -1680,6 +1940,74 @@
           if (goSearchBtn) {
             if (Sonora.Router && typeof Sonora.Router.navigate === 'function') {
               Sonora.Router.navigate('search');
+            }
+            return;
+          }
+
+          // 0b. Ir al buscador en modo Videos
+          const goSearchVideosBtn = target.closest('[data-action="go-search-videos"]');
+          if (goSearchVideosBtn) {
+            try { localStorage.setItem('sonora_search_mode', 'video'); } catch (e) {}
+            if (Sonora.Router && typeof Sonora.Router.navigate === 'function') {
+              Sonora.Router.navigate('search');
+            }
+            return;
+          }
+
+          // 0c. Reproducir un video guardado
+          const playVideoBtn = target.closest('[data-action="play-video"]');
+          if (playVideoBtn) {
+            const vid = playVideoBtn.getAttribute('data-video-id');
+            const video = allVideos.find(v => String(v.id) === String(vid) || String(v.videoId) === String(vid));
+            if (video) {
+              let blob = null;
+              try {
+                if (Sonora.DB && Sonora.DB.videos) blob = await Sonora.DB.videos.getFile(video.id);
+              } catch (e) {}
+              if (Sonora.VideoPlayer && typeof Sonora.VideoPlayer.open === 'function') {
+                Sonora.VideoPlayer.open(video, { blob: blob || null });
+              } else {
+                showToast('El reproductor de video no está disponible');
+              }
+            }
+            return;
+          }
+
+          // 0d. Convertir un video en música
+          const convertVideoBtn = target.closest('[data-action="convert-video"]');
+          if (convertVideoBtn) {
+            const vid = convertVideoBtn.getAttribute('data-video-id');
+            if (!vid) return;
+            try {
+              convertVideoBtn.disabled = true;
+              showToast('🎵 Convirtiendo el video en música…');
+              await Sonora.Download.convertVideoToMusic(vid);
+              videosLoadedOnce = false;
+              await loadVideos(true);
+              try { await loadLibraryData(); } catch (e) {}
+              renderCurrentView();
+              showToast('🎵 Listo: la canción ya está en tu biblioteca');
+            } catch (err) {
+              showToast(err && err.message ? err.message : 'No se pudo convertir el video');
+            }
+            return;
+          }
+
+          // 0e. Eliminar un video descargado
+          const deleteVideoBtn = target.closest('[data-action="delete-video"]');
+          if (deleteVideoBtn) {
+            const vid = deleteVideoBtn.getAttribute('data-video-id');
+            if (!vid) return;
+            const video = allVideos.find(v => String(v.id) === String(vid));
+            const ok = window.confirm('¿Eliminar "' + ((video && video.title) || 'este video') + '" de Sonora?\n\nSe borrará también el archivo offline.');
+            if (!ok) return;
+            try {
+              await Sonora.DB.videos.delete(vid);
+              videosLoadedOnce = false;
+              await loadVideos(true);
+              showToast('Video eliminado');
+            } catch (err) {
+              showToast('No se pudo eliminar el video');
             }
             return;
           }
@@ -2062,6 +2390,10 @@
         break;
       case 'descargados':
         tabContent.innerHTML = renderDescargadosTab(allTracks);
+        break;
+      case 'videos':
+        tabContent.innerHTML = renderVideosTab();
+        if (!videosLoadedOnce || !videosLoading) loadVideos();
         break;
       case 'dispositivo':
         tabContent.innerHTML = renderDispositivoTab();

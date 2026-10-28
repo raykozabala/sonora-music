@@ -21,17 +21,23 @@ const SERVER_MODE = (process.env.SERVER_MODE || (process.env.RENDER ? 'render' :
 const isRender = SERVER_MODE === 'render';
 
 // Paths
+// DATA_DIR / MUSIC_DIR / DB_PATH permiten montar un volumen persistente en
+// Northflank, Render u otro hosting sin tocar el código.
 const publicDir = path.resolve(__dirname, '../public');
-const musicDir = path.resolve(__dirname, '../music');
-const dbPath = path.resolve(__dirname, 'sonora.db');
+const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : __dirname;
+const musicDir = process.env.MUSIC_DIR ? path.resolve(process.env.MUSIC_DIR) : path.resolve(__dirname, '../music');
+const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : path.resolve(__dirname, 'sonora.db');
 
 // Ensure directories exist
 try {
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
   if (!fs.existsSync(musicDir)) {
     fs.mkdirSync(musicDir, { recursive: true });
   }
 } catch (err) {
-  console.error('[Startup] Failed to create music directory:', err);
+  console.error('[Startup] Failed to create data/music directory:', err);
 }
 
 // ---------------------------------------------------------------------------
@@ -634,7 +640,7 @@ app.get('/api/health', (req, res) => {
       status: 'ok',
       server: isRender ? 'render' : 'local',
       uptime: Math.floor(process.uptime()),
-      version: '7.10.0'
+      version: '7.11.0'
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
@@ -787,14 +793,14 @@ const YTDLP_CLIENT_TIMEOUT = 45000;
  * Ejecuta yt-dlp (--get-url) con un "player client" concreto.
  * Devuelve { url, error }: url si funcionó, o el motivo del fallo.
  */
-function ytdlpResolveWithClient(targetUrl, client) {
+function ytdlpResolveWithClient(targetUrl, client, formatSpec) {
   return new Promise((resolve) => {
     const args = [
       '--no-playlist',
       '--no-warnings',
       '--quiet',
       '--no-check-certificates',
-      '-f', 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
+      '-f', formatSpec || 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
       '--get-url'
     ];
     if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
@@ -916,10 +922,152 @@ function setResolvedUrl(key, url) {
   RESOLVED_URL_CACHE.set(key, { url: url, exp: Date.now() + RESOLVED_URL_TTL });
 }
 
+// ---------------------------------------------------------------------------
+// Streaming de vídeo: YouTube ya no sirve los MP4 "progresivos" (itag 18) a
+// la mayoría de clientes (HTTP 403), pero sí entrega las pistas DASH de vídeo
+// y audio por separado. El reproductor pide las dos y las sincroniza.
+// ---------------------------------------------------------------------------
+
+/** Comprueba que el CDN entrega bytes de verdad (no un 403/HTML). */
+function probeMediaUrl(url, timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok, status, ct) => {
+      if (settled) return;
+      settled = true;
+      resolve({ ok: ok, status: status || 0, contentType: ct || '' });
+    };
+    let lib;
+    try { lib = url.startsWith('https') ? https : http; } catch (e) { return finish(false, 0, ''); }
+
+    const req = lib.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.youtube.com/',
+        'Range': 'bytes=0-1023'
+      }
+    }, (up) => {
+      const ct = String(up.headers['content-type'] || '');
+      const ok = up.statusCode >= 200 && up.statusCode < 400 &&
+        ct.indexOf('text/') !== 0 && ct.indexOf('text/html') === -1;
+      up.destroy();
+      finish(ok, up.statusCode, ct);
+    });
+    req.on('error', () => finish(false, 0, ''));
+    req.setTimeout(timeoutMs || 8000, () => { try { req.destroy(); } catch (e) {} finish(false, 0, 'timeout'); });
+  });
+}
+
+const STREAM_RESOLVE_CACHE = new Map();
+const STREAM_RESOLVE_TTL = 8 * 60 * 1000;
+const STREAM_INFLIGHT = new Map();
+
+function getStreamCache(key) {
+  const e = STREAM_RESOLVE_CACHE.get(key);
+  if (!e) return null;
+  if (e.exp <= Date.now()) { STREAM_RESOLVE_CACHE.delete(key); return null; }
+  return e.url;
+}
+
+function setStreamCache(key, url) {
+  if (STREAM_RESOLVE_CACHE.size > 240) STREAM_RESOLVE_CACHE.clear();
+  STREAM_RESOLVE_CACHE.set(key, { url: url, exp: Date.now() + STREAM_RESOLVE_TTL });
+}
+
+function invalidateStreamCache(key) {
+  STREAM_RESOLVE_CACHE.delete(key);
+}
+
+/**
+ * Resuelve la URL DASH de una pista (vídeo o audio) probando varios clientes.
+ * Se lanzan de dos en dos y se valida la URL con una petición Range real:
+ * una URL que el CDN rechaza se descarta y se sigue con el siguiente cliente.
+ */
+function resolveDashStream(targetUrl, kind, height) {
+  const h = Math.max(144, parseInt(height, 10) || 720);
+  const isAudio = kind === 'audio';
+  const cacheKey = (isAudio ? 'a|' : 'v|') + h + '|' + targetUrl;
+  const cached = getStreamCache(cacheKey);
+  if (cached) return Promise.resolve({ url: cached, cacheKey: cacheKey });
+
+  // Si el reproductor (o el prefetch del modal) ya está resolviendo esta
+  // misma pista, se comparte la promesa: no se lanzan dos yt-dlp iguales.
+  if (STREAM_INFLIGHT.has(cacheKey)) return STREAM_INFLIGHT.get(cacheKey);
+
+  const formats = isAudio
+    ? ['bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio']
+    : [
+        'bestvideo[height<=' + h + '][ext=mp4]/bestvideo[height<=' + h + ']',
+        'bestvideo[ext=mp4]/bestvideo'
+      ];
+  const clients = isAudio ? [null, 'tv_embedded', 'android_vr'] : [null, 'android_vr', 'tv_embedded', 'mweb'];
+
+  const promise = new Promise((resolve, reject) => {
+    const CONCURRENCY = 2;
+    let idx = 0;
+    let pending = 0;
+    let settled = false;
+    const errors = [];
+
+    function tryNext() {
+      while (!settled && pending < CONCURRENCY && idx < clients.length) {
+        const client = clients[idx++];
+        pending++;
+        const spec = formats[0];
+        ytdlpResolveWithClient(targetUrl, client, spec).then((res) => {
+          if (settled) return;
+          if (!res || !res.url) {
+            pending--;
+            if (res && res.error) errors.push(res.error);
+            if (pending === 0 && idx >= clients.length) {
+              settled = true;
+              reject(new Error('ningún cliente entregó la pista | ' + errors.join(' | ')));
+            } else {
+              tryNext();
+            }
+            return;
+          }
+          probeMediaUrl(res.url, 9000).then((probe) => {
+            if (settled) return;
+            pending--;
+            if (probe.ok) {
+              settled = true;
+              setStreamCache(cacheKey, res.url);
+              return resolve({ url: res.url, cacheKey: cacheKey });
+            }
+            errors.push((client || 'default') + ': CDN ' + probe.status + ' ' + probe.contentType);
+            if (pending === 0 && idx >= clients.length) {
+              settled = true;
+              reject(new Error('el CDN rechazó todas las pistas | ' + errors.join(' | ')));
+            } else {
+              tryNext();
+            }
+          }).catch(() => {
+            pending--;
+            if (pending === 0 && idx >= clients.length) {
+              settled = true;
+              reject(new Error('no se pudo validar la pista'));
+            } else {
+              tryNext();
+            }
+          });
+        });
+      }
+    }
+    tryNext();
+  });
+
+  STREAM_INFLIGHT.set(cacheKey, promise);
+  promise.finally(function () { STREAM_INFLIGHT.delete(cacheKey); });
+  return promise;
+}
+
 /**
  * Hace proxy de una URL de audio respetando el header Range (permite "seek").
  */
-function proxyAudioStream(directUrl, req, res, onReject) {
+function proxyAudioStream(directUrl, req, res, onReject, defaultType, redirectsLeft) {
   const lib = directUrl.startsWith('https') ? https : http;
   const headers = {
     'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
@@ -931,6 +1079,19 @@ function proxyAudioStream(directUrl, req, res, onReject) {
 
   const upstream = lib.get(directUrl, { headers }, (up) => {
     const ct = String(up.headers['content-type'] || '');
+
+    // Redirecciones del CDN (302 a otro nodo de googlevideo).
+    if (up.statusCode >= 300 && up.statusCode < 400 && up.headers.location) {
+      up.resume();
+      const left = (typeof redirectsLeft === 'number' ? redirectsLeft : 2);
+      if (left <= 0) {
+        if (!res.headersSent) res.status(502).json({ error: 'Demasiadas redirecciones del CDN' });
+        return;
+      }
+      const next = new URL(up.headers.location, directUrl).toString();
+      return proxyAudioStream(next, req, res, onReject, defaultType, left - 1);
+    }
+
     const rejected = (up.statusCode && up.statusCode >= 400) || ct.indexOf('text/html') !== -1;
     if (rejected) {
       // El CDN de YouTube devolvió una página de error en lugar del audio.
@@ -952,7 +1113,7 @@ function proxyAudioStream(directUrl, req, res, onReject) {
     ['content-type', 'content-length', 'accept-ranges', 'content-range', 'content-encoding'].forEach((h) => {
       if (up.headers[h]) res.setHeader(h, up.headers[h]);
     });
-    if (!up.headers['content-type']) res.setHeader('Content-Type', 'audio/mpeg');
+    if (!up.headers['content-type']) res.setHeader('Content-Type', defaultType || 'audio/mpeg');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
@@ -1292,6 +1453,106 @@ app.get('/api/search/external', async (req, res) => {
     let maxResults = parseInt(req.query.limit, 10);
     if (!maxResults || maxResults < 10) maxResults = 44;
     if (maxResults > 90) maxResults = 90;
+
+    // ------------------------------------------------------------------
+    // Modo VÍDEOS: resultados de YouTube sin mezclar con audio/SoundCloud.
+    // Busca variantes amplias para que aparezcan también vídeos largos
+    // (documentales, conciertos, mixes de 1-3 h) y no sólo clips cortos.
+    // ------------------------------------------------------------------
+    if (String(req.query.mode || '').toLowerCase() === 'video') {
+      try {
+        // Si pegan una URL de YouTube, devolvemos ese vídeo directamente
+        // (con título real vía oEmbed) en lugar de buscar el texto de la URL.
+        if (/^(https?:\/\/)?(www\.|m\.|music\.)?(youtube\.com|youtu\.be)\//i.test(q)) {
+          const vid = extractYouTubeId(q);
+          if (vid) {
+            let title = 'Vídeo de YouTube';
+            let author = 'YouTube';
+            try {
+              const o = await fetch(
+                'https://www.youtube.com/oembed?url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + vid) + '&format=json',
+                { headers: { 'User-Agent': 'SonoraMusic/7.11.0' } }
+              );
+              if (o.ok) {
+                const j = await o.json();
+                if (j.title) title = j.title;
+                if (j.author_name) author = j.author_name;
+              }
+            } catch (e) {}
+            return res.json([{
+              id: 'ytv_' + vid,
+              videoId: vid,
+              title: title,
+              artist: author,
+              duration: 0,
+              durationText: '',
+              thumbnail: `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,
+              platform: 'youtube',
+              kind: 'video',
+              views: 0,
+              ago: '',
+              isLive: false,
+              url: 'https://www.youtube.com/watch?v=' + vid
+            }]);
+          }
+        }
+
+        const yts = require('yt-search');
+        const vq = [];
+        const seenQ = new Set();
+        const addQ = (s) => {
+          const t = String(s || '').replace(/\s+/g, ' ').trim();
+          if (t && !seenQ.has(t.toLowerCase())) { seenQ.add(t.toLowerCase()); vq.push(t); }
+        };
+        addQ(q);
+        // Si la consulta ya es una URL de YouTube, no hace falta buscar.
+        if (!/youtu\.?be|youtube\.com/i.test(q)) {
+          addQ(q + ' full video');
+          addQ(q + ' documental completo');
+          addQ(q + ' en español');
+          addQ(q + ' 4k');
+        }
+
+        const batches = await Promise.allSettled(vq.slice(0, 4).map((v) => yts(v)));
+        const lists = batches.map((r) =>
+          (r.status === 'fulfilled' && r.value && r.value.videos) ? r.value.videos : []
+        );
+
+        const merged = [];
+        const seen = new Set();
+        const maxLen = lists.reduce((m, l) => Math.max(m, l.length), 0);
+        for (let round = 0; round < maxLen && merged.length < maxResults; round++) {
+          for (const list of lists) {
+            const v = list[round];
+            if (!v || !v.videoId || seen.has(v.videoId)) continue;
+            seen.add(v.videoId);
+            merged.push(v);
+            if (merged.length >= maxResults) break;
+          }
+        }
+
+        const videos = merged.map((v) => ({
+          id: 'ytv_' + v.videoId,
+          videoId: v.videoId,
+          title: v.title,
+          artist: (v.author && v.author.name) || 'YouTube',
+          duration: v.seconds || 0,
+          durationText: v.timestamp || '',
+          thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+          platform: 'youtube',
+          kind: 'video',
+          views: v.views || 0,
+          ago: v.ago || '',
+          isLive: !!v.isLive,
+          url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`
+        }));
+
+        return res.json(videos);
+      } catch (err) {
+        console.warn('[Search] modo vídeo falló:', err.message);
+        return res.status(502).json({ error: 'No se pudieron buscar vídeos', detail: err.message });
+      }
+    }
 
     const results = [];
 
@@ -1832,6 +2093,449 @@ app.get('/api/download/external', async (req, res) => {
   stream.pipe(res);
 });
 
+// ---------------------------------------------------------------------------
+// VÍDEOS: información, subtítulos y stream de respaldo
+// ---------------------------------------------------------------------------
+const VIDEO_INFO_CACHE = new Map();
+const VIDEO_INFO_TTL = 15 * 60 * 1000;
+const VIDEO_SUBS_CACHE = new Map();
+const VIDEO_SUBS_TTL = 60 * 60 * 1000;
+
+/** Ejecuta un binario y devuelve stdout completo (no sólo la 1ª línea). */
+function runCaptureFull(bin, args, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(bin, args);
+    let out = '';
+    let err = '';
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      try { proc.kill('SIGKILL'); } catch (e) {}
+      reject(new Error('timeout'));
+    }, timeoutMs || 60000);
+
+    proc.stdout.on('data', (d) => { out += d.toString(); });
+    proc.stderr.on('data', (d) => { err += d.toString(); });
+    proc.on('error', (e) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      reject(e);
+    });
+    proc.on('close', (code) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (code === 0 && out.trim()) return resolve(out);
+      const lines = err.trim().split('\n').filter(Boolean);
+      reject(new Error(lines.slice(-2).join(' | ') || ('código ' + code)));
+    });
+  });
+}
+
+/** Traduce errores feos de yt-dlp a mensajes entendibles. */
+function friendlyVideoError(msg) {
+  const s = String(msg || '');
+  if (/429|too many requests/i.test(s)) {
+    return 'YouTube limitó las peticiones (HTTP 429). Espera unos minutos y vuelve a intentarlo.';
+  }
+  if (/sign in to confirm|not a bot|cookies/i.test(s)) {
+    return 'YouTube pidió verificación para este vídeo. Prueba a reproducirlo online o espera un rato.';
+  }
+  if (/timeout/i.test(s)) {
+    return 'YouTube tardó demasiado en responder. Inténtalo de nuevo.';
+  }
+  if (/private|unavailable|not available/i.test(s)) {
+    return 'Este vídeo no está disponible o es privado.';
+  }
+  return s || 'No se pudo procesar el vídeo';
+}
+
+async function ytdlpVideoInfo(targetUrl) {
+  const cached = VIDEO_INFO_CACHE.get(targetUrl);
+  if (cached && cached.exp > Date.now()) return cached.data;
+
+  const baseArgs = [
+    '--no-playlist', '--no-warnings', '--no-check-certificates',
+    '--skip-download', '--dump-single-json'
+  ];
+
+  // Los clientes se prueban EN PARALELO: antes, si el primero tardaba 40 s,
+  // el modal del vídeo se quedaba sin calidades aunque el segundo hubiera
+  // respondido en 3 s.
+  const errors = [];
+  const result = await new Promise((resolve) => {
+    let pending = 0;
+    let settled = false;
+
+    const launch = (client) => {
+      pending++;
+      const args = withCookies(baseArgs.slice());
+      if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
+      args.push(targetUrl);
+      runCaptureFull(YTDLP_BIN, args, 45000).then((raw) => {
+        if (settled) return;
+        let info = null;
+        try { info = JSON.parse(raw); } catch (e) { info = null; }
+        if (!info || !info.title) {
+          errors.push((client || 'default') + ': respuesta inválida');
+        } else {
+          settled = true;
+          VIDEO_INFO_CACHE.set(targetUrl, { data: info, exp: Date.now() + VIDEO_INFO_TTL });
+          if (VIDEO_INFO_CACHE.size > 120) VIDEO_INFO_CACHE.clear();
+          resolve(info);
+          return;
+        }
+        pending--;
+        if (pending === 0) resolve(null);
+      }).catch((e) => {
+        if (settled) return;
+        errors.push((client || 'default') + ': ' + e.message);
+        console.warn('[VideoInfo] client=' + (client || 'default') + ' falló: ' + e.message);
+        pending--;
+        if (pending === 0) resolve(null);
+      });
+    };
+
+    YT_RESOLVE_CLIENTS.forEach(launch);
+  });
+
+  if (result) return result;
+  throw new Error(errors.join(' | ') || 'No se pudo obtener la información del vídeo');
+}
+
+function pickNumber(...values) {
+  for (const v of values) {
+    if (typeof v === 'number' && isFinite(v) && v > 0) return v;
+  }
+  return 0;
+}
+
+/**
+ * GET /api/video/info?url=
+ * Metadatos + calidades disponibles + tamaño estimado + subtítulos.
+ */
+app.get('/api/video/info', async (req, res) => {
+  const targetUrl = normalizeYtdlpTarget(req.query.url);
+  if (!targetUrl) return res.status(400).json({ error: 'Falta el parámetro url' });
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  try {
+    const info = await ytdlpVideoInfo(targetUrl);
+
+    const formats = Array.isArray(info.formats) ? info.formats : [];
+    const videoFormats = formats.filter((f) => f && f.vcodec && f.vcodec !== 'none');
+    const audioFormats = formats.filter((f) => f && f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none'));
+
+    // Mejor audio disponible (para estimar el peso del MP4 final)
+    let bestAudioSize = 0;
+    for (const a of audioFormats) {
+      const sz = pickNumber(a.filesize, a.filesize_approx);
+      if (sz > bestAudioSize) bestAudioSize = sz;
+    }
+
+    const byHeight = new Map();
+    for (const f of videoFormats) {
+      const h = pickNumber(f.height);
+      if (!h) continue;
+      const size = pickNumber(f.filesize, f.filesize_approx);
+      const prev = byHeight.get(h);
+      const progressive = f.acodec && f.acodec !== 'none';
+      const candidate = {
+        height: h,
+        label: h + 'p' + (f.fps && f.fps >= 50 ? Math.round(f.fps) : ''),
+        ext: f.ext || 'mp4',
+        size: size + (progressive ? 0 : bestAudioSize),
+        fps: pickNumber(f.fps),
+        progressive: !!progressive
+      };
+      if (!prev || (candidate.progressive && !prev.progressive) || candidate.size > prev.size) {
+        byHeight.set(h, candidate);
+      }
+    }
+
+    const qualities = Array.from(byHeight.values())
+      .sort((a, b) => b.height - a.height)
+      .slice(0, 8)
+      .map((q) => ({
+        height: q.height,
+        label: q.label,
+        ext: q.ext,
+        size: q.size,
+        fps: q.fps,
+        progressive: q.progressive
+      }));
+
+    const subs = Object.keys(info.subtitles || {});
+    const autoSubs = Object.keys(info.automatic_captions || {});
+    const duration = pickNumber(info.duration);
+
+    // Tamaño estimado global: mejor pista progresiva o vídeo+audio.
+    let estimatedSize = 0;
+    const progressive = videoFormats.filter((f) => f.acodec && f.acodec !== 'none');
+    for (const f of progressive) {
+      const sz = pickNumber(f.filesize, f.filesize_approx);
+      if (sz > estimatedSize) estimatedSize = sz;
+    }
+    if (!estimatedSize && qualities.length) estimatedSize = qualities[0].size;
+
+    const data = {
+      id: info.id || extractYouTubeId(targetUrl) || '',
+      title: info.title || 'Vídeo de YouTube',
+      author: info.uploader || info.channel || 'YouTube',
+      duration: duration,
+      durationText: duration ? formatDuration(duration) : '',
+      thumbnail: info.thumbnail || (info.id ? `https://i.ytimg.com/vi/${info.id}/hqdefault.jpg` : ''),
+      viewCount: pickNumber(info.view_count),
+      uploadDate: info.upload_date || '',
+      description: String(info.description || '').slice(0, 600),
+      isLive: !!info.is_live,
+      liveStatus: info.live_status || '',
+      webpageUrl: info.webpage_url || targetUrl,
+      qualities: qualities,
+      estimatedSize: estimatedSize,
+      audioSize: bestAudioSize,
+      streamMode: 'split',
+      subtitles: subs,
+      autoSubtitles: autoSubs,
+      hasSubtitles: subs.length > 0 || autoSubs.length > 0
+    };
+
+    res.json(data);
+  } catch (err) {
+    console.warn('[VideoInfo] error:', err.message);
+    res.status(502).json({ error: friendlyVideoError(err.message), detail: err.message });
+  }
+});
+
+function formatDuration(totalSeconds) {
+  const s = Math.max(0, Math.round(Number(totalSeconds) || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
+/** Convierte SRT a WebVTT (formato que entiende <track>). */
+function srtToVtt(input) {
+  let text = String(input || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // Quita numeración de cue y deja los timestamps con punto decimal.
+  const blocks = text.split('\n\n');
+  const out = ['WEBVTT', ''];
+  for (const block of blocks) {
+    const lines = block.split('\n').filter((l) => l.trim() !== '');
+    if (!lines.length) continue;
+    let i = 0;
+    if (/^\d+$/.test(lines[0].trim())) i = 1;
+    if (!lines[i] || lines[i].indexOf('-->') === -1) continue;
+    const timing = lines[i]
+      .replace(/,/g, '.')
+      .replace(/\s+/g, ' ')
+      .trim();
+    out.push(timing);
+    out.push(lines.slice(i + 1).join('\n'));
+    out.push('');
+  }
+  return out.join('\n');
+}
+
+/**
+ * GET /api/video/subtitles?url=&lang=es&auto=1
+ * Devuelve un archivo WebVTT listo para el reproductor.
+ */
+app.get('/api/video/subtitles', async (req, res) => {
+  const targetUrl = normalizeYtdlpTarget(req.query.url);
+  const lang = String(req.query.lang || 'es').replace(/[^a-zA-Z-]/g, '').slice(0, 10) || 'es';
+  const wantAuto = String(req.query.auto || '') === '1';
+  if (!targetUrl) return res.status(400).json({ error: 'Falta el parámetro url' });
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const cacheKey = targetUrl + '|' + lang + '|' + (wantAuto ? 'auto' : 'manual');
+  const cached = VIDEO_SUBS_CACHE.get(cacheKey);
+  if (cached && cached.exp > Date.now()) {
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.send(cached.vtt);
+  }
+
+  const tmpDir = path.join(os.tmpdir(), 'sonora-subs');
+  try { fs.mkdirSync(tmpDir, { recursive: true }); } catch (e) {}
+  const stamp = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  const template = path.join(tmpDir, 'sub_' + stamp + '.%(ext)s');
+
+  const attempts = [];
+  if (wantAuto) {
+    attempts.push(['--write-auto-subs', '--sub-langs', lang + '.*,' + lang]);
+  }
+  attempts.push(['--write-subs', '--sub-langs', lang + '.*,' + lang]);
+
+  let lastError = '';
+  for (const extra of attempts) {
+    const args = withCookies([
+      '--no-playlist', '--no-warnings', '--no-check-certificates',
+      '--skip-download', '--sub-format', 'vtt/srt/best',
+      ...extra, '-o', template, targetUrl
+    ]);
+    try {
+      await runOnce(YTDLP_BIN, args);
+      const files = (() => {
+        try {
+          return fs.readdirSync(tmpDir)
+            .filter((f) => f.indexOf('sub_' + stamp) === 0)
+            .map((f) => path.join(tmpDir, f));
+        } catch (e) { return []; }
+      })();
+      if (!files.length) { lastError = 'sin archivos de subtítulos'; continue; }
+
+      let vtt = fs.readFileSync(files[0], 'utf8');
+      if (path.extname(files[0]).toLowerCase() === '.srt' || vtt.indexOf('WEBVTT') !== 0) {
+        vtt = srtToVtt(vtt);
+      }
+      files.forEach((f) => { try { fs.unlinkSync(f); } catch (e) {} });
+
+      VIDEO_SUBS_CACHE.set(cacheKey, { vtt: vtt, exp: Date.now() + VIDEO_SUBS_TTL });
+      if (VIDEO_SUBS_CACHE.size > 80) VIDEO_SUBS_CACHE.clear();
+
+      res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.send(vtt);
+    } catch (e) {
+      lastError = e.message;
+      console.warn('[Subtitles] intento falló (' + (wantAuto ? 'auto' : 'manual') + '): ' + lastError);
+    }
+  }
+
+  res.status(404).json({
+    error: friendlyVideoError(lastError),
+    found: false,
+    detail: lastError
+  });
+});
+
+/**
+ * GET /api/video/stream?url=&quality=720p&mode=video|audio
+ * Proxy del stream de YouTube con Range (permite seek).
+ *
+ * mode=video / mode=audio sirven las pistas DASH por separado: es el camino
+ * que funciona hoy (los MP4 progresivos devuelven 403). El reproductor pide
+ * las dos y las sincroniza.
+ * Sin mode se intenta el MP4 progresivo (compatibilidad).
+ */
+app.get('/api/video/stream', async (req, res) => {
+  const targetUrl = normalizeYtdlpTarget(req.query.url);
+  const quality = String(req.query.quality || '720p').toLowerCase();
+  const mode = String(req.query.mode || '').toLowerCase();
+  if (!targetUrl) return res.status(400).json({ error: 'Falta el parámetro url' });
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+
+  const height = parseInt(quality, 10) || 720;
+  const isAudio = mode === 'audio';
+  const isDash = isAudio || mode === 'video';
+  const mime = isAudio ? 'audio/mp4' : 'video/mp4';
+
+  if (isDash) {
+    const kind = isAudio ? 'audio' : 'video';
+    const cacheKey = (isAudio ? 'a|' : 'v|') + height + '|' + targetUrl;
+    const serve = async (attempt) => {
+      let resolved;
+      try {
+        resolved = await resolveDashStream(targetUrl, kind, height);
+      } catch (err) {
+        console.warn('[VideoStream] ' + kind + ' falló: ' + err.message);
+        if (!res.headersSent) {
+          res.status(502).json({
+            error: 'No se pudo preparar el ' + (isAudio ? 'audio' : 'vídeo') + ' de YouTube',
+            detail: err.message
+          });
+        }
+        return;
+      }
+      proxyAudioStream(resolved.url, req, res, (status, ct) => {
+        invalidateStreamCache(cacheKey);
+        console.warn('[VideoStream] CDN rechazó ' + kind + ' (' + status + '); reintentando…');
+        if (attempt === 0) {
+          setTimeout(() => { serve(1); }, 350);
+        } else if (!res.headersSent) {
+          res.status(502).json({
+            error: 'El CDN de YouTube rechazó el ' + (isAudio ? 'audio' : 'vídeo'),
+            detail: 'HTTP ' + (status || '?') + ' ' + (ct || 'sin content-type')
+          });
+        }
+      }, mime);
+    };
+    return serve(0);
+  }
+
+  const cacheKey = 'video|' + targetUrl + '|' + height;
+  const cached = getResolvedUrl(cacheKey);
+  if (cached) {
+    const probe = await probeMediaUrl(cached, 7000);
+    if (probe.ok) {
+      return proxyAudioStream(cached, req, res, (status, ct) => {
+        if (!res.headersSent) {
+          res.status(502).json({
+            error: 'El CDN de YouTube rechazó el vídeo',
+            detail: 'HTTP ' + (status || '?') + ' ' + (ct || 'sin content-type')
+          });
+        }
+      }, 'video/mp4');
+    }
+    RESOLVED_URL_CACHE.delete(cacheKey);
+  }
+
+  // Sólo formatos progresivos (vídeo+audio en un único archivo) para poder
+  // servirlos con un proxy simple.
+  const formatSpec = [
+    `best[height<=${height}][ext=mp4][acodec!=none][vcodec!=none]`,
+    `best[height<=${height}][acodec!=none][vcodec!=none]`,
+    'best[ext=mp4][acodec!=none][vcodec!=none]',
+    'best[acodec!=none][vcodec!=none]'
+  ].join('/');
+
+  let lastError = '';
+  for (const client of YT_RESOLVE_CLIENTS) {
+    const args = withCookies([
+      '--no-playlist', '--no-warnings', '--quiet', '--no-check-certificates',
+      '-f', formatSpec, '--get-url'
+    ]);
+    if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
+    args.push(targetUrl);
+    try {
+      const direct = await runCapture(YTDLP_BIN, args, 60000);
+      if (direct) {
+        const probe = await probeMediaUrl(direct, 8000);
+        if (!probe.ok) {
+          lastError = 'CDN ' + probe.status + ' ' + probe.contentType;
+          continue;
+        }
+        setResolvedUrl(cacheKey, direct);
+        return proxyAudioStream(direct, req, res, (status, ct) => {
+          if (!res.headersSent) {
+            res.status(502).json({
+              error: 'El CDN de YouTube rechazó el vídeo',
+              detail: 'HTTP ' + (status || '?') + ' ' + (ct || 'sin content-type')
+            });
+          }
+        }, 'video/mp4');
+      }
+    } catch (e) {
+      lastError = e.message;
+      console.warn('[VideoStream] client=' + (client || 'default') + ' falló: ' + lastError);
+    }
+  }
+
+  res.status(502).json({
+    error: friendlyVideoError(lastError) || 'No hay formato progresivo disponible',
+    hint: 'Usa mode=video y mode=audio para el reproductor dividido.',
+    detail: lastError
+  });
+});
+
 /**
  * GET /api/recommendations?artist=...&title=...
  * Continuous autoplay / radio recommendations for related tracks
@@ -1932,7 +2636,7 @@ app.get('/api/recommendations', async (req, res) => {
 // Collaborative Playlists (persistentes en disco para que el código sobreviva
 // a reinicios y despliegues de Render)
 // ---------------------------------------------------------------------------
-const collaborativeFile = path.resolve(__dirname, 'sonora-collaborative.json');
+const collaborativeFile = path.join(dataDir, 'sonora-collaborative.json');
 const collaborativeStore = new Map();
 
 function loadCollaborativeStore() {

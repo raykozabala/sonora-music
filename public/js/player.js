@@ -486,6 +486,17 @@
       }
     }
 
+    // 1b. Canción convertida desde un video offline: reutiliza el mismo MP4
+    //     (su pista de audio) sin duplicar el archivo en IndexedDB.
+    if (track.mediaType === 'audio-from-video' && track.convertedFromVideoId && Sonora.DB && Sonora.DB.videos) {
+      try {
+        var videoBlob = await Sonora.DB.videos.getFile(track.convertedFromVideoId);
+        if (videoBlob) return URL.createObjectURL(videoBlob);
+      } catch (e) {
+        console.warn('[Player] Video-a-música lookup failed:', e);
+      }
+    }
+
     // 2. Local device audio file path (Android internal storage / SD card)
     if (track.filePath && typeof track.filePath === 'string' && track.filePath.length > 5) {
       return track.filePath;
