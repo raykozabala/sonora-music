@@ -1869,8 +1869,14 @@ function runYtDlp(args, timeoutMs, noCookies) {
 async function runYtDlpWithFallback(baseArgs, timeoutMs) {
   let lastErr = null;
   for (const client of YT_CLIENT_FALLBACKS) {
-    const args = baseArgs.slice();
-    if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
+    let args = baseArgs.slice();
+    if (client) {
+      // Ojo: las opciones deben ir ANTES del separador '--'; si se añaden
+      // después, yt-dlp las trata como URLs ("youtube:player_client=...").
+      const extra = ['--extractor-args', 'youtube:player_client=' + client];
+      const sep = args.lastIndexOf('--');
+      args = sep === -1 ? args.concat(extra) : args.slice(0, sep).concat(extra, args.slice(sep));
+    }
     try {
       return await runYtDlp(args, timeoutMs);
     } catch (e) {
