@@ -876,7 +876,57 @@ app.get('/api/ytdiag', async (req, res) => {
     }));
   }));
 
-  res.json({ id: id, mode: SERVER_MODE, proxy: !!process.env.YTDLP_PROXY, http: http, results: results });
+  // 3) Probar instancias Invidious/Piped desde este servidor. Si alguna
+  //    responde, sirve como vía alternativa cuando YouTube bloquea la IP.
+  let instances = null;
+  if (req.query.instances) {
+    const invidious = [
+      'https://inv.nadeko.net',
+      'https://yewtu.be',
+      'https://invidious.nerdvpn.de',
+      'https://iv.melmac.space',
+      'https://invidious.f5.si',
+      'https://inv.tux.pizza',
+      'https://iv.datura.network'
+    ];
+    const piped = [
+      'https://pipedapi.kavin.rocks',
+      'https://pipedapi.adminforge.de'
+    ];
+    instances = { invidious: {}, piped: {} };
+    await Promise.all(invidious.map(async (base) => {
+      const started = Date.now();
+      try {
+        const r = await fetch(base.replace(/\/+$/, '') + '/api/v1/videos/' + id + '?fields=title,adaptiveFormats', {
+          headers: { 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(12000)
+        });
+        const txt = await r.text();
+        let formats = 0;
+        try { formats = (JSON.parse(txt).adaptiveFormats || []).length; } catch (e) {}
+        instances.invidious[base] = { status: r.status, ms: Date.now() - started, formats: formats };
+      } catch (e) {
+        instances.invidious[base] = { error: e.name === 'TimeoutError' ? 'timeout' : String(e.message).slice(0, 80) };
+      }
+    }));
+    await Promise.all(piped.map(async (base) => {
+      const started = Date.now();
+      try {
+        const r = await fetch(base.replace(/\/+$/, '') + '/streams/' + id, {
+          headers: { 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(12000)
+        });
+        const txt = await r.text();
+        let streams = 0;
+        try { streams = ((JSON.parse(txt).audioStreams) || []).length; } catch (e) {}
+        instances.piped[base] = { status: r.status, ms: Date.now() - started, audioStreams: streams };
+      } catch (e) {
+        instances.piped[base] = { error: e.name === 'TimeoutError' ? 'timeout' : String(e.message).slice(0, 80) };
+      }
+    }));
+  }
+
+  res.json({ id: id, mode: SERVER_MODE, proxy: !!process.env.YTDLP_PROXY, http: http, results: results, instances: instances });
 });
 
 /**
