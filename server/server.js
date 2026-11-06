@@ -689,21 +689,46 @@ const COOKIES_CANDIDATES = [
   path.join(process.cwd(), 'cookies.txt')
 ].filter(Boolean);
 
+/**
+ * Acepta el contenido de cookies.txt tanto en base64 como en texto plano.
+ * Mucha gente pega el archivo directamente en la variable "B64"; decodificarlo
+ * como base64 genera basura que rompe la extracción de YouTube.
+ */
+function looksLikeNetscapeCookies(text) {
+  if (!text) return false;
+  if (/^#\s*Netscape HTTP Cookie File/i.test(text.trimStart())) return true;
+  return text.indexOf('\t') !== -1 && text.indexOf('youtube.com') !== -1;
+}
+
 if (process.env.YTDLP_COOKIES_B64) {
   try {
-    const decoded = Buffer.from(String(process.env.YTDLP_COOKIES_B64).trim(), 'base64');
-    if (decoded.length > 50) {
-      fs.writeFileSync('/tmp/sonora-cookies.txt', decoded);
-      const looksValid = decoded.toString('utf8').indexOf('youtube.com') !== -1;
-      console.log('[Cookies] base64 -> ' + decoded.length + ' bytes, válido=' + looksValid);
-      if (!looksValid) {
-        console.error('[Cookies] ⚠️ YTDLP_COOKIES_B64 no parece un cookies.txt válido');
+    const raw = String(process.env.YTDLP_COOKIES_B64).replace(/\r\n/g, '\n');
+    let content = null;
+    let how = '';
+    if (looksLikeNetscapeCookies(raw)) {
+      content = raw;
+      how = 'texto plano';
+    } else {
+      const decoded = Buffer.from(raw.trim(), 'base64');
+      if (decoded.length > 50) {
+        content = decoded.toString('utf8');
+        how = 'base64';
+      }
+    }
+    if (content && content.length > 50) {
+      fs.writeFileSync('/tmp/sonora-cookies.txt', content);
+      const cookies = content.split('\n').filter(function (l) { return l && l.charAt(0) !== '#'; });
+      const hasSession = /\t(SID|HSID|SSID|APISID|SAPISID|LOGIN_INFO|__Secure-[13]PSID)\t/.test(content);
+      console.log('[Cookies] ' + how + ' -> ' + content.length + ' bytes | ' + cookies.length +
+        ' cookies | sesión=' + hasSession + ' | youtube=' + (content.indexOf('youtube.com') !== -1));
+      if (!hasSession) {
+        console.warn('[Cookies] ⚠️ no se detectan cookies de sesión: YouTube puede bloquear el servidor');
       }
     } else {
-      console.error('[Cookies] ⚠️ YTDLP_COOKIES_B64 demasiado corto: ' + decoded.length + ' bytes');
+      console.error('[Cookies] ⚠️ YTDLP_COOKIES_B64 no contiene cookies válidas');
     }
   } catch (e) {
-    console.warn('[Cookies] YTDLP_COOKIES_B64 no se pudo decodificar:', e.message);
+    console.warn('[Cookies] YTDLP_COOKIES_B64 no se pudo interpretar:', e.message);
   }
 }
 
@@ -770,12 +795,16 @@ app.get('/api/system', (req, res) => {
     try {
       const buf = fs.readFileSync(COOKIES_PATH);
       const sha = require('crypto').createHash('sha256').update(buf).digest('hex');
+      const text = buf.toString('utf8');
+      const cookieLines = text.split('\n').filter(function (l) { return l && l.charAt(0) !== '#'; });
       cookies = {
         available: true,
         path: COOKIES_PATH,
         size: buf.length,
         sha256: sha,
-        valid: buf.toString('utf8').indexOf('youtube.com') !== -1
+        valid: text.indexOf('youtube.com') !== -1,
+        count: cookieLines.length,
+        hasSession: /\t(SID|HSID|SSID|APISID|SAPISID|LOGIN_INFO|__Secure-[13]PSID)\t/.test(text)
       };
     } catch (e) {
       cookies = { available: false, path: COOKIES_PATH, error: e.message };
