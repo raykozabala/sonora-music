@@ -738,7 +738,13 @@ let COOKIES_PATH = null;
 
 /** Añade las cookies a los argumentos de yt-dlp si están disponibles. */
 function withCookies(args) {
-  return COOKIES_PATH ? ['--cookies', COOKIES_PATH].concat(args) : args.slice();
+  const base = COOKIES_PATH ? ['--cookies', COOKIES_PATH].concat(args) : args.slice();
+  // Proxy opcional (http://usuario:clave@host:puerto). Sirve para salir por
+  // una IP residencial cuando YouTube bloquea la IP del servidor.
+  if (process.env.YTDLP_PROXY) {
+    return ['--proxy', process.env.YTDLP_PROXY].concat(base);
+  }
+  return base;
 }
 
 /** Clientes de YouTube a probar, del más compatible al más específico. */
@@ -798,22 +804,28 @@ app.get('/api/ytdiag', async (req, res) => {
   const videoUrl = 'https://www.youtube.com/watch?v=' + id;
   const clients = ['default', 'android_vr', 'tv_embedded', 'mweb', 'web_safari'];
   const results = {};
-  for (const client of clients) {
-    const args = ['--no-playlist', '--no-warnings', '--quiet', '-f', 'bestaudio[ext=m4a]/bestaudio/best', '--get-url'];
-    if (client !== 'default') args.push('--extractor-args', 'youtube:player_client=' + client);
-    args.push(videoUrl);
-    try {
-      const { stdout } = await runYtDlp(args, 45000);
-      const direct = stdout.trim().split(/\r?\n/)[0] || '';
-      results[client] = {
-        ok: !!direct,
-        host: (direct.match(/^https?:\/\/([^/]+)/) || [])[1] || null
-      };
-    } catch (e) {
-      results[client] = { ok: false, error: String(e.message).slice(0, 150) };
+  // Se prueba con cookies (si existen) y sin ellas: así se distingue un
+  // bloqueo por IP de unas cookies caducadas.
+  const modes = COOKIES_PATH ? ['cookies', 'nocookies'] : ['nocookies'];
+  for (const mode of modes) {
+    results[mode] = {};
+    for (const client of clients) {
+      const args = ['--no-playlist', '--no-warnings', '--quiet', '-f', 'bestaudio[ext=m4a]/bestaudio/best', '--get-url'];
+      if (client !== 'default') args.push('--extractor-args', 'youtube:player_client=' + client);
+      args.push(videoUrl);
+      try {
+        const { stdout } = await runYtDlp(args, 45000, mode === 'nocookies');
+        const direct = stdout.trim().split(/\r?\n/)[0] || '';
+        results[mode][client] = {
+          ok: !!direct,
+          host: (direct.match(/^https?:\/\/([^/]+)/) || [])[1] || null
+        };
+      } catch (e) {
+        results[mode][client] = { ok: false, error: String(e.message).slice(0, 160) };
+      }
     }
   }
-  res.json({ id: id, mode: SERVER_MODE, clients: results });
+  res.json({ id: id, mode: SERVER_MODE, proxy: !!process.env.YTDLP_PROXY, results: results });
 });
 
 /**
@@ -1665,29 +1677,49 @@ app.get('/api/stream/external', async (req, res) => {
       ? requestedQuality
       : ({ low: '96k', normal: '160k', high: '320k' }[requestedQuality] || '192k');
 
+    const cacheKey = 'audio|' + String(targetUrl) + '|' + audioBitrate;
+
+    // 1) Resolver la URL directa ANTES de escribir cabeceras. Así, si YouTube
+    //    bloquea, el cliente recibe un 502 con explicación en vez de un 200
+    //    vacío (que dejaba el reproductor colgado).
+    const resolveAudio = async () => {
+      const cached = videoCacheGet(cacheKey);
+      if (cached) return cached;
+      const { stdout } = await runYtDlpWithFallback([
+        '--no-playlist', '--no-warnings', '--no-progress',
+        '-f', 'bestaudio[ext=m4a]/bestaudio/best',
+        '-g', '--', String(targetUrl)
+      ], 45000);
+      const direct = stdout.trim().split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean)[0];
+      if (!direct) throw new Error('yt-dlp no devolvió una URL de audio');
+      videoCacheSet(cacheKey, direct);
+      return direct;
+    };
+
+    let direct;
+    try {
+      direct = await resolveAudio();
+    } catch (e) {
+      console.warn('[Stream] no se pudo resolver el audio:', e.message);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(502).json({
+        error: 'No se pudo preparar el audio',
+        message: e.message,
+        hint: 'YouTube puede estar bloqueando el servidor; revisa /api/system y /api/ytdiag'
+      });
+    }
+
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Accept-Ranges', 'bytes');
 
-    // Clean streaming flags: --quiet and --no-progress prevent text logs from polluting the audio stream
-    const ytdlpArgs = [
-      '--no-playlist',
-      '--no-progress',
-      '--quiet',
-      '--no-warnings',
-      '-f', 'bestaudio/best',
-      '-o', '-',
-      targetUrl
-    ];
-
-    const proc = spawn(YTDLP_BIN, withCookies(ytdlpArgs));
-
-    // If ffmpeg is available, pipe through ffmpeg to guarantee valid MP3 frames
-    if (FFMPEG_BIN && fs.existsSync(FFMPEG_BIN)) {
+    const startTranscode = (sourceUrl) => {
+      // ffmpeg lee la URL firmada y devuelve MP3 con el bitrate elegido.
       const ffmpegArgs = [
-        '-i', 'pipe:0',
+        '-hide_banner', '-loglevel', 'error',
+        '-i', sourceUrl,
         '-vn',
         '-f', 'mp3',
         '-acodec', 'libmp3lame',
@@ -1695,34 +1727,54 @@ app.get('/api/stream/external', async (req, res) => {
         '-ar', '44100',
         'pipe:1'
       ];
-      const ffmpegProc = spawn(FFMPEG_BIN, ffmpegArgs);
-      proc.stdout.pipe(ffmpegProc.stdin);
-      ffmpegProc.stdout.pipe(res);
+      return spawn(FFMPEG_BIN, ffmpegArgs);
+    };
 
-      proc.on('error', (err) => {
-        console.error('[Stream] yt-dlp error:', err.message);
-        if (!res.headersSent) res.status(500).send('Error en streaming');
-      });
-      ffmpegProc.on('error', (err) => {
-        console.error('[Stream] ffmpeg error:', err.message);
-      });
-      res.on('close', () => {
-        try { proc.kill(); } catch (e) {}
-        try { ffmpegProc.kill(); } catch (e) {}
-      });
-    } else {
-      proc.stdout.pipe(res);
-      proc.on('error', (err) => {
-        console.error('[Stream] error:', err.message);
-        if (!res.headersSent) res.status(500).send('Error en streaming');
-      });
-      res.on('close', () => {
-        try { proc.kill(); } catch (e) {}
-      });
-    }
+    let ffmpegProc = startTranscode(direct);
+    let wroteBytes = false;
+    let retried = false;
+
+    ffmpegProc.stdout.on('data', (chunk) => {
+      wroteBytes = true;
+      res.write(chunk);
+    });
+
+    ffmpegProc.on('error', (err) => {
+      console.error('[Stream] ffmpeg error:', err.message);
+      if (!res.headersSent) res.status(500).send('Error en streaming');
+      else { try { res.end(); } catch (e) {} }
+    });
+
+    ffmpegProc.on('close', (code) => {
+      // La URL caducó o YouTube devolvió 403: se extrae de nuevo una vez.
+      if (!wroteBytes && !retried) {
+        retried = true;
+        VIDEO_URL_CACHE.delete(cacheKey);
+        resolveAudio().then((fresh) => {
+          ffmpegProc = startTranscode(fresh);
+          ffmpegProc.stdout.on('data', (chunk) => { wroteBytes = true; res.write(chunk); });
+          ffmpegProc.on('close', () => { try { res.end(); } catch (e) {} });
+          ffmpegProc.on('error', () => { try { res.end(); } catch (e) {} });
+        }).catch((e) => {
+          console.warn('[Stream] reintento falló:', e.message);
+          try { res.status(502).json({ error: 'No se pudo preparar el audio', message: e.message }); }
+          catch (_) { try { res.end(); } catch (e2) {} }
+        });
+        return;
+      }
+      if (!wroteBytes) {
+        console.warn('[Stream] ffmpeg no produjo audio (código ' + code + ')');
+      }
+      try { res.end(); } catch (e) {}
+    });
+
+    res.on('close', () => {
+      try { ffmpegProc.kill('SIGKILL'); } catch (e) {}
+    });
   } catch (outerErr) {
     console.error('[Stream] Fatal route error:', outerErr);
-    if (!res.headersSent) res.status(500).send('Error interno en streaming');
+    if (!res.headersSent) res.status(500).json({ error: 'Error interno en streaming', message: outerErr.message });
+    else { try { res.end(); } catch (e) {} }
   }
 });
 
@@ -1737,14 +1789,14 @@ const VIDEO_URL_CACHE = new Map();
 const VIDEO_URL_TTL = 10 * 60 * 1000;
 
 /** Ejecuta yt-dlp y devuelve stdout/stderr con timeout y limpieza. */
-function runYtDlp(args, timeoutMs) {
+function runYtDlp(args, timeoutMs, noCookies) {
   return new Promise((resolve, reject) => {
     let stdout = '';
     let stderr = '';
     let finished = false;
     let proc;
     try {
-      proc = spawn(YTDLP_BIN, withCookies(args));
+      proc = spawn(YTDLP_BIN, noCookies ? args : withCookies(args));
     } catch (e) {
       reject(e);
       return;
