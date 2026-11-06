@@ -189,15 +189,41 @@
     try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
   }
 
-  function getServerBaseUrl() {
+  function isDeviceMode() {
+    try {
+      if (Sonora.API && typeof Sonora.API.getMode === 'function') {
+        const mode = Sonora.API.getMode();
+        if (mode === 'device' || mode === 'off') return true;
+        if (mode === 'local' || mode === 'render' || mode === 'northflank') return false;
+      }
+    } catch (e) {}
+    return !getServerBaseUrlRaw();
+  }
+
+  function getServerBaseUrlRaw() {
     if (Sonora.API && typeof Sonora.API.getActiveUrl === 'function') {
       return Sonora.API.getActiveUrl();
     }
-    const mode = Sonora.Store ? Sonora.Store.get('serverMode') : 'local';
+    return '';
+  }
+
+  function getServerBaseUrl() {
+    // Modo Dispositivo: no hay servidor, así que no inventamos una IP local.
+    if (isDeviceMode()) return '';
+    if (Sonora.API && typeof Sonora.API.getActiveUrl === 'function') {
+      return Sonora.API.getActiveUrl();
+    }
+    const mode = Sonora.Store ? Sonora.Store.get('serverMode') : 'device';
+    if (mode === 'northflank') {
+      return (Sonora.Store && Sonora.Store.get('serverNorthflankUrl')) || '';
+    }
     if (mode === 'render') {
       return (Sonora.Store && Sonora.Store.get('serverRenderUrl')) || 'https://sonora-music-b1ee.onrender.com';
     }
-    return (Sonora.Store && Sonora.Store.get('serverLocalUrl')) || 'http://192.168.1.132:3000';
+    if (mode === 'local') {
+      return (Sonora.Store && Sonora.Store.get('serverLocalUrl')) || '';
+    }
+    return '';
   }
 
   function getRenderUrl() {
@@ -645,8 +671,8 @@
             .search-mode-toggle {
               display: flex;
               gap: 6px;
-              background: rgba(255,255,255,0.06);
-              border: 1px solid rgba(255,255,255,0.08);
+              background: var(--color-surface-elevated);
+              border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.08));
               border-radius: 14px;
               padding: 4px;
               margin-bottom: 10px;
@@ -684,7 +710,7 @@
               border-radius: 12px;
               padding: 0 12px;
               height: 48px;
-              border: 1px solid rgba(255, 255, 255, 0.1);
+              border: 1px solid var(--color-divider);
               transition: border-color 0.2s, box-shadow 0.2s;
             }
             .search-bar:focus-within {
@@ -1167,6 +1193,28 @@
               margin-bottom: 4px;
             }
             .search-empty-desc { font-size: 13px; color: var(--color-text-secondary); }
+            .search-device-actions {
+              display: flex;
+              gap: 8px;
+              justify-content: center;
+              flex-wrap: wrap;
+              margin-top: 16px;
+            }
+            .search-device-actions .btn {
+              padding: 10px 20px;
+              border-radius: 22px;
+              font-size: 13px;
+              font-weight: 700;
+              cursor: pointer;
+              border: 1px solid var(--color-divider);
+              background: var(--color-surface-elevated);
+              color: var(--color-text-primary);
+            }
+            .search-device-actions .btn--primary {
+              background: var(--color-primary);
+              border-color: var(--color-primary);
+              color: var(--color-on-primary);
+            }
 
             /* Cargando */
             .search-loading { padding: 44px 20px; text-align: center; }
@@ -1190,21 +1238,38 @@
             .modal-backdrop {
               position: fixed;
               inset: 0;
-              background: rgba(0,0,0,0.75);
-              z-index: 500;
+              background: rgba(0,0,0,0.8);
+              backdrop-filter: blur(6px);
+              -webkit-backdrop-filter: blur(6px);
+              z-index: 10001;
               display: flex;
               flex-direction: column;
               justify-content: flex-end;
               animation: fadeIn 0.2s ease;
             }
             .format-modal-sheet {
-              background: var(--color-surface);
+              background: var(--color-surface, #1e1e1e);
               border-radius: 20px 20px 0 0;
-              padding: 16px 20px 32px;
+              padding: 18px 22px 34px;
               max-height: 88vh;
               overflow-y: auto;
-              box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
+              box-shadow: 0 -8px 36px rgba(0,0,0,0.7);
               animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            @media (min-width: 768px) {
+              .modal-backdrop {
+                justify-content: center !important;
+                align-items: center !important;
+                padding: 24px !important;
+              }
+              .format-modal-sheet {
+                width: min(92vw, 620px) !important;
+                max-height: 85vh !important;
+                border-radius: 22px !important;
+                margin: auto !important;
+                border: 1px solid rgba(255,255,255,0.12);
+                box-shadow: 0 20px 60px rgba(0,0,0,0.85) !important;
+              }
             }
             .format-modal-handle {
               width: 36px;
@@ -1473,7 +1538,6 @@
             ${renderGenreGrid()}
           </div>
 
-          <div id="format-modal-container"></div>
         </div>
       `;
     },
@@ -1652,6 +1716,23 @@
           if (clearAllBtn) {
             clearAllSearchHistory();
             if (historyContainer) historyContainer.innerHTML = renderHistoryChips();
+            return;
+          }
+
+          // Modo Dispositivo: atajos a biblioteca y ajustes
+          const goLibraryBtn = target.closest('[data-action="go-library"]');
+          if (goLibraryBtn) {
+            if (Sonora.Router && typeof Sonora.Router.navigate === 'function') {
+              Sonora.Router.navigate('library');
+            }
+            return;
+          }
+
+          const goSettingsBtn = target.closest('[data-action="go-settings"]');
+          if (goSettingsBtn) {
+            if (Sonora.Router && typeof Sonora.Router.navigate === 'function') {
+              Sonora.Router.navigate('settings');
+            }
             return;
           }
 
@@ -1870,6 +1951,23 @@
     // Si llegó otra búsqueda mientras tanto, descartamos esta respuesta.
     if (controller.signal.aborted || token !== searchToken) return;
 
+    // Modo Dispositivo y la nube tampoco respondió: mensaje honesto.
+    if ((!results || results.length === 0) && isDeviceMode() && contentContainer) {
+      currentExternalResults = [];
+      contentContainer.innerHTML = `
+        <div class="search-empty-state search-empty-state--device">
+          <div class="search-empty-icon">📱</div>
+          <h3 class="search-empty-title">Sin servidor disponible</h3>
+          <p class="search-empty-desc">No se pudo buscar en YouTube/SoundCloud. Tu música local sigue disponible en Biblioteca.</p>
+          <div class="search-device-actions">
+            <button class="btn btn--primary" data-action="go-library">Ver mi biblioteca</button>
+            <button class="btn" data-action="go-settings">Elegir servidor</button>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
     currentExternalResults = (results || []).map(function (r) {
       return Object.assign({}, r, {
         kind: searchMode === 'video' ? 'video' : (r.kind || 'audio')
@@ -1885,7 +1983,10 @@
   async function enrichVideoFromServer(video) {
     if (!video || !video.url) return video;
     try {
-      const base = getServerBaseUrl();
+      const base = (Sonora.API && typeof Sonora.API.getMediaBase === 'function')
+        ? Sonora.API.getMediaBase()
+        : getServerBaseUrl();
+      if (!base) return video;
       const resp = await fetch(base.replace(/\/+$/, '') + '/api/video/info?url=' + encodeURIComponent(video.url));
       if (!resp.ok) return video;
       const info = await resp.json();
@@ -1906,12 +2007,17 @@
   }
 
   /* ── Modal de audio ─────────────────────────────────────────────────── */
+  function handleModalEsc(e) {
+    if (e.key === 'Escape') closeFormatModal();
+  }
+
   function openFormatModal(track) {
     activeModalTrack = track;
-    const modalContainer = $('#format-modal-container');
+    const modalContainer = document.getElementById('format-modal-container') || $('#format-modal-container');
     if (!modalContainer) return;
 
     modalContainer.innerHTML = renderFormatModal(track);
+    document.addEventListener('keydown', handleModalEsc);
 
     const backdrop = $('#format-modal-backdrop', modalContainer);
     const closeBtn = $('#btn-close-format-modal', modalContainer);
@@ -1995,7 +2101,7 @@
   /* ── Modal de video ─────────────────────────────────────────────────── */
   async function openVideoModal(video) {
     activeModalTrack = video;
-    const modalContainer = $('#format-modal-container');
+    const modalContainer = document.getElementById('format-modal-container') || $('#format-modal-container');
     if (!modalContainer) return;
 
     if (!video.url && video.videoId) {
@@ -2003,6 +2109,7 @@
     }
 
     modalContainer.innerHTML = renderVideoModal(video);
+    document.addEventListener('keydown', handleModalEsc);
 
     const backdrop = $('#format-modal-backdrop', modalContainer);
     const closeBtn = $('#btn-close-format-modal', modalContainer);
@@ -2115,7 +2222,8 @@
 
   function closeFormatModal() {
     activeModalTrack = null;
-    const modalContainer = $('#format-modal-container');
+    document.removeEventListener('keydown', handleModalEsc);
+    const modalContainer = document.getElementById('format-modal-container') || $('#format-modal-container');
     if (modalContainer) modalContainer.innerHTML = '';
   }
 
@@ -2133,7 +2241,9 @@
       return;
     }
 
-    const serverBase = getServerBaseUrl();
+    const serverBase = (Sonora.API && typeof Sonora.API.getMediaBase === 'function')
+      ? Sonora.API.getMediaBase()
+      : getServerBaseUrl();
 
     const trackObj = {
       id: track.id || ('ext_' + Date.now()),
@@ -2145,7 +2255,11 @@
       thumbnail: track.thumbnail,
       sourceUrl: track.url,
       videoId: track.videoId || '',
-      streamUrl: track.url ? (serverBase.replace(/\/+$/, '') + '/api/stream/external?url=' + encodeURIComponent(track.url)) : '',
+      streamUrl: track.url
+        ? ((Sonora.API && typeof Sonora.API.externalStreamUrl === 'function')
+          ? Sonora.API.externalStreamUrl(track.url)
+          : (serverBase.replace(/\/+$/, '') + '/api/stream/external?url=' + encodeURIComponent(track.url)))
+        : '',
       platform: track.platform
     };
 

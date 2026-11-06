@@ -3,41 +3,49 @@
  * Offline caching for PWA functionality
  */
 
-const CACHE_NAME = 'sonora-7.11.0';
+const CACHE_NAME = 'sonora-7.17.0';
+// Rutas relativas: funcionan en la raíz y también si Sonora se sirve bajo
+// un subdirectorio (antes las rutas absolutas rompían el modo offline).
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/css/themes.css',
-  '/css/main.css',
-  '/css/player.css',
-  '/css/video-player.css',
-  '/css/animations.css',
-  '/css/responsive.css',
-  '/js/store.js',
-  '/js/i18n.js',
-  '/js/router.js',
-  '/js/db.js',
-  '/js/api.js',
-  '/js/themes.js',
-  '/js/player.js',
-  '/js/visualizer.js',
-  '/js/video-player.js',
-  '/js/download.js',
-  '/js/notifications.js',
-  '/js/home.js',
-  '/js/search.js',
-  '/js/library.js',
-  '/js/discover.js',
-  '/js/playlists.js',
-  '/js/profile.js',
-  '/js/settings.js',
-  '/js/app.js'
+  './',
+  './index.html',
+  './pip.html',
+  './manifest.json',
+  './css/themes.css',
+  './css/main.css',
+  './css/player.css',
+  './css/video-player.css',
+  './css/animations.css',
+  './css/responsive.css',
+  './css/desktop-spotify.css',
+  './css/enhancements.css',
+  './js/store.js',
+  './js/i18n.js',
+  './js/router.js',
+  './js/db.js',
+  './js/api.js',
+  './js/themes.js',
+  './js/player.js',
+  './js/visualizer.js',
+  './js/video-player.js',
+  './js/download.js',
+  './js/notifications.js',
+  './js/home.js',
+  './js/search.js',
+  './js/library.js',
+  './js/discover.js',
+  './js/playlists.js',
+  './js/profile.js',
+  './js/settings.js',
+  './js/updater.js',
+  './js/lyrics.js',
+  './js/desktop-spotify.js',
+  './js/app.js'
 ];
 
 // Install — cache all static assets
 self.addEventListener('install', function (event) {
-  console.log('[SW] Installing Sonora Music v7.11...');
+  console.log('[SW] Installing Sonora Music v7.17.0...');
   event.waitUntil(
     caches.open(CACHE_NAME).then(function (cache) {
       return cache.addAll(STATIC_ASSETS).catch(function (err) {

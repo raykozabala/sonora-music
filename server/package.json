@@ -1,7 +1,7 @@
 {
   "name": "sonora-music-server",
-  "version": "7.10.0",
-  "description": "Sonora Music dual-mode server (local + Render compatible)",
+  "version": "7.17.0",
+  "description": "Sonora Music triple-mode server (local + Render + Northflank compatible)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -11,9 +11,7 @@
     "better-sqlite3": "^9.4.3",
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "fs": "^0.0.1-security",
     "multer": "^1.4.5-lts.1",
-    "path": "^0.12.7",
     "play-dl": "^1.9.7",
     "yt-search": "^2.13.1"
   },

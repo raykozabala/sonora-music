@@ -11,6 +11,13 @@
   // Utility helpers as specified
   function $(sel, ctx) { return (ctx || document).querySelector(sel); }
   function $$(sel, ctx) { return [...(ctx || document).querySelectorAll(sel)]; }
+  function notifyPlaylistsChanged() {
+    try {
+      if (Sonora.Store && typeof Sonora.Store.emit === 'function') {
+        Sonora.Store.emit('playlistsChanged');
+      }
+    } catch (e) {}
+  }
   function formatTime(sec) {
     if (isNaN(sec) || sec === null || sec === undefined) return '0:00';
     const m = Math.floor(sec / 60);
@@ -151,9 +158,21 @@
   /** URL del servidor activo (local o nube) */
   function getServerBase() {
     try {
-      if (Sonora.API && typeof Sonora.API.getActiveUrl === 'function') return Sonora.API.getActiveUrl();
+      if (Sonora.API && typeof Sonora.API.getMediaBase === 'function') {
+        var media = Sonora.API.getMediaBase();
+        if (media) return media;
+      }
+      if (Sonora.API && typeof Sonora.API.getActiveUrl === 'function') {
+        var active = Sonora.API.getActiveUrl();
+        if (active) return active;
+      }
+      // En Modo Dispositivo no hay servidor propio: para funciones que
+      // necesitan red (buscar canciones online, colaborativas) usamos la nube.
+      if (Sonora.API && typeof Sonora.API.getCollabBase === 'function') {
+        return Sonora.API.getCollabBase();
+      }
     } catch (e) {}
-    return 'http://192.168.1.132:3000';
+    return '';
   }
 
   /** Convierte un resultado de búsqueda online en una canción guardable */
@@ -171,7 +190,9 @@
       duration: t.duration || 0,
       artworkUrl: t.thumbnail || '',
       sourceUrl: url,
-      streamUrl: serverBase + '/api/stream/external?url=' + encodeURIComponent(url),
+      streamUrl: (Sonora.API && typeof Sonora.API.externalStreamUrl === 'function')
+        ? Sonora.API.externalStreamUrl(url)
+        : serverBase + '/api/stream/external?url=' + encodeURIComponent(url),
       platform: platform,
       addedAt: Date.now()
     };
@@ -328,8 +349,9 @@
 
   /** Sube la playlist colaborativa al servidor (para que otros se unan con el código) */
   async function syncCollabPlaylistToServer(pl) {
-    if (!pl || !pl.code) return;
-    if (!(Sonora.API && typeof Sonora.API.saveCollaborativePlaylist === 'function')) return;
+    if (!pl || !pl.code) return null;
+    if (!(Sonora.API && typeof Sonora.API.saveCollaborativePlaylist === 'function')) return null;
+
     var tracks = [];
     try {
       for (var i = 0; i < (pl.trackIds || []).length; i++) {
@@ -339,12 +361,137 @@
         }
       }
     } catch (e) {}
+
     return Sonora.API.saveCollaborativePlaylist(pl.code, {
       name: pl.name,
       description: pl.description || '',
       tracks: tracks
-    }).catch(function (e) { console.warn('[Playlists] sync collab falló:', e && e.message); });
+    }).then(function (result) {
+      pl.syncedAt = new Date().toISOString();
+      return result;
+    }).catch(function (e) {
+      console.warn('[Playlists] sync collab falló:', e && e.message);
+      return null;
+    });
   }
+
+  /** Guarda/actualiza en local una canción que llega del servidor colaborativo. */
+  async function mergeRemoteTrack(t) {
+    if (!t || t.id === undefined || t.id === null) return null;
+    if (!(Sonora.DB && Sonora.DB.tracks)) return t;
+
+    try {
+      const existing = await Sonora.DB.tracks.getById(t.id);
+      if (!existing) {
+        await Sonora.DB.tracks.add(t);
+        return t;
+      }
+
+      // Los datos del servidor mandan en título/artista/álbum, pero no deben
+      // pisar lo que es tuyo: descarga, favorito, oculto, carátula o letras.
+      const merged = Object.assign({}, t, {
+        isDownloaded: existing.isDownloaded || 0,
+        isFavorite: existing.isFavorite || 0,
+        hidden: existing.hidden || 0,
+        hiddenAt: existing.hiddenAt || 0,
+        artworkManual: existing.artworkManual || 0,
+        artworkUrl: existing.artworkManual ? existing.artworkUrl : (t.artworkUrl || existing.artworkUrl || ''),
+        lyrics: existing.lyrics || '',
+        syncedLyrics: existing.syncedLyrics || '',
+        lyricsEdited: existing.lyricsEdited || 0,
+        lyricsEngine: existing.lyricsEngine || 0,
+        filePath: existing.filePath || t.filePath || null,
+        isDeviceTrack: existing.isDeviceTrack || t.isDeviceTrack || 0
+      });
+      await Sonora.DB.tracks.update(merged);
+      return merged;
+    } catch (e) {
+      return t;
+    }
+  }
+
+  /** Descarga los cambios de una playlist colaborativa y los aplica en local. */
+  async function pullCollabPlaylist(pl, options) {
+    options = options || {};
+    if (!pl || !pl.code) return false;
+    if (!(Sonora.API && typeof Sonora.API.getCollaborativePlaylist === 'function')) return false;
+
+    var remote = null;
+    try {
+      remote = await Sonora.API.getCollaborativePlaylist(pl.code);
+    } catch (e) {
+      var msg = (e && e.message) || '';
+
+      // El servidor perdió la playlist (reinicio, hibernación...) pero la
+      // tenemos en local: la volvemos a publicar con el mismo código.
+      if (/no encontr|not found|404/i.test(msg)) {
+        var reuploaded = await syncCollabPlaylistToServer(pl);
+        if (reuploaded) {
+          if (!options.silent) showToast('Playlist colaborativa republicada con el código ' + pl.code, 'success');
+          return false;
+        }
+      }
+
+      if (!options.silent) showToast('Sin conexión al servidor de playlists colaborativas', 'error');
+      return false;
+    }
+
+    if (!remote) return false;
+
+    var remoteTracks = Array.isArray(remote.tracks) ? remote.tracks : [];
+    var remoteIds = [];
+
+    for (var i = 0; i < remoteTracks.length; i++) {
+      var t = remoteTracks[i];
+      if (!t || t.id === undefined || t.id === null) continue;
+      await mergeRemoteTrack(t);
+      remoteIds.push(t.id);
+    }
+
+    var localIds = Array.isArray(pl.trackIds) ? pl.trackIds.map(String) : [];
+    var nextIds = remoteIds.map(String);
+    var changed = localIds.join('|') !== nextIds.join('|') ||
+      (remote.name && remote.name !== pl.name) ||
+      ((remote.description || '') !== (pl.description || ''));
+
+    if (changed) {
+      pl.name = remote.name || pl.name;
+      pl.description = remote.description || pl.description || '';
+      pl.trackIds = remoteIds;
+      pl.updatedAt = remote.updatedAt || new Date().toISOString();
+      if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.update === 'function') {
+        await Sonora.DB.playlists.update(pl);
+      }
+    }
+
+    pl.syncedAt = new Date().toISOString();
+    return changed;
+  }
+
+  var _collabRefreshTimer = null;
+
+  function stopCollabRefresh() {
+    if (_collabRefreshTimer) {
+      clearInterval(_collabRefreshTimer);
+      _collabRefreshTimer = null;
+    }
+  }
+
+  function startCollabRefresh(playlistId, onChanged) {
+    stopCollabRefresh();
+    _collabRefreshTimer = setInterval(async function () {
+      try {
+        var pl = null;
+        if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.getById === 'function') {
+          pl = await Sonora.DB.playlists.getById(playlistId);
+        }
+        if (!pl || !pl.code) { stopCollabRefresh(); return; }
+        var changed = await pullCollabPlaylist(pl, { silent: true });
+        if (changed && typeof onChanged === 'function') onChanged();
+      } catch (e) { /* silencioso: se reintenta en el siguiente ciclo */ }
+    }, 12000);
+  }
+
 
   /** Une una playlist colaborativa por su código y la guarda en local. */
   async function joinCollaborativeByCode(rawCode) {
@@ -364,13 +511,7 @@
     for (var i = 0; i < remoteTracks.length; i++) {
       var t = remoteTracks[i];
       if (!t || t.id === undefined || t.id === null) continue;
-      try {
-        if (Sonora.DB && Sonora.DB.tracks && typeof Sonora.DB.tracks.getById === 'function') {
-          var existing = await Sonora.DB.tracks.getById(t.id);
-          if (!existing) await Sonora.DB.tracks.add(t);
-          else await Sonora.DB.tracks.update(t);
-        }
-      } catch (e) { /* seguimos */ }
+      await mergeRemoteTrack(t);
       trackIds.push(t.id);
     }
 
@@ -1400,6 +1541,9 @@
             <button class="btn-action btn-action--secondary" id="btn-share-playlist">
               Compartir
             </button>
+            <button class="btn-action btn-action--secondary" id="btn-sync-collab" style="display:none;">
+              🔄 Sincronizar
+            </button>
             <button class="btn-action btn-action--danger" id="btn-delete-playlist">
               Eliminar
             </button>
@@ -1597,6 +1741,7 @@
       }
 
       const allPlaylists = userPlaylists;
+      notifyPlaylistsChanged();
 
       // Menú de acciones de una playlist (pulsación larga o botón ⋯)
       const openPlaylistActions = (pl) => {
@@ -1629,13 +1774,18 @@
                 danger: true,
                 onConfirm: async () => {
                   try {
-                    await Sonora.DB.playlists.delete(pl.id);
+                    // En colaborativas, borramos primero en el servidor. Si
+                    // falla, no decimos "eliminada" ni dejamos estados a medias.
                     if (pl.code && Sonora.API && typeof Sonora.API.deleteCollaborativePlaylist === 'function') {
-                      Sonora.API.deleteCollaborativePlaylist(pl.code).catch(() => {});
+                      await Sonora.API.deleteCollaborativePlaylist(pl.code);
                     }
-                    showToast('Playlist eliminada');
+                    await Sonora.DB.playlists.delete(pl.id);
+                    notifyPlaylistsChanged();
+                    showToast('Playlist eliminada', 'success');
                     await this.initMainView();
-                  } catch (e) { showToast('No se pudo eliminar', 'error'); }
+                  } catch (e) {
+                    showToast('No se pudo eliminar la playlist: ' + (e && e.message ? e.message : 'sin conexión'), 'error');
+                  }
                 }
               }) }
           ]
@@ -1798,6 +1948,7 @@
             showToast(isCollab
               ? 'Playlist colaborativa creada · código ' + (created && created.code || '')
               : 'Playlist creada correctamente');
+            notifyPlaylistsChanged();
             closeCreateModal();
             // Entramos directo a la playlist nueva y abrimos el buscador para
             // añadir canciones de la biblioteca enseguida.
@@ -1972,6 +2123,22 @@
       const tracksMap = new Map();
       allTracks.forEach(t => tracksMap.set(String(t.id), t));
 
+      // Playlists colaborativas: traer los cambios que hicieron los demás
+      // antes de pintar. Si el servidor perdió la lista, se republica.
+      if (playlist.code) {
+        try {
+          const changedRemote = await pullCollabPlaylist(playlist, { silent: true });
+          if (changedRemote) {
+            const fresh = (await Sonora.DB.tracks.getAll()) || [];
+            allTracks = fresh;
+            tracksMap.clear();
+            fresh.forEach(t => tracksMap.set(String(t.id), t));
+          }
+        } catch (e) {
+          console.warn('[Playlists] No se pudo sincronizar la colaborativa:', e);
+        }
+      }
+
       // Update Header info
       const titleEl = $('#detail-title');
       const descEl = $('#detail-desc');
@@ -2086,6 +2253,12 @@
             e.stopPropagation();
             const trackId = btn.getAttribute('data-track-id');
             try {
+              // Si es colaborativa, primero confirmamos el borrado en el
+              // servidor. Antes se lanzaba en segundo plano y la UI decía
+              // "eliminada" aunque el servidor hubiera fallado.
+              if ((playlist.isCollaborative || playlist.code) && playlist.code && Sonora.API && typeof Sonora.API.removeTrackFromCollaborative === 'function') {
+                await Sonora.API.removeTrackFromCollaborative(playlist.code, trackId);
+              }
               // Update playlist (comparando como texto: los ids pueden ser
               // números o cadenas según el origen de la canción)
               const updatedTrackIds = (playlist.trackIds || []).filter(id => String(id) !== String(trackId));
@@ -2097,15 +2270,11 @@
                   await Sonora.DB.playlists.update(Object.assign({}, playlist, { trackIds: updatedTrackIds, updatedAt: new Date().toISOString() }));
                 }
               }
-              // Si es colaborativa, quitarla también en el servidor
-              if ((playlist.isCollaborative || playlist.code) && playlist.code && Sonora.API && typeof Sonora.API.removeTrackFromCollaborative === 'function') {
-                Sonora.API.removeTrackFromCollaborative(playlist.code, trackId).catch(() => {});
-              }
-              showToast('Canción eliminada de la playlist');
-              await this.initDetailView(playlist.id);
+              showToast('Canción eliminada de la playlist', 'success');
+              if (Sonora.Router && typeof Sonora.Router.refresh === 'function') Sonora.Router.refresh();
             } catch (err) {
               console.error('[Playlists] Error removing track', err);
-              showToast('Error al eliminar canción', 'error');
+              showToast('No se pudo eliminar la canción: ' + (err && err.message ? err.message : 'sin conexión'), 'error');
             }
           });
         });
@@ -2339,13 +2508,14 @@
             danger: true,
             onConfirm: async () => {
               try {
+                if (playlist.code && Sonora.API && typeof Sonora.API.deleteCollaborativePlaylist === 'function') {
+                  await Sonora.API.deleteCollaborativePlaylist(playlist.code);
+                }
                 if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.delete === 'function') {
                   await Sonora.DB.playlists.delete(playlist.id);
+                  notifyPlaylistsChanged();
                 }
-                if (playlist.code && Sonora.API && typeof Sonora.API.deleteCollaborativePlaylist === 'function') {
-                  Sonora.API.deleteCollaborativePlaylist(playlist.code).catch(() => {});
-                }
-                showToast('Playlist eliminada');
+                showToast('Playlist eliminada', 'success');
                 if (Sonora.Router && typeof Sonora.Router.navigate === 'function') {
                   Sonora.Router.navigate('/playlists');
                 } else {
@@ -2353,7 +2523,7 @@
                 }
               } catch (err) {
                 console.error('[Playlists] Delete failed', err);
-                showToast('Error al eliminar la playlist', 'error');
+                showToast('No se pudo eliminar la playlist: ' + (err && err.message ? err.message : 'sin conexión'), 'error');
               }
             }
           });
@@ -2473,7 +2643,7 @@
             if (playlist.code) syncCollabPlaylistToServer(playlist);
             showToast(playlist.code ? 'Playlist actualizada · código ' + playlist.code : 'Playlist actualizada');
             closeEditModal();
-            await this.initDetailView(playlist.id);
+            if (Sonora.Router && typeof Sonora.Router.refresh === 'function') Sonora.Router.refresh();
           } catch (err) {
             console.error('[Playlists] Edit failed', err);
             showToast('Error al actualizar la playlist', 'error');
@@ -2680,8 +2850,8 @@
 
       const closeAddModal = async () => {
         if (modalAdd) modalAdd.classList.remove('active');
-        // Refresh detail view after adding tracks
-        await this.initDetailView(playlist.id);
+        // Refrescar la vista de detalle sin volver a enganchar listeners.
+        if (Sonora.Router && typeof Sonora.Router.refresh === 'function') Sonora.Router.refresh();
       };
 
       if (btnOpenAdd) addTrackedListener(btnOpenAdd, 'click', openAddModal);
@@ -2703,6 +2873,41 @@
         setTimeout(() => { try { openEditModal(); } catch (e) {} }, 240);
       }
 
+      // Playlist colaborativa: botón Sincronizar + refresco automático cada 12 s.
+      const collabSyncBtn = $('#btn-sync-collab');
+      if (playlist.code) {
+        if (collabSyncBtn) {
+          collabSyncBtn.style.display = 'inline-flex';
+          addTrackedListener(collabSyncBtn, 'click', async () => {
+            const original = collabSyncBtn.textContent;
+            collabSyncBtn.disabled = true;
+            collabSyncBtn.textContent = '⏳ Sincronizando…';
+            try {
+              const changed = await pullCollabPlaylist(playlist, { silent: false });
+              if (changed) {
+                showToast('Playlist actualizada con los cambios de todos', 'success');
+                if (Sonora.Router && typeof Sonora.Router.refresh === 'function') Sonora.Router.refresh();
+              } else {
+                showToast('Ya tienes la última versión de la playlist', 'info');
+              }
+            } catch (e) {
+              showToast('No se pudo sincronizar la playlist', 'error');
+            } finally {
+              collabSyncBtn.disabled = false;
+              collabSyncBtn.textContent = original;
+            }
+          });
+        }
+
+        startCollabRefresh(playlist.id, function () {
+          const shell = document.querySelector('.playlist-detail-container');
+          if (!shell || String(shell.getAttribute('data-playlist-id')) !== String(playlist.id)) return;
+          if (Sonora.Router && typeof Sonora.Router.refresh === 'function') Sonora.Router.refresh();
+        });
+      } else if (collabSyncBtn) {
+        collabSyncBtn.style.display = 'none';
+      }
+
       // Playlist recién creada → invitamos a añadir canciones de la biblioteca.
       if (_pendingOpenAdd && !(playlist.trackIds || []).length) {
         _pendingOpenAdd = false;
@@ -2714,6 +2919,8 @@
      * Cleanup event listeners and DOM elements
      */
     destroy() {
+      stopCollabRefresh();
+
       _listeners.forEach(({ el, event, handler, options }) => {
         try {
           if (el) el.removeEventListener(event, handler, options);

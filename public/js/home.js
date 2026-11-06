@@ -180,10 +180,44 @@
     `;
   }
 
+  function isDeviceMode() {
+    try {
+      if (Sonora.API && typeof Sonora.API.getMode === 'function') {
+        var mode = Sonora.API.getMode();
+        if (mode === 'device' || mode === 'off') return true;
+        if (mode === 'local' || mode === 'render' || mode === 'northflank') return false;
+      }
+    } catch (e) {}
+    var base = (Sonora.API && typeof Sonora.API.getActiveUrl === 'function') ? Sonora.API.getActiveUrl() : '';
+    return !base;
+  }
+
   function renderEmptyState() {
+    if (isDeviceMode()) {
+      return `
+      <div class="home-empty-state home-empty-state--device" style="padding: 40px 20px; text-align: center;">
+        <div class="empty-icon-wrap" style="width: 72px; height: 72px; margin: 0 auto 16px; border-radius: 50%; background: rgba(var(--color-primary-rgb, 255, 71, 87), 0.12); display: flex; align-items: center; justify-content: center; border: 1px solid rgba(var(--color-primary-rgb, 255, 71, 87), 0.25); font-size: 32px;">
+          📱
+        </div>
+        <h3 class="empty-title" style="font-size: 22px; font-weight: 800; color: var(--color-text-primary); margin-bottom: 8px; letter-spacing: -0.3px;">Tu música, sin conexión</h3>
+        <p class="empty-desc" style="color: var(--color-text-secondary); max-width: 340px; margin: 0 auto 24px; font-size: 14px; line-height: 1.55;">
+          Estás en <b>Modo Dispositivo</b>. Tus playlists, favoritos, historial y descargas siguen aquí. Para buscar en YouTube elige un servidor en Ajustes.
+        </p>
+        <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 8px;">
+          <button class="btn btn--primary" data-action="go-library" style="background: var(--color-primary, #FF4757); color: var(--color-on-primary, #fff); border: none; border-radius: 24px; padding: 13px 28px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 18px rgba(var(--color-primary-rgb, 255, 71, 87), 0.4);">
+            Ver mi biblioteca
+          </button>
+          <button class="btn" data-action="go-settings" style="background: var(--color-surface-elevated); color: var(--color-text-primary); border: 1px solid var(--color-divider); border-radius: 24px; padding: 13px 24px; font-size: 14px; font-weight: 600; cursor: pointer;">
+            Elegir servidor
+          </button>
+        </div>
+      </div>
+    `;
+    }
+
     return `
       <div class="home-empty-state" style="padding: 40px 20px; text-align: center;">
-        <div class="empty-icon-wrap" style="width: 72px; height: 72px; margin: 0 auto 16px; border-radius: 50%; background: rgba(255, 71, 87, 0.12); display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255, 71, 87, 0.25);">
+        <div class="empty-icon-wrap" style="width: 72px; height: 72px; margin: 0 auto 16px; border-radius: 50%; background: rgba(var(--color-primary-rgb, 255, 71, 87), 0.12); display: flex; align-items: center; justify-content: center; border: 1px solid rgba(var(--color-primary-rgb, 255, 71, 87), 0.25);">
           <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary, #FF4757)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M9 18V5l12-2v13"></path>
             <circle cx="6" cy="18" r="3"></circle>
@@ -191,10 +225,10 @@
           </svg>
         </div>
         <h3 class="empty-title" style="font-size: 22px; font-weight: 800; color: var(--color-text-primary); margin-bottom: 8px; letter-spacing: -0.3px;">Tu música en un solo lugar</h3>
-        <p class="empty-desc" style="color: #9e9ea7; max-width: 320px; margin: 0 auto 24px; font-size: 14px; line-height: 1.5;">
+        <p class="empty-desc" style="color: var(--color-text-secondary); max-width: 320px; margin: 0 auto 24px; font-size: 14px; line-height: 1.5;">
           Busca canciones y artistas en YouTube y SoundCloud. Reproduce al instante y descarga con portada y letras.
         </p>
-        <button class="btn btn--primary" data-action="go-search" style="background: var(--color-primary, #FF4757); color: var(--color-text-primary); border: none; border-radius: 24px; padding: 13px 32px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 18px rgba(255,71,87,0.45); margin-bottom: 32px;">
+        <button class="btn btn--primary" data-action="go-search" style="background: var(--color-primary, #FF4757); color: var(--color-on-primary, #fff); border: none; border-radius: 24px; padding: 13px 32px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 18px rgba(var(--color-primary-rgb, 255, 71, 87), 0.45); margin-bottom: 32px;">
           Explorar y buscar música
         </button>
 
@@ -269,7 +303,7 @@
             }
             .greeting-sub {
               font-size: 14px;
-              color: rgba(255, 255, 255, 0.7);
+              color: var(--color-text-secondary);
               margin: 4px 0 0 0;
             }
             .greeting-avatar {
@@ -722,8 +756,8 @@
               gap: 6px;
               padding: 9px 14px;
               border-radius: 999px;
-              background: rgba(255, 255, 255, 0.06);
-              border: 1px solid rgba(255, 255, 255, 0.1);
+              background: var(--color-surface);
+              border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.08));
               color: var(--color-text-primary);
               font-size: 12.5px;
               font-weight: 600;
@@ -811,6 +845,23 @@
             return;
           }
 
+          // 0.0 Modo Dispositivo: ir a la biblioteca o a Ajustes
+          const goLibraryBtn = target.closest('[data-action="go-library"]');
+          if (goLibraryBtn) {
+            if (Sonora.Router && typeof Sonora.Router.navigate === 'function') {
+              Sonora.Router.navigate('library');
+            }
+            return;
+          }
+
+          const goSettingsBtn = target.closest('[data-action="go-settings"]');
+          if (goSettingsBtn) {
+            if (Sonora.Router && typeof Sonora.Router.navigate === 'function') {
+              Sonora.Router.navigate('settings');
+            }
+            return;
+          }
+
           // 0.1 Quick search chip
           const quickSearchBtn = target.closest('[data-quick-search]');
           if (quickSearchBtn) {
@@ -827,7 +878,9 @@
             try {
               const trackData = JSON.parse(extRecCard.getAttribute('data-external-rec'));
               if (trackData && Sonora.Player && typeof Sonora.Player.play === 'function') {
-                const serverBase = (Sonora.API && typeof Sonora.API.getActiveUrl === 'function') ? Sonora.API.getActiveUrl() : 'http://192.168.1.132:3000';
+                const serverBase = (Sonora.API && typeof Sonora.API.getMediaBase === 'function')
+                  ? Sonora.API.getMediaBase()
+                  : ((Sonora.API && typeof Sonora.API.getActiveUrl === 'function') ? Sonora.API.getActiveUrl() : '');
                 const trackObj = {
                   id: trackData.id || ('ext_' + Date.now()),
                   title: trackData.title,
@@ -836,7 +889,9 @@
                   duration: trackData.duration || 215,
                   artworkUrl: trackData.thumbnail,
                   sourceUrl: trackData.url,
-                  streamUrl: `${serverBase}/api/stream/external?url=${encodeURIComponent(trackData.url)}`,
+                  streamUrl: (Sonora.API && typeof Sonora.API.externalStreamUrl === 'function')
+                    ? Sonora.API.externalStreamUrl(trackData.url)
+                    : `${serverBase}/api/stream/external?url=${encodeURIComponent(trackData.url)}`,
                   platform: 'youtube'
                 };
                 Sonora.Player.play(trackObj);
@@ -856,7 +911,9 @@
             const cache = window._sonora_home_data || {};
             const recs = cache.artistRecommendations || [];
             if (recs.length > 0 && Sonora.Player) {
-              const serverBase = (Sonora.API && typeof Sonora.API.getActiveUrl === 'function') ? Sonora.API.getActiveUrl() : 'http://192.168.1.132:3000';
+              const serverBase = (Sonora.API && typeof Sonora.API.getMediaBase === 'function')
+                ? Sonora.API.getMediaBase()
+                : ((Sonora.API && typeof Sonora.API.getActiveUrl === 'function') ? Sonora.API.getActiveUrl() : '');
               const queue = recs.map((r, i) => ({
                 id: r.id || ('ext_' + Date.now() + '_' + i),
                 title: r.title,
@@ -865,7 +922,9 @@
                 duration: r.duration || 215,
                 artworkUrl: r.thumbnail,
                 sourceUrl: r.url,
-                streamUrl: `${serverBase}/api/stream/external?url=${encodeURIComponent(r.url)}`,
+                streamUrl: (Sonora.API && typeof Sonora.API.externalStreamUrl === 'function')
+                  ? Sonora.API.externalStreamUrl(r.url)
+                  : `${serverBase}/api/stream/external?url=${encodeURIComponent(r.url)}`,
                 platform: 'youtube'
               }));
               Sonora.Player.setQueue(queue, 0);

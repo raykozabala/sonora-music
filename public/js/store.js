@@ -104,9 +104,12 @@
         theme: 'coral',
         darkMode: 'dark',
         fontSize: 'medium',
-        serverMode: 'off', // 'local' | 'render' | 'off'
-        serverLocalUrl: 'http://192.168.1.132:3000',
+        serverMode: 'off', // 'local' | 'render' | 'northflank' | 'off'
+        serverLocalUrl: 'http://MacBook-Air-de-Rayko.local:3000',
         serverRenderUrl: 'https://sonora-music-b1ee.onrender.com',
+        serverNorthflankUrl: '',
+        serverNorthflankToken: '',
+        appVersion: '7.17.0',
         language: 'es',
         customBg: null,
         currentPage: 'home',

@@ -26,6 +26,18 @@
       .replace(/'/g, '&#039;');
   }
 
+  // Modo Dispositivo = sin servidor activo. La biblioteca local sigue viva.
+  function isDeviceMode() {
+    try {
+      if (Sonora.API && typeof Sonora.API.getMode === 'function') {
+        const mode = Sonora.API.getMode();
+        if (mode === 'device' || mode === 'off') return true;
+        if (mode === 'local' || mode === 'render' || mode === 'northflank') return false;
+      }
+    } catch (e) {}
+    return !(Sonora.API && typeof Sonora.API.getActiveUrl === 'function' ? Sonora.API.getActiveUrl() : '');
+  }
+
   /**
    * Pide una foto al usuario y la devuelve reducida como data URL JPEG.
    * Se usa para poner carátula manual a las canciones (sobre todo a las del
@@ -96,6 +108,7 @@
 
   // Cached data
   let allTracks = [];
+  let hiddenTracks = [];
   let allAlbums = [];
   let allArtists = [];
   let currentTabTracks = [];
@@ -177,7 +190,29 @@
   function findTrackById(id) {
     var t = allTracks.find(function (x) { return String(x.id) === String(id); });
     if (t) return t;
+    t = hiddenTracks.find(function (x) { return String(x.id) === String(id); });
+    if (t) return t;
     return deviceTracks.find(function (x) { return String(x.id) === String(id); }) || null;
+  }
+
+  function isHiddenTrack(track) {
+    return !!track && (track.hidden === 1 || track.hidden === true);
+  }
+
+  /** Fila discreta que da acceso a la carpeta de canciones ocultas. */
+  function renderHiddenAccessRow() {
+    if (!hiddenTracks.length) return '';
+    var count = hiddenTracks.length;
+    return `
+      <button type="button" class="lib-hidden-access" data-action="open-hidden">
+        <span class="lib-hidden-access__icon" aria-hidden="true">🔒</span>
+        <span class="lib-hidden-access__text">
+          <strong>Canciones ocultas</strong>
+          <small>${count} ${count === 1 ? 'canción guardada' : 'canciones guardadas'} · toca para verlas</small>
+        </span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    `;
   }
 
   function renderTrackRow(track, idx, context) {
@@ -237,7 +272,7 @@
           <div class="empty-icon">🎵</div>
           <h3>Tu biblioteca está vacía</h3>
           <p>Busca tus canciones favoritas en YouTube o SoundCloud para comenzar a escuchar y descargar.</p>
-          <button type="button" class="btn btn--primary" data-action="go-search" style="margin-top:16px; background:var(--color-primary, #FF4757); color:var(--color-text-primary); border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
+          <button type="button" class="btn btn--primary" data-action="go-search" style="margin-top:16px; background:var(--color-primary, #FF4757); color:var(--color-on-primary, #fff); border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
             🔍 Buscar música para comenzar
           </button>
         </div>
@@ -370,8 +405,11 @@
     if (!Sonora.DB || !Sonora.DB.tracks || typeof Sonora.DB.tracks.add !== 'function') return;
     try {
       var all = (await Sonora.DB.tracks.getAll()) || [];
-      var prevIds = all.filter(t => t && t.isDeviceTrack).map(t => String(t.id));
+      var prevDevice = all.filter(t => t && t.isDeviceTrack);
+      var prevIds = prevDevice.map(t => String(t.id));
       var nowIds = list.map(t => String(t.id));
+      var prevById = {};
+      prevDevice.forEach(function (t) { prevById[String(t.id)] = t; });
 
       for (var i = 0; i < prevIds.length; i++) {
         if (nowIds.indexOf(prevIds[i]) === -1) {
@@ -383,6 +421,9 @@
 
       var now = new Date().toISOString();
       var records = list.map(function (t) {
+        var prev = prevById[String(t.id)] || {};
+        var hidden = isHiddenTrack(prev) || isHiddenTrack(t);
+        if (hidden) t.hidden = 1;
         return {
           id: t.id,
           title: t.title,
@@ -396,10 +437,12 @@
           rawPath: t.rawPath || '',
           sourceUrl: '',
           streamUrl: '',
-          isFavorite: 0,
+          isFavorite: prev.isFavorite ? 1 : 0,
           isDownloaded: 0,
           isDeviceTrack: 1,
-          dateAdded: now,
+          hidden: hidden ? 1 : 0,
+          hiddenAt: hidden ? (prev.hiddenAt || t.hiddenAt || Date.now()) : 0,
+          dateAdded: prev.dateAdded || now,
           genre: 'Dispositivo',
           year: 0,
           trackNumber: 1
@@ -723,7 +766,7 @@
               🔄 Escanear de nuevo
             </button>
             <button type="button" class="btn" data-action="request-storage"
-                    style="background:var(--color-surface-elevated); color:var(--color-text-primary); border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
+                    style="background:var(--color-surface-elevated); color:var(--color-text-primary); border:1px solid var(--color-divider); border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
               🔓 Permisos
             </button>
           </div>
@@ -731,7 +774,8 @@
       `;
     }
 
-    const sorted = sortTracks(deviceTracks, currentSort);
+    const visibleDeviceTracks = deviceTracks.filter(function (t) { return !isHiddenTrack(t); });
+    const sorted = sortTracks(visibleDeviceTracks, currentSort);
     currentTabTracks = sorted;
 
     return `
@@ -742,15 +786,15 @@
         </button>
         <button type="button" class="btn" data-action="toggle-device-lock"
                 title="${deviceLockedInPlaylists ? 'Las canciones del teléfono están bloqueadas en las playlists' : 'Bloquear las canciones del teléfono en las playlists'}"
-                style="background:${deviceLockedInPlaylists ? 'var(--color-surface-elevated)' : 'rgba(255,255,255,0.06)'}; color:var(--color-text-primary); border:1px solid ${deviceLockedInPlaylists ? 'var(--color-primary, #FF4757)' : 'rgba(255,255,255,0.15)'}; border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
+                style="background:${deviceLockedInPlaylists ? 'var(--color-surface-elevated)' : 'var(--color-card-bg)'}; color:var(--color-text-primary); border:1px solid ${deviceLockedInPlaylists ? 'var(--color-primary, #FF4757)' : 'var(--color-divider)'}; border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
           ${deviceLockedInPlaylists ? '🔒 No en playlists' : '🔓 Sí en playlists'}
         </button>
         <button type="button" class="btn" data-action="scan-device" title="Escanear de nuevo"
-                style="background:var(--color-surface-elevated); color:var(--color-text-primary); border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
+                style="background:var(--color-surface-elevated); color:var(--color-text-primary); border:1px solid var(--color-divider); border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
           🔄
         </button>
         <button type="button" class="btn" data-action="request-storage" title="Permisos"
-                style="background:var(--color-surface-elevated); color:var(--color-text-primary); border:1px solid rgba(255,255,255,0.15); border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
+                style="background:var(--color-surface-elevated); color:var(--color-text-primary); border:1px solid var(--color-divider); border-radius:20px; padding:8px 14px; font-weight:700; cursor:pointer;">
           🔓
         </button>
       </div>
@@ -760,19 +804,60 @@
     `;
   }
 
+  function renderActiveDownloadsSection() {
+    if (!Sonora.Download || typeof Sonora.Download.getActiveDownloads !== 'function') return '';
+    const actives = Sonora.Download.getActiveDownloads();
+    if (!actives || actives.length === 0) return '';
+
+    return `
+      <div class="lib-active-downloads-section">
+        <div class="lib-section-title" style="font-size:12px;font-weight:700;color:var(--color-text-secondary,#9da2b4);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">
+          ⬇️ En Curso (${actives.length})
+        </div>
+        ${actives.map(function(item) {
+          const pct = item.progress || 0;
+          const isError = item.phase === 'error';
+          const isPreparing = item.phase === 'preparing';
+          const detail = isPreparing ? 'Preparando…' : (item.phase === 'saving' ? 'Guardando en dispositivo…' : `${item.speed || ''} · ${item.eta || '--'}`);
+          return `
+            <div class="active-dl-item${isError ? ' is-error' : ''}">
+              <div class="active-dl-info" style="flex:1;min-width:0;">
+                <div class="active-dl-title">${item.title || 'Canción'}</div>
+                <div class="active-dl-sub">${item.artist || ''} · ${isPreparing ? 'Preparando…' : pct + '%'} · ${detail}</div>
+                <div class="active-dl-bar" style="margin-top:6px;">
+                  <div class="active-dl-fill" style="width:${pct}%;${isPreparing ? 'animation:sonora-dl-pulse 1.1s ease-in-out infinite;' : ''}"></div>
+                </div>
+              </div>
+              <div class="active-dl-btns">
+                ${isError
+                  ? `<button class="active-dl-btn btn-retry-dl" data-dl-id="${item.id}" title="Reintentar">🔄 Reintentar</button>`
+                  : `<button class="active-dl-btn btn-pause-dl" data-dl-id="${item.id}" title="Cancelar descarga">✕ Cancelar</button>`
+                }
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
   function renderDescargadosTab(tracks) {
     // Antes se llamaba a Download.isDownloaded() (promesa => siempre verdadera)
     // y esta pestaña listaba TODA la biblioteca como si estuviera descargada.
     const dlTracks = tracks.filter(t => t && !!t.isDownloaded);
+    const activesSection = renderActiveDownloadsSection();
 
-    if (dlTracks.length === 0) {
+    if (dlTracks.length === 0 && !activesSection) {
+      const device = isDeviceMode();
       return `
         <div class="lib-empty-state">
           <div class="empty-icon">💾</div>
           <h3>Sin descargas</h3>
-          <p>Descarga canciones desde el buscador para disfrutarlas sin conexión a internet o con Lark Player.</p>
-          <button type="button" class="btn btn--primary" data-action="go-search" style="margin-top:16px; background:var(--color-primary, #FF4757); color:var(--color-text-primary); border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
-            🔍 Buscar canciones para descargar
+          <p>${device
+            ? 'Estás en Modo Dispositivo. Conecta un servidor para descargar canciones nuevas; las que ya tengas seguirán disponibles sin internet.'
+            : 'Descarga canciones desde el buscador para disfrutarlas sin conexión a internet o con Lark Player.'}</p>
+          <button type="button" class="btn btn--primary" data-action="${device ? 'go-settings' : 'go-search'}" style="margin-top:16px; background:var(--color-primary, #FF4757); color:var(--color-on-primary, #fff); border:none; border-radius:20px; padding:10px 22px; font-weight:700; cursor:pointer;">
+            ${device ? '⚙️ Elegir servidor' : '🔍 Buscar canciones para descargar'}
           </button>
         </div>
       `;
@@ -782,6 +867,7 @@
     currentTabTracks = sorted;
 
     return `
+      ${activesSection}
       <div class="tab-header-action">
         <button class="btn btn--primary play-all-btn" data-action="play-tab-all">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -993,6 +1079,44 @@
     `;
   }
 
+  function renderHiddenDetail() {
+    const sorted = sortTracks(hiddenTracks, currentSort);
+    currentTabTracks = sorted;
+
+    return `
+      <div class="lib-detail-view">
+        <div class="detail-header">
+          <button class="btn-back" data-action="close-detail-view">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            Volver
+          </button>
+          <div class="detail-hero">
+            <div class="detail-hero-art-wrap" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.06);font-size:44px;">
+              🔒
+            </div>
+            <div class="detail-hero-info">
+              <span class="detail-type-badge">CARPETA OCULTA</span>
+              <h1 class="detail-title">Canciones ocultas</h1>
+              <p class="detail-meta">${sorted.length} ${sorted.length === 1 ? 'canción' : 'canciones'} · nadie las ve en tu biblioteca</p>
+            </div>
+          </div>
+          <div class="detail-action-buttons">
+            <button class="btn" data-action="unhide-all">
+              👁️ Mostrar todas
+            </button>
+          </div>
+          <p style="font-size:12.5px;color:var(--color-text-secondary);padding:0 20px 8px;">
+            Toca los 3 puntos de una canción para mostrarla otra vez o quitarla de la biblioteca.
+          </p>
+        </div>
+
+        <div class="lib-tracks-container detail-tracks-container">
+          ${sorted.map((t, idx) => renderTrackRow(t, idx, 'hidden')).join('')}
+        </div>
+      </div>
+    `;
+  }
+
   function renderContextMenuContent(track) {
     if (!track) return '';
     // OJO: Download.isDownloaded() devuelve una promesa (siempre verdadera),
@@ -1000,6 +1124,7 @@
     const isDevice = !!track.isDeviceTrack;
     const isDl = !isDevice && !!track.isDownloaded;
     const isFav = !!track.isFavorite;
+    const isHidden = isHiddenTrack(track);
 
     return `
       <div class="sheet-backdrop" data-action="close-sheet"></div>
@@ -1035,8 +1160,16 @@
           ${isDevice ? '' : `
           <button class="sheet-menu-item" data-action="sheet-toggle-download">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            <span>${isDl ? 'Eliminar descarga' : 'Descargar'}</span>
+            <span>${isDl ? 'Quitar de Sonora offline' : 'Guardar en Sonora offline'}</span>
           </button>`}
+          <button class="sheet-menu-item" data-action="sheet-hide-track">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+            <span>${isHidden ? 'Mostrar canción' : 'Ocultar canción'}</span>
+          </button>
+          <button class="sheet-menu-item" data-action="sheet-remove-track" style="color:#FF6B6B;">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            <span>Quitar de la biblioteca</span>
+          </button>
           ${isDevice ? '' : `
           <button class="sheet-menu-item" data-action="sheet-go-artist">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -1159,6 +1292,46 @@
             .play-all-btn {
               width: 100%;
               justify-content: center;
+            }
+            /* Fila discreta de acceso a canciones ocultas */
+            .lib-hidden-access {
+              display: flex;
+              align-items: center;
+              gap: 12px;
+              width: calc(100% - 32px);
+              margin: 10px 16px 4px;
+              padding: 11px 14px;
+              border-radius: 14px;
+              border: 1px dashed var(--color-card-border, rgba(255, 255, 255, 0.16));
+              background: var(--color-surface);
+              color: var(--color-text-secondary);
+              text-align: left;
+              cursor: pointer;
+              transition: background 0.18s ease, border-color 0.18s ease;
+            }
+            .lib-hidden-access:hover {
+              background: var(--color-surface-elevated, rgba(255, 255, 255, 0.07));
+              border-color: var(--color-text-secondary);
+            }
+            .lib-hidden-access__icon {
+              font-size: 18px;
+              line-height: 1;
+            }
+            .lib-hidden-access__text {
+              display: flex;
+              flex-direction: column;
+              gap: 1px;
+              flex: 1;
+              min-width: 0;
+            }
+            .lib-hidden-access__text strong {
+              font-size: 13.5px;
+              font-weight: 700;
+              color: var(--color-text-primary);
+            }
+            .lib-hidden-access__text small {
+              font-size: 11.5px;
+              color: var(--color-text-secondary);
             }
             /* Track Item */
             .lib-tracks-container {
@@ -1929,6 +2102,25 @@
       if (tabsContainer) tabsContainer.innerHTML = renderTabsBar();
       renderCurrentView();
 
+      // Suscripción a eventos de descargas para actualizar en vivo
+      if (Sonora.Store && typeof Sonora.Store.subscribe === 'function') {
+        Sonora.Store.subscribe('downloadsChanged', async () => {
+          if (activeTab === 'descargados') {
+            await loadLibraryData();
+            renderCurrentView();
+          }
+        });
+        Sonora.Store.subscribe('activeDownloadProgress', () => {
+          if (activeTab === 'descargados') {
+            const sec = $('.lib-active-downloads-section', rootElement);
+            if (sec) {
+              const newHtml = renderActiveDownloadsSection();
+              if (newHtml) sec.outerHTML = newHtml;
+            }
+          }
+        });
+      }
+
       // Delegated click handler on page-library
       rootElement.addEventListener('click', async (e) => {
         try {
@@ -1940,6 +2132,39 @@
           if (goSearchBtn) {
             if (Sonora.Router && typeof Sonora.Router.navigate === 'function') {
               Sonora.Router.navigate('search');
+            }
+            return;
+          }
+
+          // Active Downloads: Cancel
+          const cancelDlBtn = target.closest('.btn-pause-dl, .btn-cancel-dl');
+          if (cancelDlBtn) {
+            const dlId = cancelDlBtn.getAttribute('data-dl-id');
+            if (dlId && Sonora.Download && typeof Sonora.Download.cancelDownload === 'function') {
+              Sonora.Download.cancelDownload(dlId);
+              renderCurrentView();
+            }
+            return;
+          }
+
+          // Active Downloads: Retry
+          const retryDlBtn = target.closest('.btn-retry-dl');
+          if (retryDlBtn) {
+            const dlId = retryDlBtn.getAttribute('data-dl-id');
+            if (dlId && Sonora.Download && typeof Sonora.Download.retryDownload === 'function') {
+              Sonora.Download.retryDownload(dlId);
+              renderCurrentView();
+            } else {
+              showToast('Reintentando descarga...');
+            }
+            return;
+          }
+
+          // 0a. Ir a Ajustes (Modo Dispositivo sin servidor)
+          const goSettingsBtn = target.closest('[data-action="go-settings"]');
+          if (goSettingsBtn) {
+            if (Sonora.Router && typeof Sonora.Router.navigate === 'function') {
+              Sonora.Router.navigate('settings');
             }
             return;
           }
@@ -2045,8 +2270,15 @@
           // 1c. Pedir permiso de audio
           const permBtn = target.closest('[data-action="request-storage"]');
           if (permBtn) {
-            if (window.SonoraNative && typeof window.SonoraNative.requestStoragePermission === 'function') {
-              window.SonoraNative.requestStoragePermission();
+            if (window.SonoraNative) {
+              // Android 13+ usa READ_MEDIA_AUDIO (declarado en el manifest).
+              // Antes se abría el ajuste de "Todos los archivos", que la app
+              // no declara y por tanto no desbloqueaba la biblioteca.
+              if (typeof window.SonoraNative.requestAudioPermission === 'function') {
+                window.SonoraNative.requestAudioPermission();
+              } else if (typeof window.SonoraNative.requestStoragePermission === 'function') {
+                window.SonoraNative.requestStoragePermission();
+              }
             }
             return;
           }
@@ -2236,6 +2468,59 @@
             return;
           }
 
+          // 14b. Context Menu Action: Ocultar / mostrar canción
+          const sheetHideBtn = target.closest('[data-action="sheet-hide-track"]');
+          if (sheetHideBtn && activeTrackForMenu) {
+            const targetTrack = activeTrackForMenu;
+            closeContextMenu();
+            await setTrackHidden(targetTrack, !isHiddenTrack(targetTrack));
+            return;
+          }
+
+          // 14c. Context Menu Action: Quitar de la biblioteca
+          const sheetRemoveBtn = target.closest('[data-action="sheet-remove-track"]');
+          if (sheetRemoveBtn && activeTrackForMenu) {
+            const targetTrack = activeTrackForMenu;
+            closeContextMenu();
+            await removeTrackFromLibrary(targetTrack);
+            return;
+          }
+
+          // 14d. Abrir la carpeta de canciones ocultas
+          const openHiddenBtn = target.closest('[data-action="open-hidden"]');
+          if (openHiddenBtn) {
+            detailViewType = 'hidden';
+            detailViewData = null;
+            renderCurrentView();
+            return;
+          }
+
+          // 14e. Mostrar todas las canciones ocultas
+          const unhideAllBtn = target.closest('[data-action="unhide-all"]');
+          if (unhideAllBtn) {
+            if (!hiddenTracks.length) return;
+            const ok = window.confirm('¿Mostrar otra vez las ' + hiddenTracks.length + ' canciones ocultas?');
+            if (!ok) return;
+            try {
+              const list = hiddenTracks.slice();
+              for (const t of list) {
+                t.hidden = 0;
+                t.hiddenAt = 0;
+                if (Sonora.DB && Sonora.DB.tracks && typeof Sonora.DB.tracks.update === 'function') {
+                  await Sonora.DB.tracks.update(t);
+                }
+              }
+              await loadLibraryData();
+              detailViewType = null;
+              renderCurrentView();
+              showToast('👁️ Canciones visibles otra vez');
+            } catch (e) {
+              console.warn('[Library] No se pudieron mostrar las canciones:', e);
+              showToast('No se pudieron mostrar las canciones');
+            }
+            return;
+          }
+
           // 15. Context Menu Action: Go to Artist
           const goArtistBtn = target.closest('[data-action="sheet-go-artist"]');
           if (goArtistBtn && activeTrackForMenu) {
@@ -2307,8 +2592,10 @@
       if (Sonora.DB.tracks && typeof Sonora.DB.tracks.getAll === 'function') {
         // Las pistas del teléfono tienen su propia pestaña ("Este dispositivo")
         // y no deben mezclarse con la biblioteca de Sonora.
-        allTracks = ((await Sonora.DB.tracks.getAll()) || []).filter(function (t) {
-          return t && !t.isDeviceTrack;
+        const allRecords = ((await Sonora.DB.tracks.getAll()) || []).filter(function (t) { return !!t; });
+        hiddenTracks = allRecords.filter(isHiddenTrack);
+        allTracks = allRecords.filter(function (t) {
+          return !t.isDeviceTrack && !isHiddenTrack(t);
         });
       }
 
@@ -2356,6 +2643,28 @@
         });
         allArtists = Array.from(artistMap.values());
       }
+
+      // Si hay canciones ocultas, los álbumes y artistas no deben seguir
+      // mostrando canciones que el usuario ocultó.
+      if (hiddenTracks.length > 0) {
+        allAlbums = allAlbums.filter(function (alb) {
+          const count = allTracks.filter(function (t) {
+            return (t.album && t.album.toLowerCase() === (alb.title || '').toLowerCase()) ||
+                   (alb.id && String(t.albumId) === String(alb.id));
+          }).length;
+          if (count > 0) alb.trackCount = count;
+          return count > 0;
+        });
+
+        allArtists = allArtists.filter(function (art) {
+          const count = allTracks.filter(function (t) {
+            return (t.artist && t.artist.toLowerCase() === (art.name || '').toLowerCase()) ||
+                   (art.id && String(t.artistId) === String(art.id));
+          }).length;
+          if (count > 0) art.trackCount = count;
+          return count > 0;
+        });
+      }
     } catch (e) {
       console.error('[Library] Data load error:', e);
     }
@@ -2375,21 +2684,28 @@
       return;
     }
 
+    if (detailViewType === 'hidden') {
+      tabContent.innerHTML = renderHiddenDetail();
+      return;
+    }
+
+    var hiddenRow = renderHiddenAccessRow();
+
     switch (activeTab) {
       case 'canciones':
-        tabContent.innerHTML = renderCancionesTab(allTracks);
+        tabContent.innerHTML = hiddenRow + renderCancionesTab(allTracks);
         break;
       case 'albumes':
-        tabContent.innerHTML = renderAlbumesTab(allAlbums);
+        tabContent.innerHTML = hiddenRow + renderAlbumesTab(allAlbums);
         break;
       case 'artistas':
-        tabContent.innerHTML = renderArtistasTab(allArtists);
+        tabContent.innerHTML = hiddenRow + renderArtistasTab(allArtists);
         break;
       case 'favoritos':
-        tabContent.innerHTML = renderFavoritosTab(allTracks);
+        tabContent.innerHTML = hiddenRow + renderFavoritosTab(allTracks);
         break;
       case 'descargados':
-        tabContent.innerHTML = renderDescargadosTab(allTracks);
+        tabContent.innerHTML = hiddenRow + renderDescargadosTab(allTracks);
         break;
       case 'videos':
         tabContent.innerHTML = renderVideosTab();
@@ -2402,7 +2718,7 @@
         }
         break;
       default:
-        tabContent.innerHTML = renderCancionesTab(allTracks);
+        tabContent.innerHTML = hiddenRow + renderCancionesTab(allTracks);
     }
   }
 
@@ -2439,12 +2755,24 @@
   async function handleToggleDownload(track) {
     try {
       if (Sonora.Download) {
-        if (typeof Sonora.Download.isDownloaded === 'function' && Sonora.Download.isDownloaded(track.id)) {
-          // Remove download if API supports it
-          if (Sonora.DB && Sonora.DB.downloads && typeof Sonora.DB.downloads.delete === 'function') {
+        // OJO: isDownloaded() devuelve una promesa. Antes se evaluaba como
+        // booleano y siempre entraba en la rama de "eliminar", por lo que el
+        // botón de descarga/eliminar no hacía lo correcto.
+        let downloaded = !!track.isDownloaded;
+        if (typeof Sonora.Download.isDownloaded === 'function') {
+          try { downloaded = await Sonora.Download.isDownloaded(track.id); } catch (e) {}
+        }
+
+        if (downloaded) {
+          if (typeof Sonora.Download.deleteDownload === 'function') {
+            await Sonora.Download.deleteDownload(track.id);
+          } else if (Sonora.DB && Sonora.DB.downloads && typeof Sonora.DB.downloads.delete === 'function') {
             await Sonora.DB.downloads.delete(track.id);
           }
           track.isDownloaded = false;
+          if (Sonora.DB && Sonora.DB.tracks && typeof Sonora.DB.tracks.update === 'function') {
+            try { await Sonora.DB.tracks.update(track); } catch (e) {}
+          }
           showToast('Descarga eliminada');
         } else if (typeof Sonora.Download.downloadTrack === 'function') {
           showToast('Descargando...');
@@ -2463,8 +2791,103 @@
     renderCurrentView();
   }
 
-  async function handleAddToPlaylist(track) {
-    let playlists = [];
+  /** Oculta o vuelve a mostrar una canción de la biblioteca. */
+  async function setTrackHidden(track, hidden) {
+    if (!track) return;
+    track.hidden = hidden ? 1 : 0;
+    track.hiddenAt = hidden ? Date.now() : 0;
+
+    try {
+      if (Sonora.DB && Sonora.DB.tracks && typeof Sonora.DB.tracks.update === 'function' && track.id !== undefined) {
+        await Sonora.DB.tracks.update(track);
+      }
+    } catch (e) {
+      console.warn('[Library] No se pudo guardar el estado oculto:', e);
+    }
+
+    await loadLibraryData();
+    renderCurrentView();
+    showToast(hidden ? '🙈 Canción oculta · está en la carpeta oculta' : '👁️ Canción visible otra vez');
+  }
+
+  /** Quita una canción de la biblioteca (y de playlists/descargas). */
+  async function removeTrackFromLibrary(track) {
+    if (!track) return;
+
+    // Las canciones del teléfono se vuelven a encontrar al escanear, así que
+    // "quitarlas" equivale a ocultarlas de forma permanente.
+    if (track.isDeviceTrack) {
+      const okHide = window.confirm('¿Quitar "' + (track.title || 'esta canción') + '" de tu biblioteca?\n\nEl archivo de música seguirá en tu teléfono.');
+      if (!okHide) return;
+      await setTrackHidden(track, true);
+      return;
+    }
+
+    const name = track.title || 'esta canción';
+    const ok = window.confirm(
+      '¿Quitar "' + name + '" de tu biblioteca?\n\n' +
+      'Se borra de tus playlists y de las descargas guardadas. No se puede deshacer.'
+    );
+    if (!ok) return;
+
+    try {
+      // Descarga / copia offline
+      if (Sonora.DB && Sonora.DB.downloads && typeof Sonora.DB.downloads.delete === 'function') {
+        try { await Sonora.DB.downloads.delete(track.id); } catch (e) {}
+      }
+
+      // Playlists (incluidas colaborativas)
+      if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.getAll === 'function') {
+        try {
+          const playlists = (await Sonora.DB.playlists.getAll()) || [];
+          for (const pl of playlists) {
+            if (!Array.isArray(pl.trackIds)) continue;
+            const before = pl.trackIds.length;
+            pl.trackIds = pl.trackIds.filter(id => String(id) !== String(track.id));
+            if (pl.trackIds.length === before) continue;
+
+            pl.updatedAt = new Date().toISOString();
+            if (typeof Sonora.DB.playlists.update === 'function') {
+              await Sonora.DB.playlists.update(pl);
+            }
+            if (pl.code && Sonora.API && typeof Sonora.API.removeTrackFromCollaborative === 'function') {
+              Sonora.API.removeTrackFromCollaborative(pl.code, track.id).catch(function () {});
+            }
+          }
+        } catch (e) {
+          console.warn('[Library] No se pudieron actualizar las playlists:', e);
+        }
+      }
+
+      // Registro de la biblioteca
+      if (Sonora.DB && Sonora.DB.tracks && typeof Sonora.DB.tracks.delete === 'function' && track.id !== undefined) {
+        await Sonora.DB.tracks.delete(track.id);
+      }
+
+      // Caché de letra de esa pista. Va DESPUÉS de borrar el registro: forget()
+      // lee la pista y la vuelve a guardar, así que si se llama antes la
+      // canción reaparecía en la biblioteca.
+      try {
+        if (Sonora.Lyrics && typeof Sonora.Lyrics.forget === 'function') {
+          await Sonora.Lyrics.forget(track);
+        }
+      } catch (e) {}
+
+      await loadLibraryData();
+
+      if (detailViewType === 'hidden' && !hiddenTracks.length) detailViewType = null;
+      if (detailViewType === 'album' && !allTracks.some(t => t.album === detailViewData.title)) detailViewType = null;
+      if (detailViewType === 'artist' && !allTracks.some(t => t.artist === detailViewData.name)) detailViewType = null;
+
+      renderCurrentView();
+      showToast('Canción quitada de la biblioteca');
+    } catch (e) {
+      console.error('[Library] Error quitando canción:', e);
+      showToast('No se pudo quitar la canción');
+    }
+  }
+
+  async function handleAddToPlaylist(track) {    let playlists = [];
     try {
       if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.getAll === 'function') {
         playlists = (await Sonora.DB.playlists.getAll()) || [];

@@ -234,20 +234,30 @@
               color: #4FC3F7;
               border-color: rgba(79, 195, 247, 0.3);
             }
+            .server-mode-indicator.mode-northflank {
+              background: rgba(108, 92, 231, 0.18);
+              color: #a29bfe;
+              border-color: rgba(108, 92, 231, 0.4);
+            }
             .server-mode-indicator.mode-off {
               background: rgba(255, 82, 82, 0.15);
               color: #FF5252;
               border-color: rgba(255, 82, 82, 0.3);
             }
+            .server-mode-indicator.mode-device {
+              background: rgba(var(--color-primary-rgb, 255, 71, 87), 0.15);
+              color: var(--color-primary, #FF4757);
+              border-color: rgba(var(--color-primary-rgb, 255, 71, 87), 0.35);
+            }
             /* Server Cards */
             .server-cards-grid {
               display: grid;
               grid-template-columns: 1fr;
-              gap: 16px;
+              gap: 14px;
             }
             @media (min-width: 680px) {
               .server-cards-grid {
-                grid-template-columns: 1fr 1fr;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
               }
             }
             .server-card {
@@ -258,7 +268,13 @@
               display: flex;
               flex-direction: column;
               gap: 12px;
-              transition: border-color 0.2s ease, box-shadow 0.2s ease;
+              min-width: 0;
+              cursor: pointer;
+              transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+            }
+            .server-card:focus-visible {
+              outline: 2px solid var(--color-primary, #FF4757);
+              outline-offset: 2px;
             }
             .server-card.active-server {
               border-color: var(--color-primary, #FF4757);
@@ -268,11 +284,15 @@
               display: flex;
               align-items: center;
               justify-content: space-between;
+              gap: 10px;
+              flex-wrap: wrap;
             }
             .server-card__identity {
               display: flex;
               align-items: center;
               gap: 10px;
+              min-width: 0;
+              flex: 1 1 auto;
             }
             .server-icon {
               width: 36px;
@@ -283,10 +303,15 @@
               align-items: center;
               justify-content: center;
               font-size: 18px;
+              flex-shrink: 0;
+            }
+            body.light .server-icon {
+              background: rgba(0, 0, 0, 0.06);
             }
             .server-card__title-box {
               display: flex;
               flex-direction: column;
+              min-width: 0;
             }
             .server-card__name {
               font-size: 14px;
@@ -294,6 +319,36 @@
               display: flex;
               align-items: center;
               gap: 6px;
+              min-width: 0;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            }
+            .server-card__hint {
+              margin: 0;
+              font-size: 11.5px;
+              line-height: 1.45;
+              color: var(--color-text-secondary, #A0A5BA);
+            }
+            /* Selección tipo radio: solo una fuente activa */
+            .server-radio {
+              width: 20px;
+              height: 20px;
+              border-radius: 50%;
+              border: 2px solid var(--color-divider, rgba(255, 255, 255, 0.2));
+              flex-shrink: 0;
+              position: relative;
+              transition: border-color 0.2s ease;
+            }
+            .server-card.active-server .server-radio {
+              border-color: var(--color-primary, #FF4757);
+            }
+            .server-card.active-server .server-radio::after {
+              content: "";
+              position: absolute;
+              inset: 3px;
+              border-radius: 50%;
+              background: var(--color-primary, #FF4757);
             }
             .status-dot {
               width: 10px;
@@ -313,6 +368,11 @@
             .status-dot.render {
               background: #22C55E;
               box-shadow: 0 0 9px rgba(34, 197, 94, 0.95);
+            }
+            /* 🚀 Servidor Northflank conectado */
+            .status-dot.northflank {
+              background: #a29bfe;
+              box-shadow: 0 0 9px rgba(162, 155, 254, 0.95);
             }
             /* 🟠 Conectado pero muy lento (> 1 s) */
             .status-dot.slow {
@@ -351,10 +411,39 @@
             .server-url-input:focus {
               border-color: var(--color-primary, #FF4757);
             }
+            .server-token-box {
+              display: flex;
+              flex-direction: column;
+              gap: 4px;
+            }
+            .server-token-label {
+              font-size: 11px;
+              color: var(--color-text-secondary, #A0A5BA);
+              display: flex;
+              align-items: center;
+              gap: 4px;
+            }
+            .server-token-input {
+              width: 100%;
+              background: var(--color-surface, #1a1a2e);
+              border: 1px solid var(--color-card-border, rgba(255, 255, 255, 0.1));
+              color: var(--color-text-primary, #ffffff);
+              padding: 8px 12px;
+              border-radius: var(--radius-sm, 10px);
+              font-size: 11px;
+              font-family: monospace;
+              box-sizing: border-box;
+              outline: none;
+            }
+            .server-token-input:focus {
+              border-color: #a29bfe;
+            }
             .server-card__bottom {
               display: flex;
               align-items: center;
               justify-content: space-between;
+              gap: 8px;
+              flex-wrap: wrap;
               padding-top: 4px;
             }
             .server-latency-tag {
@@ -411,6 +500,7 @@
               display: inline-flex;
               align-items: center;
               gap: 6px;
+              white-space: nowrap;
               transition: transform 0.15s ease, opacity 0.15s ease;
             }
             .btn-pill:active {
@@ -676,6 +766,26 @@
               opacity: 1;
               transform: translateX(-50%) translateY(0);
             }
+            @media (max-width: 420px) {
+              .server-card__bottom {
+                justify-content: flex-start;
+              }
+              .server-card__name {
+                white-space: normal;
+              }
+            }
+            @media (max-height: 520px) and (orientation: landscape) and (max-width: 1023px) {
+              .page-settings {
+                padding-bottom: 110px;
+              }
+              .server-cards-grid {
+                grid-template-columns: 1fr;
+              }
+              .server-card {
+                padding: 12px;
+                gap: 10px;
+              }
+            }
           </style>
 
           <h1 class="settings-main-title">Ajustes</h1>
@@ -684,7 +794,7 @@
           <section class="settings-section settings-section--featured">
             <div class="settings-section__header">
               <h2 class="settings-section__title">
-                🌐 Conexión al Servidor
+                🌐 Fuente de música
               </h2>
               <span class="server-mode-indicator mode-off" id="server-mode-badge">
                 <span class="status-dot disconnected" id="overall-status-dot"></span>
@@ -692,9 +802,27 @@
               </span>
             </div>
 
-            <div class="server-cards-grid">
+            <div class="server-cards-grid" role="radiogroup" aria-label="Fuente de música">
+              <!-- Este dispositivo -->
+              <div class="server-card" id="card-server-device" data-mode="device" role="radio" tabindex="0" aria-checked="false">
+                <div class="server-card__top">
+                  <div class="server-card__identity">
+                    <div class="server-icon">📱</div>
+                    <div class="server-card__title-box">
+                      <span class="server-card__name">
+                        Este dispositivo
+                        <span class="status-dot connected" id="device-status-dot"></span>
+                      </span>
+                      <span class="server-card__subtitle">Música local, sin servidor</span>
+                    </div>
+                  </div>
+                  <span class="server-radio" aria-hidden="true"></span>
+                </div>
+                <p class="server-card__hint">Playlists, favoritos, historial y descargas funcionan sin internet. YouTube necesita un servidor.</p>
+              </div>
+
               <!-- Servidor Local -->
-              <div class="server-card" id="card-server-local">
+              <div class="server-card" id="card-server-local" data-mode="local" role="radio" tabindex="0" aria-checked="false">
                 <div class="server-card__top">
                   <div class="server-card__identity">
                     <div class="server-icon">💻</div>
@@ -703,28 +831,23 @@
                         Servidor Local
                         <span class="status-dot disconnected" id="local-status-dot"></span>
                       </span>
-                      <span class="server-card__subtitle">Mi Computadora</span>
+                      <span class="server-card__subtitle">Tu computadora en la misma Wi-Fi</span>
                     </div>
                   </div>
-                  <label class="switch" title="Activar/desactivar servidor local">
-                    <input type="checkbox" id="toggle-server-local" />
-                    <span class="slider"></span>
-                  </label>
+                  <span class="server-radio" aria-hidden="true"></span>
                 </div>
 
                 <input type="url" id="input-server-local-url" class="server-url-input"
-                       value="http://192.168.1.132:3000" placeholder="http://192.168.1.x:3000" spellcheck="false" />
+                       value="" placeholder="http://192.168.1.10:3000" spellcheck="false" />
 
                 <div class="server-card__bottom">
-                  <button class="btn-pill btn-pill--secondary" id="btn-test-local">
-                    ⚡ Probar conexión
-                  </button>
+                  <button class="btn-pill btn-pill--secondary" id="btn-test-local">Probar</button>
                   <span class="server-latency-tag" id="latency-local-text">Sin probar</span>
                 </div>
               </div>
 
               <!-- Servidor Render -->
-              <div class="server-card" id="card-server-render">
+              <div class="server-card" id="card-server-render" data-mode="render" role="radio" tabindex="0" aria-checked="false">
                 <div class="server-card__top">
                   <div class="server-card__identity">
                     <div class="server-icon">☁️</div>
@@ -733,23 +856,43 @@
                         Servidor Render
                         <span class="status-dot disconnected" id="render-status-dot"></span>
                       </span>
-                      <span class="server-card__subtitle">Online (Nube)</span>
+                      <span class="server-card__subtitle">Nube · puede tardar en despertar</span>
                     </div>
                   </div>
-                  <label class="switch" title="Activar/desactivar servidor Render">
-                    <input type="checkbox" id="toggle-server-render" />
-                    <span class="slider"></span>
-                  </label>
+                  <span class="server-radio" aria-hidden="true"></span>
                 </div>
 
                 <input type="url" id="input-server-render-url" class="server-url-input"
-                       value="https://sonora-music-b1ee.onrender.com" placeholder="https://sonora-music-b1ee.onrender.com" spellcheck="false" />
+                       value="" placeholder="https://tu-servidor.onrender.com" spellcheck="false" />
 
                 <div class="server-card__bottom">
-                  <button class="btn-pill btn-pill--secondary" id="btn-test-render">
-                    ⚡ Probar conexión
-                  </button>
+                  <button class="btn-pill btn-pill--secondary" id="btn-test-render">Probar</button>
                   <span class="server-latency-tag" id="latency-render-text">Sin probar</span>
+                </div>
+              </div>
+
+              <!-- Servidor Northflank -->
+              <div class="server-card" id="card-server-northflank" data-mode="northflank" role="radio" tabindex="0" aria-checked="false">
+                <div class="server-card__top">
+                  <div class="server-card__identity">
+                    <div class="server-icon">🚀</div>
+                    <div class="server-card__title-box">
+                      <span class="server-card__name">
+                        Servidor Northflank
+                        <span class="status-dot disconnected" id="northflank-status-dot"></span>
+                      </span>
+                      <span class="server-card__subtitle">Nube siempre activa</span>
+                    </div>
+                  </div>
+                  <span class="server-radio" aria-hidden="true"></span>
+                </div>
+
+                <input type="url" id="input-server-northflank-url" class="server-url-input"
+                       value="" placeholder="https://tu-servidor.code.run" spellcheck="false" />
+
+                <div class="server-card__bottom">
+                  <button class="btn-pill btn-pill--secondary" id="btn-test-northflank">Probar</button>
+                  <span class="server-latency-tag" id="latency-northflank-text">Sin probar</span>
                 </div>
               </div>
             </div>
@@ -967,28 +1110,6 @@
 
             <div class="setting-item-row setting-item-row--inline">
               <div class="setting-label-box">
-                <span class="setting-label-title">Nuevas canciones</span>
-                <span class="setting-label-sub">Avisos de nuevos lanzamientos de tus artistas</span>
-              </div>
-              <label class="switch">
-                <input type="checkbox" id="notify-new-tracks" checked />
-                <span class="slider"></span>
-              </label>
-            </div>
-
-            <div class="setting-item-row setting-item-row--inline">
-              <div class="setting-label-box">
-                <span class="setting-label-title">Recomendaciones</span>
-                <span class="setting-label-sub">Mixes y listas personalizadas para ti</span>
-              </div>
-              <label class="switch">
-                <input type="checkbox" id="notify-recommendations" checked />
-                <span class="slider"></span>
-              </label>
-            </div>
-
-            <div class="setting-item-row setting-item-row--inline">
-              <div class="setting-label-box">
                 <span class="setting-label-title">Actualizaciones de la app</span>
                 <span class="setting-label-sub">Novedades de versiones y mejoras</span>
               </div>
@@ -1023,6 +1144,26 @@
               </button>
             </div>
 
+            <div class="setting-item-row setting-item-row--inline">
+              <div class="setting-label-box">
+                <span class="setting-label-title">Letras guardadas</span>
+                <span class="setting-label-sub">Borrar la caché de letras (se vuelven a buscar)</span>
+              </div>
+              <button class="btn-pill btn-pill--secondary" id="btn-clear-lyrics-cache">
+                Borrar letras
+              </button>
+            </div>
+
+            <div class="setting-item-row setting-item-row--inline">
+              <div class="setting-label-box">
+                <span class="setting-label-title">Caché de la aplicación</span>
+                <span class="setting-label-sub">Liberar archivos temporales sin borrar tu música</span>
+              </div>
+              <button class="btn-pill btn-pill--secondary" id="btn-clear-app-cache">
+                Limpiar caché
+              </button>
+            </div>
+
             <div class="setting-item-row setting-item-row--inline" style="margin-top:8px;">
               <div class="setting-label-box">
                 <span class="setting-label-title" style="color:#FF5252;">Restablecer aplicación</span>
@@ -1052,7 +1193,12 @@
               </svg>
 
               <h3 class="about-title">Sonora Music</h3>
-              <span class="about-version-badge">v7.4 Ultimate (Build 2026)</span>
+              <div style="display:flex;align-items:center;gap:10px;margin:6px 0;flex-wrap:wrap;justify-content:center;">
+                <span class="about-version-badge">v7.17.0 (Build 2026)</span>
+                <button id="btn-check-updates" class="btn-update-action" style="padding:4px 12px;font-size:11px;" title="Buscar nuevas versiones">
+                  🔄 Buscar actualizaciones
+                </button>
+              </div>
 
               <div class="about-stats-summary" id="about-stats-summary">
                 <span id="about-tracks-count">🎵 0 pistas</span> •
@@ -1065,11 +1211,11 @@
               </p>
 
               <div class="about-links">
-                <a href="https://github.com" target="_blank" rel="noopener noreferrer" class="about-link">GitHub</a>
+                <a href="https://github.com/raykozabala/sonora-music-server" target="_blank" rel="noopener noreferrer" class="about-link">GitHub</a>
                 <span style="color:var(--color-divider);">•</span>
-                <a href="#" id="link-about-web" class="about-link">Sitio Web</a>
+                <a href="https://sonora-music-b1ee.onrender.com" target="_blank" rel="noopener noreferrer" id="link-about-web" class="about-link">Sitio Web</a>
                 <span style="color:var(--color-divider);">•</span>
-                <a href="#" id="link-about-feedback" class="about-link">Sugerencias</a>
+                <a href="https://github.com/raykozabala/sonora-music-server/issues" target="_blank" rel="noopener noreferrer" id="link-about-feedback" class="about-link">Sugerencias</a>
               </div>
             </div>
           </section>
@@ -1101,57 +1247,74 @@
 
     /**
      * SECTION 1: Server Logic
-     * Handles Local & Render servers, URLs, toggles, test latency, and state sync
+     * Handles Local, Render & Northflank servers, URLs, toggles, test latency, and state sync
      */
     async initServerSection() {
-      const toggleLocal = $('#toggle-server-local');
-      const toggleRender = $('#toggle-server-render');
       const inputLocal = $('#input-server-local-url');
       const inputRender = $('#input-server-render-url');
+      const inputNorthflank = $('#input-server-northflank-url');
       const btnTestLocal = $('#btn-test-local');
       const btnTestRender = $('#btn-test-render');
+      const btnTestNorthflank = $('#btn-test-northflank');
       const latencyLocal = $('#latency-local-text');
       const latencyRender = $('#latency-render-text');
+      const latencyNorthflank = $('#latency-northflank-text');
+      const dotDevice = $('#device-status-dot');
       const dotLocal = $('#local-status-dot');
       const dotRender = $('#render-status-dot');
+      const dotNorthflank = $('#northflank-status-dot');
       const modeBadge = $('#server-mode-badge');
       const modeText = $('#server-mode-text');
       const overallDot = $('#overall-status-dot');
+      const cardDevice = $('#card-server-device');
       const cardLocal = $('#card-server-local');
       const cardRender = $('#card-server-render');
+      const cardNorthflank = $('#card-server-northflank');
+      const cards = [
+        { mode: 'device', el: cardDevice },
+        { mode: 'local', el: cardLocal },
+        { mode: 'render', el: cardRender },
+        { mode: 'northflank', el: cardNorthflank }
+      ];
 
       // Load saved settings
-      let localUrl = await getSetting('server_local_url', 'http://192.168.1.132:3000');
+      let localUrl = await getSetting('server_local_url', '');
       let renderUrl = await getSetting('server_render_url', 'https://sonora-music-b1ee.onrender.com');
-      let serverMode = await getSetting('server_mode', 'off'); // 'local' | 'render' | 'off'
+      let northflankUrl = await getSetting('server_northflank_url', '');
+      let serverMode = await getSetting('server_mode', 'device'); // 'device' | 'local' | 'render' | 'northflank'
 
       if (inputLocal) inputLocal.value = localUrl;
       if (inputRender) inputRender.value = renderUrl;
+      if (inputNorthflank) inputNorthflank.value = northflankUrl;
 
-      // Update toggles based on mode
-      const isLocalOn = serverMode === 'local';
-      const isRenderOn = serverMode === 'render';
-
-      if (toggleLocal) toggleLocal.checked = isLocalOn;
-      if (toggleRender) toggleRender.checked = isRenderOn;
+      // Update card selection based on mode
+      const paintCards = (mode) => {
+        cards.forEach(({ mode: m, el }) => {
+          if (!el) return;
+          const active = m === mode;
+          el.classList.toggle('active-server', active);
+          el.setAttribute('aria-checked', active ? 'true' : 'false');
+        });
+      };
+      paintCards(serverMode);
 
       // Update UI Mode display
       const updateModeUI = (mode) => {
+        paintCards(mode);
         if (!modeBadge || !modeText || !overallDot) return;
         modeBadge.className = 'server-mode-indicator mode-' + mode;
 
-        if (cardLocal) cardLocal.classList.toggle('active-server', mode === 'local');
-        if (cardRender) cardRender.classList.toggle('active-server', mode === 'render');
-
-        if (mode === 'local') {
+        if (mode === 'device') {
+          modeText.textContent = 'Este dispositivo';
+        } else if (mode === 'local') {
           modeText.textContent = 'Servidor Local';
+        } else if (mode === 'northflank') {
+          modeText.textContent = 'Servidor Northflank';
         } else if (mode === 'render') {
           modeText.textContent = 'Servidor Render';
         } else {
           modeText.textContent = 'Sin conexión';
         }
-        // El color del punto refleja el estado real (verde/naranja/rojo),
-        // no el tipo de servidor.
         refreshOverallBadge();
       };
 
@@ -1164,19 +1327,25 @@
       const dotEmojiFor = (cls) => (cls === 'slow' ? '🟠' : (cls === 'connected' ? '🟢' : '🔴'));
 
       // Último estado conocido de cada servidor ('connected' | 'slow' | 'off')
-      const probeState = { local: null, render: null };
+      const probeState = { local: null, northflank: null, render: null };
 
       // Aplica el color y el texto del badge superior según el modo activo.
       const refreshOverallBadge = () => {
         if (!overallDot) return;
         let st = null;
-        if (serverMode === 'local') {
+        if (serverMode === 'device') {
+          // Modo Dispositivo: siempre disponible, sin red.
+          overallDot.className = 'status-dot connected';
+          return;
+        } else if (serverMode === 'local') {
           st = probeState.local;
+        } else if (serverMode === 'northflank') {
+          st = probeState.northflank;
         } else if (serverMode === 'render') {
           st = probeState.render;
         } else {
           // Sin servidor elegido mostramos el mejor resultado disponible.
-          const vals = [probeState.local, probeState.render].filter(Boolean);
+          const vals = [probeState.local, probeState.northflank, probeState.render].filter(Boolean);
           if (vals.indexOf('connected') !== -1) st = 'connected';
           else if (vals.indexOf('slow') !== -1) st = 'slow';
           else st = 'off';
@@ -1194,7 +1363,7 @@
           let ok = false, ms = 0;
           if (Sonora.API && typeof Sonora.API.testConnection === 'function') {
             const t0 = Date.now();
-            const res = await Sonora.API.testConnection(type, type === 'render' ? 22000 : 9000);
+            const res = await Sonora.API.testConnection(type, type === 'render' ? 22000 : (type === 'local' ? 5000 : 9000));
             ms = (res && res.latency) ? res.latency : (Date.now() - t0);
             ok = !!(res && (res.success || res.status === 200 || res.ok));
           }
@@ -1215,16 +1384,21 @@
         }
         refreshOverallBadge();
       };
-      autoColorDot('local', dotLocal, latencyLocal);
-      autoColorDot('render', dotRender, latencyRender);
+      // Solo sondeamos la fuente activa: Render puede tardar 25 s en despertar
+      // y no tiene sentido bloquear Ajustes probando servidores que no se usan.
+      if (serverMode === 'local') autoColorDot('local', dotLocal, latencyLocal);
+      else if (serverMode === 'northflank') autoColorDot('northflank', dotNorthflank, latencyNorthflank);
+      else if (serverMode === 'render') autoColorDot('render', dotRender, latencyRender);
 
       updateModeUI(serverMode);
 
       // Synchronization function
       const syncServerMode = async (newMode) => {
+        if (!newMode || newMode === serverMode) return;
         serverMode = newMode;
         updateModeUI(newMode);
         await setSetting('server_mode', newMode);
+        await setSetting('serverMode', newMode);
 
         if (Sonora.API && typeof Sonora.API.setMode === 'function') {
           try { Sonora.API.setMode(newMode); } catch (e) {}
@@ -1232,60 +1406,62 @@
         if (Sonora.Store) {
           Sonora.Store.set('serverMode', newMode);
         }
+
+        if (newMode === 'device') {
+          showToast('Modo Dispositivo: música local sin servidor');
+          return;
+        }
+
+        // Test de inmediato para actualizar el indicador activo
+        if (newMode === 'local') autoColorDot('local', dotLocal, latencyLocal);
+        else if (newMode === 'northflank') autoColorDot('northflank', dotNorthflank, latencyNorthflank);
+        else if (newMode === 'render') autoColorDot('render', dotRender, latencyRender);
       };
 
-      // Toggle changes logic:
-      // When local is ON, use local.
-      // When render is ON and local is OFF, use render.
-      // When both OFF, offline mode.
-      if (toggleLocal) {
-        addTrackedListener(toggleLocal, 'change', async () => {
-          if (toggleLocal.checked) {
-            await syncServerMode('local');
-            showToast('Servidor Local activado');
-          } else {
-            if (toggleRender && toggleRender.checked) {
-              await syncServerMode('render');
-              showToast('Cambiado a Servidor Render');
-            } else {
-              await syncServerMode('off');
-              showToast('Modo sin conexión');
-            }
+      // Selección de fuente: una sola tarjeta activa (radio).
+      cards.forEach(({ mode, el }) => {
+        if (!el) return;
+        const choose = () => { syncServerMode(mode); };
+        addTrackedListener(el, 'click', (e) => {
+          // Los controles internos (input, botones de probar) no cambian la fuente.
+          if (e.target.closest('input, button')) return;
+          choose();
+        });
+        addTrackedListener(el, 'keydown', (e) => {
+          if (e.target !== el) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            choose();
           }
         });
-      }
-
-      if (toggleRender) {
-        addTrackedListener(toggleRender, 'change', async () => {
-          if (toggleRender.checked) {
-            if (toggleLocal && toggleLocal.checked) {
-              // Local is currently active, render is standby
-              showToast('Servidor Render en espera (Local prioritario)');
-            } else {
-              await syncServerMode('render');
-              showToast('Servidor Render activado');
-            }
-          } else {
-            if (toggleLocal && toggleLocal.checked) {
-              await syncServerMode('local');
-            } else {
-              await syncServerMode('off');
-              showToast('Modo sin conexión');
-            }
-          }
-        });
-      }
+      });
 
       // URL input changes
       if (inputLocal) {
         addTrackedListener(inputLocal, 'change', async (e) => {
           const val = e.target.value.trim();
           await setSetting('server_local_url', val);
+          await setSetting('serverLocalUrl', val);
           if (Sonora.API && typeof Sonora.API.setLocalUrl === 'function') {
             Sonora.API.setLocalUrl(val);
           }
           if (Sonora.Store) Sonora.Store.set('serverLocalUrl', val);
           showToast('URL local guardada');
+          autoColorDot('local', dotLocal, latencyLocal);
+        });
+      }
+
+      if (inputNorthflank) {
+        addTrackedListener(inputNorthflank, 'change', async (e) => {
+          const val = e.target.value.trim();
+          await setSetting('server_northflank_url', val);
+          await setSetting('serverNorthflankUrl', val);
+          if (Sonora.API && typeof Sonora.API.setNorthflankUrl === 'function') {
+            Sonora.API.setNorthflankUrl(val);
+          }
+          if (Sonora.Store) Sonora.Store.set('serverNorthflankUrl', val);
+          showToast('URL Northflank guardada');
+          autoColorDot('northflank', dotNorthflank, latencyNorthflank);
         });
       }
 
@@ -1293,11 +1469,13 @@
         addTrackedListener(inputRender, 'change', async (e) => {
           const val = e.target.value.trim();
           await setSetting('server_render_url', val);
+          await setSetting('serverRenderUrl', val);
           if (Sonora.API && typeof Sonora.API.setRenderUrl === 'function') {
             Sonora.API.setRenderUrl(val);
           }
           if (Sonora.Store) Sonora.Store.set('serverRenderUrl', val);
           showToast('URL Render guardada');
+          autoColorDot('render', dotRender, latencyRender);
         });
       }
 
@@ -1317,17 +1495,17 @@
 
         try {
           if (Sonora.API && typeof Sonora.API.testConnection === 'function') {
-            const res = await Sonora.API.testConnection(type, type === 'render' ? 25000 : 9000);
+            const res = await Sonora.API.testConnection(type, type === 'render' ? 25000 : (type === 'local' ? 5000 : 9000));
             latencyMs = res && res.latency ? res.latency : (Date.now() - startTime);
             success = !!(res && (res.success || res.status === 200 || res.ok));
           } else {
             // Fetch ping test to URL
             const url = urlInput ? urlInput.value.trim() : '';
             if (url) {
-              const pingUrl = url.replace(/\/+$/, '') + '/api/ping';
+              const healthUrl = url.replace(/\/+$/, '') + '/api/health';
               const ctrl = new AbortController();
-              const tid = setTimeout(() => ctrl.abort(), 6000);
-              const resp = await fetch(pingUrl, { signal: ctrl.signal });
+              const tid = setTimeout(() => ctrl.abort(), type === 'render' ? 20000 : 5000);
+              const resp = await fetch(healthUrl, { signal: ctrl.signal });
               clearTimeout(tid);
               latencyMs = Date.now() - startTime;
               success = resp.ok;
@@ -1362,6 +1540,12 @@
       if (btnTestLocal) {
         addTrackedListener(btnTestLocal, 'click', () => {
           testServer('local', btnTestLocal, dotLocal, latencyLocal, inputLocal);
+        });
+      }
+
+      if (btnTestNorthflank) {
+        addTrackedListener(btnTestNorthflank, 'click', () => {
+          testServer('northflank', btnTestNorthflank, dotNorthflank, latencyNorthflank, inputNorthflank);
         });
       }
 
@@ -1682,17 +1866,35 @@
           btn.classList.add('active');
           const q = btn.getAttribute('data-quality');
           await setSetting('audio_quality', q);
-          showToast(`Calidad de audio: ${btn.textContent.trim()}`);
+          // Alias que ya usaba la base de datos; el reproductor lee
+          // sonora_audio_quality en localStorage al resolver cada pista.
+          await setSetting('audioQuality', q);
+          showToast(`Calidad de audio: ${btn.textContent.trim()} (se aplica a la próxima canción)`);
         });
       });
 
       // 4. Sleep timer presets
       const timerBtns = $$('#control-sleep-timer .segmented-btn');
       const savedTimer = await getSetting('sleep_timer', '0');
+      const savedTimerEnd = Number(await getSetting('sleep_timer_end', 0)) || 0;
       const markTimerActive = (val) => {
         timerBtns.forEach(b => b.classList.toggle('active', b.getAttribute('data-timer') === String(val)));
       };
-      markTimerActive(savedTimer);
+
+      // Refleja el estado REAL: si el tiempo ya venció, no lo pintamos activo.
+      let activeTimer = '0';
+      if (savedTimer === 'end_track') {
+        activeTimer = 'end_track';
+      } else if (Number(savedTimer) > 0 && savedTimerEnd > Date.now()) {
+        activeTimer = String(savedTimer);
+      } else if (Number(savedTimer) > 0 && !savedTimerEnd) {
+        // Compatibilidad con versiones anteriores sin fecha de fin: se
+        // reprograma la duración elegida en lugar de mostrar algo falso.
+        Sonora.Player.setSleepTimer(Number(savedTimer), true);
+        activeTimer = String(savedTimer);
+      }
+      markTimerActive(activeTimer);
+
       timerBtns.forEach(btn => {
         addTrackedListener(btn, 'click', async () => {
           const val = btn.getAttribute('data-timer');
@@ -1701,6 +1903,9 @@
           }
           markTimerActive(val);
           await setSetting('sleep_timer', val);
+          await setSetting('sleep_timer_end', val === '0' || val === 'end_track'
+            ? 0
+            : Date.now() + (Number(val) * 60 * 1000));
           if (val === '0') showToast('Temporizador desactivado');
           else if (val === 'end_track') showToast('Se pausará al terminar esta canción');
           else showToast(`Temporizador programado: ${btn.textContent.trim()}`);
@@ -1718,18 +1923,41 @@
       const listEl = $('#downloaded-tracks-list');
       const btnClearAll = $('#btn-clear-all-downloads');
 
+      const readDownloadRecords = async () => {
+        // Usamos los registros completos (id + trackId + tamaño). Antes se
+        // listaban solo pistas que seguían existiendo en la biblioteca; si la
+        // pista había desaparecido, la descarga quedaba invisible e imposible
+        // de borrar desde Ajustes.
+        try {
+          if (Sonora.DB && Sonora.DB.downloads && typeof Sonora.DB.downloads.getRecords === 'function') {
+            return await Sonora.DB.downloads.getRecords();
+          }
+        } catch (e) {}
+        try {
+          if (Sonora.Download && typeof Sonora.Download.getDownloadedTracks === 'function') {
+            const tracks = await Sonora.Download.getDownloadedTracks();
+            return (tracks || []).map(t => ({ trackId: t.id, size: t.fileSize || 0, track: t }));
+          }
+        } catch (e) {}
+        return [];
+      };
+
       const renderDownloadsUI = async () => {
         let bytesUsed = 0;
-        let downloadedTracks = [];
+        let items = [];
 
         try {
-          if (Sonora.Download && typeof Sonora.Download.getStorageUsed === 'function') {
+          const records = await readDownloadRecords();
+          items = await Promise.all((records || []).map(async (rec) => {
+            let track = rec.track || null;
+            if (!track && Sonora.DB && Sonora.DB.tracks && typeof Sonora.DB.tracks.getById === 'function') {
+              try { track = await Sonora.DB.tracks.getById(rec.trackId); } catch (e) {}
+            }
+            bytesUsed += Number(rec.size) || Number(track && track.fileSize) || 0;
+            return { rec, track };
+          }));
+          if (!bytesUsed && Sonora.Download && typeof Sonora.Download.getStorageUsed === 'function') {
             bytesUsed = (await Sonora.Download.getStorageUsed()) || 0;
-          }
-          if (Sonora.Download && typeof Sonora.Download.getDownloadedTracks === 'function') {
-            downloadedTracks = (await Sonora.Download.getDownloadedTracks()) || [];
-          } else if (Sonora.DB && Sonora.DB.downloads && typeof Sonora.DB.downloads.getAll === 'function') {
-            downloadedTracks = (await Sonora.DB.downloads.getAll()) || [];
           }
         } catch (e) {
           console.warn('[Settings] Error reading downloads', e);
@@ -1741,74 +1969,93 @@
         const pct = Math.min(100, Math.max(3, Math.round((bytesUsed / (2 * 1024 * 1024 * 1024)) * 100)));
         if (storageBar) storageBar.style.width = pct + '%';
 
-        if (listEl) {
-          if (downloadedTracks.length === 0) {
-            listEl.innerHTML = `
-              <div style="font-size:12px;color:var(--color-text-secondary);padding:6px 0;">
-                No hay pistas descargadas para uso offline.
-              </div>
-            `;
-          } else {
-            listEl.innerHTML = downloadedTracks.map(t => {
-              const artwork = t.artworkUrl || generateArtwork(t.id, t.title);
-              const sizeStr = t.fileSize ? formatBytes(t.fileSize) : '3.5 MB';
-              return `
-                <div class="download-track-item">
-                  <img src="${artwork}" class="download-track-img" alt="" />
-                  <div class="download-track-info">
-                    <div class="download-track-name">${escapeHtml(t.title || 'Pista')}</div>
-                    <div class="download-track-artist">${escapeHtml(t.artist || 'Artista')} • ${sizeStr}</div>
-                  </div>
-                  <button class="btn-delete-download" data-track-id="${escapeHtml(t.id)}" title="Eliminar descarga">
-                    🗑️
-                  </button>
-                </div>
-              `;
-            }).join('');
+        if (!listEl) return;
 
-            // Bind single track delete
-            $$('.btn-delete-download', listEl).forEach(btn => {
-              addTrackedListener(btn, 'click', async () => {
-                const id = btn.getAttribute('data-track-id');
-                try {
-                  if (Sonora.Download && typeof Sonora.Download.deleteDownload === 'function') {
-                    await Sonora.Download.deleteDownload(id);
-                  } else if (Sonora.DB && Sonora.DB.downloads && typeof Sonora.DB.downloads.delete === 'function') {
-                    await Sonora.DB.downloads.delete(id);
-                  }
-                  showToast('Descarga eliminada');
-                  await renderDownloadsUI();
-                } catch (err) {
-                  console.error('[Settings] Delete download error', err);
-                }
-              });
-            });
-          }
+        if (items.length === 0) {
+          listEl.innerHTML = `
+            <div style="font-size:12px;color:var(--color-text-secondary);padding:6px 0;">
+              No hay pistas descargadas para uso offline.
+            </div>
+          `;
+          return;
         }
+
+        listEl.innerHTML = items.map(({ rec, track }) => {
+          const id = rec.trackId != null ? rec.trackId : String(rec.id || '').replace(/^dl_/, '');
+          const title = (track && track.title) || 'Descarga';
+          const artist = (track && track.artist) || 'Pista no encontrada';
+          const artwork = (track && track.artworkUrl) || generateArtwork(id, title);
+          const sizeStr = rec.size ? formatBytes(rec.size) : ((track && track.fileSize) ? formatBytes(track.fileSize) : '—');
+          return `
+            <div class="download-track-item">
+              <img src="${artwork}" class="download-track-img" alt="" />
+              <div class="download-track-info">
+                <div class="download-track-name">${escapeHtml(title)}</div>
+                <div class="download-track-artist">${escapeHtml(artist)} • ${sizeStr}</div>
+              </div>
+              <button class="btn-delete-download" data-track-id="${escapeHtml(id)}" data-record-id="${escapeHtml(rec.id || '')}" title="Eliminar descarga">
+                🗑️
+              </button>
+            </div>
+          `;
+        }).join('');
+
+        // Bind single download delete
+        $$('.btn-delete-download', listEl).forEach(btn => {
+          addTrackedListener(btn, 'click', async () => {
+            const trackId = btn.getAttribute('data-track-id');
+            const recordId = btn.getAttribute('data-record-id');
+            btn.disabled = true;
+            try {
+              if (Sonora.Download && typeof Sonora.Download.deleteDownload === 'function') {
+                await Sonora.Download.deleteDownload(trackId);
+              }
+              // Borrado directo por id de registro: cubre descargas cuyo track
+              // ya no existe o cuyo id no es numérico.
+              if (Sonora.DB && Sonora.DB.downloads && typeof Sonora.DB.downloads.delete === 'function') {
+                await Sonora.DB.downloads.delete(recordId || trackId);
+              }
+              if (Sonora.Store) {
+                try { Sonora.Store.emit('downloadsChanged', { deleted: trackId }); } catch (e) {}
+              }
+              showToast('Descarga eliminada');
+              await renderDownloadsUI();
+            } catch (err) {
+              console.error('[Settings] Delete download error', err);
+              btn.disabled = false;
+              showToast('No se pudo eliminar la descarga');
+            }
+          });
+        });
       };
 
       await renderDownloadsUI();
 
       if (btnClearAll) {
         addTrackedListener(btnClearAll, 'click', async () => {
-          const confirmed = window.confirm('¿Deseas eliminar todas las canciones descargadas de tu dispositivo?');
+          const confirmed = window.confirm('¿Deseas eliminar todas las canciones y videos descargados de tu dispositivo?');
           if (!confirmed) return;
 
+          btnClearAll.disabled = true;
           try {
-            if (Sonora.Download && typeof Sonora.Download.getDownloadedTracks === 'function') {
-              const all = await Sonora.Download.getDownloadedTracks();
-              for (const t of all) {
-                if (typeof Sonora.Download.deleteDownload === 'function') {
-                  await Sonora.Download.deleteDownload(t.id);
-                }
-              }
+            if (Sonora.DB && Sonora.DB.downloads && typeof Sonora.DB.downloads.clearAll === 'function') {
+              await Sonora.DB.downloads.clearAll();
             } else if (Sonora.DB && Sonora.DB.downloads && typeof Sonora.DB.downloads.clear === 'function') {
               await Sonora.DB.downloads.clear();
+            }
+            if (Sonora.DB && Sonora.DB.videos && typeof Sonora.DB.videos.clearAll === 'function') {
+              await Sonora.DB.videos.clearAll();
+            }
+            if (Sonora.Store) {
+              try { Sonora.Store.emit('downloadsChanged', { cleared: true }); } catch (e) {}
             }
             showToast('Todas las descargas han sido eliminadas');
             await renderDownloadsUI();
           } catch (err) {
             console.error('[Settings] Clear downloads failed', err);
+            showToast('No se pudieron borrar todas las descargas');
+          } finally {
+            btnClearAll.disabled = false;
           }
         });
       }
@@ -1846,34 +2093,17 @@
      * SECTION 6: Notifications Logic
      */
     async initNotificationsSection() {
-      const toggleNew = $('#notify-new-tracks');
-      const toggleRecs = $('#notify-recommendations');
       const toggleUpdates = $('#notify-updates');
+      if (!toggleUpdates) return;
 
-      const isNewOn = await getSetting('notify_new_tracks', true);
-      const isRecsOn = await getSetting('notify_recommendations', true);
       const isUpdatesOn = await getSetting('notify_updates', true);
-
-      if (toggleNew) {
-        toggleNew.checked = isNewOn;
-        addTrackedListener(toggleNew, 'change', async () => {
-          await setSetting('notify_new_tracks', toggleNew.checked);
-        });
-      }
-
-      if (toggleRecs) {
-        toggleRecs.checked = isRecsOn;
-        addTrackedListener(toggleRecs, 'change', async () => {
-          await setSetting('notify_recommendations', toggleRecs.checked);
-        });
-      }
-
-      if (toggleUpdates) {
-        toggleUpdates.checked = isUpdatesOn;
-        addTrackedListener(toggleUpdates, 'change', async () => {
-          await setSetting('notify_updates', toggleUpdates.checked);
-        });
-      }
+      toggleUpdates.checked = isUpdatesOn !== false;
+      addTrackedListener(toggleUpdates, 'change', async () => {
+        await setSetting('notify_updates', toggleUpdates.checked);
+        showToast(toggleUpdates.checked
+          ? 'Avisos de actualizaciones activados'
+          : 'Avisos de actualizaciones desactivados');
+      });
     },
 
     /**
@@ -1882,6 +2112,8 @@
     async initPrivacySection() {
       const btnClearHistory = $('#btn-clear-history');
       const btnClearSearch = $('#btn-clear-search-history');
+      const btnClearLyrics = $('#btn-clear-lyrics-cache');
+      const btnClearCache = $('#btn-clear-app-cache');
       const btnResetAll = $('#btn-reset-all-data');
 
       if (btnClearHistory) {
@@ -1910,29 +2142,120 @@
         });
       }
 
+      if (btnClearLyrics) {
+        addTrackedListener(btnClearLyrics, 'click', async () => {
+          const ok = window.confirm('¿Borrar las letras guardadas? Se volverán a buscar cuando reproduzcas cada canción. Tus letras editadas se conservan.');
+          if (!ok) return;
+          btnClearLyrics.disabled = true;
+          try {
+            if (Sonora.Lyrics && typeof Sonora.Lyrics.clearCache === 'function') {
+              await Sonora.Lyrics.clearCache();
+            } else if (Sonora.DB && Sonora.DB.lyrics && typeof Sonora.DB.lyrics.clear === 'function') {
+              await Sonora.DB.lyrics.clear();
+            }
+            showToast('Letras guardadas borradas');
+          } catch (e) {
+            console.error('[Settings] Error clearing lyrics cache', e);
+            showToast('No se pudieron borrar las letras');
+          } finally {
+            btnClearLyrics.disabled = false;
+          }
+        });
+      }
+
+      if (btnClearCache) {
+        addTrackedListener(btnClearCache, 'click', async () => {
+          const ok = window.confirm('¿Limpiar la caché de la aplicación? No se borrarán tus canciones, playlists ni descargas.');
+          if (!ok) return;
+          btnClearCache.disabled = true;
+          try {
+            if (window.caches && typeof caches.keys === 'function') {
+              const keys = await caches.keys();
+              await Promise.all(keys.map(k => caches.delete(k)));
+            }
+            showToast('Caché de la aplicación limpiada');
+          } catch (e) {
+            console.error('[Settings] Error clearing app cache', e);
+            showToast('No se pudo limpiar la caché');
+          } finally {
+            btnClearCache.disabled = false;
+          }
+        });
+      }
+
       if (btnResetAll) {
         addTrackedListener(btnResetAll, 'click', async () => {
           const step1 = window.confirm('⚠️ ADVERTENCIA: ¿Estás seguro de que deseas restablecer TODOS los datos de Sonora Music?\nSe borrarán tus playlists, historial, descargas y configuraciones.');
           if (!step1) return;
 
-          const step2 = window.confirm('⚠️ Confirmación final: ¿Realmente deseas restablecer la aplicación a su estado de fábrica?');
+          const step2 = window.confirm('⚠️ Confirmación final: ¿Realmente deseas restablecer la aplicación a su estado de fábrica?\n\nEsta acción no se puede deshacer.');
           if (!step2) return;
 
+          btnResetAll.disabled = true;
+          btnResetAll.textContent = 'Borrando…';
+
           try {
-            localStorage.clear();
-            if (window.indexedDB && indexedDB.databases) {
-              const dbs = await indexedDB.databases();
-              for (const db of dbs) {
-                if (db.name && db.name.toLowerCase().includes('sonora')) {
-                  indexedDB.deleteDatabase(db.name);
-                }
-              }
+            // 1) Detener reproducción y liberar blobs/descargas en memoria.
+            try { if (Sonora.Player && typeof Sonora.Player.stop === 'function') Sonora.Player.stop(); } catch (e) {}
+
+            // 2) Cerrar la base y esperar a que IndexedDB la borre de verdad.
+            //    Antes se llamaba deleteDatabase con la conexión abierta, así
+            //    que el borrado quedaba bloqueado y parecía que el botón no hacía nada.
+            if (Sonora.DB && typeof Sonora.DB.reset === 'function') {
+              await Sonora.DB.reset();
+            } else {
+              await new Promise((resolve) => {
+                const req = indexedDB.deleteDatabase('SonoraMusic');
+                req.onsuccess = resolve;
+                req.onerror = resolve;
+                req.onblocked = resolve;
+              });
             }
+
+            // 3) Otras bases de Sonora que hayan podido quedar de versiones anteriores.
+            if (window.indexedDB && typeof indexedDB.databases === 'function') {
+              try {
+                const dbs = await indexedDB.databases();
+                for (const db of dbs) {
+                  if (db.name && db.name.toLowerCase().includes('sonora') && db.name !== 'SonoraMusic') {
+                    await new Promise((resolve) => {
+                      const req = indexedDB.deleteDatabase(db.name);
+                      req.onsuccess = resolve;
+                      req.onerror = resolve;
+                      req.onblocked = resolve;
+                    });
+                  }
+                }
+              } catch (e) {}
+            }
+
+            // 4) Preferencias y sesión.
+            try { localStorage.clear(); } catch (e) {}
+            try { sessionStorage.clear(); } catch (e) {}
+
+            // 5) Caché del service worker (la app se quedaba con assets viejos).
+            if (window.caches && typeof caches.keys === 'function') {
+              try {
+                const keys = await caches.keys();
+                await Promise.all(keys.map(k => caches.delete(k)));
+              } catch (e) {}
+            }
+            if (navigator.serviceWorker && typeof navigator.serviceWorker.getRegistrations === 'function') {
+              try {
+                const regs = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(regs.map(r => r.unregister()));
+              } catch (e) {}
+            }
+
             alert('Sonora Music ha sido restablecida. La aplicación se recargará ahora.');
-            window.location.reload();
+            setTimeout(() => {
+              try { window.location.reload(); } catch (e) { window.location.href = window.location.pathname; }
+            }, 250);
           } catch (err) {
             console.error('[Settings] Reset failed', err);
-            alert('Se produjo un error al restablecer algunos datos.');
+            btnResetAll.disabled = false;
+            btnResetAll.textContent = '⚠️ Borrar todos los datos';
+            alert('Se produjo un error al restablecer algunos datos. Cierra y vuelve a abrir la app e inténtalo de nuevo.');
           }
         });
       }
@@ -1976,18 +2299,30 @@
 
       const linkWeb = $('#link-about-web');
       const linkFb = $('#link-about-feedback');
+      const btnCheckUpdates = $('#btn-check-updates');
 
-      if (linkWeb) {
-        addTrackedListener(linkWeb, 'click', (e) => {
-          e.preventDefault();
-          showToast('Sonora Music v4.0 Web Client');
+      if (btnCheckUpdates) {
+        addTrackedListener(btnCheckUpdates, 'click', async () => {
+          btnCheckUpdates.disabled = true;
+          btnCheckUpdates.textContent = '⏳ Comprobando...';
+          try {
+            if (Sonora.Updater && Sonora.Updater.check) {
+              await Sonora.Updater.check(true);
+            }
+          } finally {
+            btnCheckUpdates.disabled = false;
+            btnCheckUpdates.textContent = '🔄 Buscar actualizaciones';
+          }
         });
       }
-      if (linkFb) {
-        addTrackedListener(linkFb, 'click', (e) => {
-          e.preventDefault();
-          showToast('¡Gracias por tus sugerencias! Contacta al equipo.');
-        });
+
+      // Los enlaces de "Acerca de" apuntan a URLs reales (GitHub, web y
+      // sugerencias). Antes eran botones que solo mostraban un toast falso.
+      if (linkWeb && !linkWeb.getAttribute('href')) {
+        linkWeb.setAttribute('href', 'https://sonora-music-b1ee.onrender.com');
+      }
+      if (linkFb && !linkFb.getAttribute('href')) {
+        linkFb.setAttribute('href', 'https://github.com/raykozabala/sonora-music-server/issues');
       }
     },
 

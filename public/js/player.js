@@ -464,6 +464,39 @@
   }
 
   /**
+   * Servidor de medios absoluto. En Modo Dispositivo cae a Render para que
+   * las URLs no queden relativas y funcionen bajo file:// / tauri://.
+   */
+  function getMediaBase() {
+    try {
+      if (Sonora.API && typeof Sonora.API.getMediaBase === 'function') {
+        return String(Sonora.API.getMediaBase() || '').replace(/\/+$/, '');
+      }
+      if (Sonora.API && typeof Sonora.API.getActiveUrl === 'function') {
+        return String(Sonora.API.getActiveUrl() || '').replace(/\/+$/, '');
+      }
+    } catch (e) {}
+    return '';
+  }
+
+  /** Calidad de audio elegida en Ajustes (96/160/320 kbps). */
+  function audioQualityParam() {
+    var q = 'normal';
+    try {
+      var raw = localStorage.getItem('sonora_audio_quality');
+      if (raw !== null) q = JSON.parse(raw);
+    } catch (e) {}
+    return q === 'low' ? '96k' : (q === 'high' ? '320k' : '160k');
+  }
+
+  /** Añade la calidad a una URL de /api/stream/external ya existente. */
+  function withAudioQuality(url) {
+    if (!url || url.indexOf('/api/stream/external') === -1) return url;
+    if (/[?&]quality=/.test(url)) return url;
+    return url + (url.indexOf('?') === -1 ? '?' : '&') + 'quality=' + audioQualityParam();
+  }
+
+  /**
    * Resolve track audio source: Offline Blob -> Direct/External URL -> Server Stream -> Dynamic Search
    */
   async function resolveTrackSource(track) {
@@ -502,17 +535,16 @@
       return track.filePath;
     }
 
-    var activeUrl = (Sonora.API && typeof Sonora.API.getActiveUrl === 'function')
-      ? Sonora.API.getActiveUrl()
-      : 'http://192.168.1.132:3000';
+    var mediaBase = getMediaBase();
 
     // 3. Direct streamUrl provided on the track object (e.g. from search, playlist or API)
     if (track.streamUrl && typeof track.streamUrl === 'string' && track.streamUrl.length > 5) {
       var sUrl = track.streamUrl;
-      // If the stream URL points to external streaming, ensure it uses activeUrl
-      if (sUrl.includes('/api/stream/external')) {
+      // Si la URL apunta al stream externo, la anclamos al servidor de medios
+      // absoluto y le añadimos la calidad elegida en Ajustes.
+      if (sUrl.indexOf('/api/stream/external') !== -1) {
         var extIdx = sUrl.indexOf('/api/stream/external');
-        return activeUrl + sUrl.substring(extIdx);
+        return withAudioQuality((mediaBase ? mediaBase : '') + sUrl.substring(extIdx));
       }
       return sUrl;
     }
@@ -520,26 +552,27 @@
     // 4. YouTube or SoundCloud video URLs or direct video ID
     var targetUrl = track.url || track.sourceUrl || '';
     if (targetUrl && (targetUrl.includes('youtube.com') || targetUrl.includes('youtu.be') || targetUrl.includes('soundcloud.com'))) {
-      return activeUrl + '/api/stream/external?url=' + encodeURIComponent(targetUrl);
+      return mediaBase ? withAudioQuality(mediaBase + '/api/stream/external?url=' + encodeURIComponent(targetUrl)) : null;
     }
     if (track.videoId) {
-      return activeUrl + '/api/stream/external?url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + track.videoId);
+      return mediaBase ? withAudioQuality(mediaBase + '/api/stream/external?url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + track.videoId)) : null;
     }
     if (typeof track.id === 'string' && track.id.startsWith('yt_')) {
       var vid = track.id.replace('yt_', '');
-      return activeUrl + '/api/stream/external?url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + vid);
+      if (!mediaBase) return null;
+      return withAudioQuality(mediaBase + '/api/stream/external?url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + vid));
     }
 
     // 5. Database numeric track ID: stream from server
     if (typeof track.id === 'number' || (!isNaN(parseInt(track.id, 10)) && !String(track.id).includes('_'))) {
-      return activeUrl + '/api/stream/' + track.id;
+      return mediaBase ? (mediaBase + '/api/stream/' + track.id) : null;
     }
 
     // 6. Fallback: Search online dynamically using artist and title
-    if (track.artist || track.title) {
+    if (mediaBase && (track.artist || track.title)) {
       var q = ((track.artist || '') + ' ' + (track.title || '')).trim();
       if (q) {
-        return activeUrl + '/api/stream/external?q=' + encodeURIComponent(q);
+        return withAudioQuality(mediaBase + '/api/stream/external?q=' + encodeURIComponent(q));
       }
     }
 
@@ -829,6 +862,14 @@
     if (_sleepTimerEndOfTrack) {
       _sleepTimerEndOfTrack = false;
       updateState('sleepTimer', null);
+      try {
+        if (Sonora.DB && Sonora.DB.settings && Sonora.DB.settings.set) {
+          Sonora.DB.settings.set('sleep_timer', '0');
+          Sonora.DB.settings.set('sleep_timer_end', 0);
+        }
+        localStorage.setItem('sonora_sleep_timer', JSON.stringify('0'));
+        localStorage.setItem('sonora_sleep_timer_end', JSON.stringify(0));
+      } catch (e) {}
       Sonora.Player.pause();
       showToast('Se acabó la canción: reproducción pausada', 'info');
       return;
@@ -1080,6 +1121,14 @@
       } else {
         this.resume();
       }
+      return this.isPlaying();
+    },
+
+    /**
+     * Alias for toggle()
+     */
+    togglePlay: function () {
+      return this.toggle();
     },
 
     /**
@@ -1159,6 +1208,13 @@
       _queueIndex = prevIdx;
       updateState('queueIndex', _queueIndex);
       this.play(_queue[_queueIndex]);
+    },
+
+    /**
+     * Alias for previous()
+     */
+    prev: function () {
+      return this.previous();
     },
 
     /**
@@ -1422,6 +1478,13 @@
     },
 
     /**
+     * Alias for cycleRepeat()
+     */
+    toggleRepeat: function () {
+      return this.cycleRepeat();
+    },
+
+    /**
      * Get current shuffle state
      */
     isShuffled: function () {
@@ -1447,6 +1510,16 @@
      */
     isPlaying: function () {
       return _isPlaying;
+    },
+
+    /**
+     * Get exact current playback time in seconds (no rounding).
+     * Used by the lyrics engine for voice-accurate synchronization.
+     */
+    getCurrentTime: function () {
+      var ch = _channels[_activeChannelIdx];
+      if (ch && ch.audio) return ch.audio.currentTime || 0;
+      return 0;
     },
 
     /**
@@ -1505,7 +1578,20 @@
      * Set sleep timer in minutes (0 to cancel)
      * @param {number} minutes
      */
-    setSleepTimer: function (minutes) {
+    setSleepTimer: function (minutes, silent) {
+      var persist = function (mode, endAt) {
+        try {
+          if (Sonora.DB && Sonora.DB.settings && Sonora.DB.settings.set) {
+            Sonora.DB.settings.set('sleep_timer', mode);
+            Sonora.DB.settings.set('sleep_timer_end', endAt || 0);
+          }
+        } catch (e) {}
+        try {
+          localStorage.setItem('sonora_sleep_timer', JSON.stringify(mode));
+          localStorage.setItem('sonora_sleep_timer_end', JSON.stringify(endAt || 0));
+        } catch (e) {}
+      };
+
       if (_sleepTimerTimeout) {
         clearTimeout(_sleepTimerTimeout);
         _sleepTimerTimeout = null;
@@ -1522,7 +1608,8 @@
         _sleepTimerEndTime = null;
         _sleepTimerEndOfTrack = false;
         updateState('sleepTimer', null);
-        showToast('Temporizador de sueño desactivado', 'info');
+        persist('0', 0);
+        if (!silent) showToast('Temporizador de sueño desactivado', 'info');
         return;
       }
 
@@ -1531,7 +1618,8 @@
         _sleepTimerEndOfTrack = true;
         _sleepTimerEndTime = null;
         updateState('sleepTimer', 'end_track');
-        showToast('El temporizador se activará al terminar esta canción', 'info');
+        persist('end_track', 0);
+        if (!silent) showToast('El temporizador se activará al terminar esta canción', 'info');
         return;
       }
 
@@ -1539,11 +1627,13 @@
       _sleepTimerEndOfTrack = false;
       _sleepTimerEndTime = Date.now() + (mins * 60 * 1000);
       updateState('sleepTimer', mins);
+      persist(mins, _sleepTimerEndTime);
 
       _sleepTimerTimeout = setTimeout(function () {
         Sonora.Player.pause();
         _sleepTimerEndTime = null;
         updateState('sleepTimer', null);
+        persist('0', 0);
         showToast('Se acabó el tiempo: reproducción pausada', 'info');
       }, mins * 60 * 1000);
 
@@ -1562,7 +1652,7 @@
         }
       }, 30000);
 
-      showToast('Temporizador activado: ' + mins + ' min', 'info');
+      if (!silent) showToast('Temporizador activado: ' + mins + ' min', 'info');
     },
 
     /**
@@ -1572,6 +1662,13 @@
       if (!_sleepTimerEndTime) return null;
       var remaining = _sleepTimerEndTime - Date.now();
       return remaining > 0 ? remaining : null;
+    },
+
+    /** Estado real del temporizador: 'end_track', minutos restantes o null. */
+    getSleepTimerMode: function () {
+      if (_sleepTimerEndOfTrack) return 'end_track';
+      var remaining = Sonora.Player.getSleepTimer();
+      return remaining ? Math.max(1, Math.ceil(remaining / 60000)) : null;
     },
 
     /**
@@ -1702,6 +1799,29 @@
             Sonora.DB.settings.get('playback_crossfade').then(function (sec) {
               var s = Number(sec) || 0;
               if (s > 0) Sonora.Player.setCrossfade(s * 1000);
+            }).catch(function () {});
+
+            // Restaura el temporizador de sueño. Antes Ajustes lo pintaba como
+            // activo al reiniciar pero no se programaba nada.
+            Promise.all([
+              Sonora.DB.settings.get('sleep_timer'),
+              Sonora.DB.settings.get('sleep_timer_end')
+            ]).then(function (vals) {
+              var mode = vals[0];
+              var endAt = Number(vals[1]) || 0;
+              if (!mode || mode === '0' || mode === 0) return;
+              if (mode === 'end_track') {
+                Sonora.Player.setSleepTimer('end_track', true);
+                return;
+              }
+              if (endAt > Date.now()) {
+                var mins = Math.max(1, Math.ceil((endAt - Date.now()) / 60000));
+                Sonora.Player.setSleepTimer(mins, true);
+              } else {
+                // El tiempo ya venció mientras la app estaba cerrada.
+                Sonora.DB.settings.set('sleep_timer', '0').catch(function () {});
+                Sonora.DB.settings.set('sleep_timer_end', 0).catch(function () {});
+              }
             }).catch(function () {});
           }
         } catch (e) {}

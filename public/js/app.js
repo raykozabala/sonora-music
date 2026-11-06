@@ -317,12 +317,12 @@
       if (!listEl) return;
 
       if (!queue || queue.length === 0) {
-        listEl.innerHTML = '<div class="empty-state" style="padding: 40px 20px; text-align: center;"><p style="font-size: 32px; margin-bottom: 8px;">🎵</p><p style="color: #8e8e93;">La cola de reproducción está vacía</p></div>';
+        listEl.innerHTML = '<div class="empty-state" style="padding: 40px 20px; text-align: center;"><p style="font-size: 32px; margin-bottom: 8px;">🎵</p><p style="color: var(--color-text-secondary);">La cola de reproducción está vacía</p></div>';
         return;
       }
 
       var html = '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding:0 4px;">' +
-        '<span style="font-size:12px; font-weight:700; color:#8e8e93; text-transform:uppercase;">' + queue.length + ' canciones</span>' +
+        '<span style="font-size:12px; font-weight:700; color: var(--color-text-secondary); text-transform:uppercase;">' + queue.length + ' canciones</span>' +
         '<button id="btn-clear-queue" type="button" style="background:none; border:none; color:var(--color-primary, #FF4757); font-size:12px; font-weight:600; cursor:pointer;">Vaciar cola</button>' +
         '</div>';
 
@@ -330,22 +330,67 @@
         var isCurrent = i === currentIdx;
         var canMoveUp = i > 0;
         var canMoveDown = i < queue.length - 1;
-        return '<div class="track-item queue-item' + (isCurrent ? ' track-item--active' : '') + '" data-queue-idx="' + i + '" style="display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:10px; margin-bottom:6px; background: ' + (isCurrent ? 'rgba(255, 71, 87, 0.15)' : 'rgba(255, 255, 255, 0.03)') + '; border: 1px solid ' + (isCurrent ? 'rgba(255, 71, 87, 0.3)' : 'transparent') + ';">' +
-          '<span style="font-size:11px; font-weight:700; color:#777; width:16px; text-align:center;">' + (i + 1) + '</span>' +
+        return '<div class="track-item queue-item' + (isCurrent ? ' track-item--active' : '') + '" data-queue-idx="' + i + '" draggable="true" style="display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:10px; margin-bottom:6px; background: ' + (isCurrent ? 'rgba(var(--color-primary-rgb), 0.15)' : 'var(--color-card-bg)') + '; border: 1px solid ' + (isCurrent ? 'rgba(var(--color-primary-rgb), 0.3)' : 'transparent') + '; cursor:default; transition:all 0.15s ease;">' +
+          '<span class="queue-drag-handle" title="Arrastrar para reordenar" style="font-size:14px; color:rgba(255,255,255,0.4); cursor:grab; padding:4px 2px; user-select:none;">⠿</span>' +
+          '<span style="font-size:11px; font-weight:700; color: var(--color-text-secondary); width:16px; text-align:center;">' + (i + 1) + '</span>' +
           '<img class="track-item__artwork" src="' + (track.artworkUrl || generateArtwork(track.id, track.title)) + '" alt="" width="42" height="42" style="border-radius:6px; object-fit:cover; flex-shrink:0;">' +
           '<div class="track-item__info" style="flex:1; min-width:0; cursor:pointer;" data-action="play-queue-track">' +
-            '<span class="track-item__title" style="display:block; font-size:13px; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + (track.title || '') + '</span>' +
-            '<span class="track-item__artist" style="display:block; font-size:11px; color:#8e8e93; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + (track.artist || '') + '</span>' +
+            '<span class="track-item__title" style="display:block; font-size:13px; font-weight:600; color: var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + (track.title || '') + '</span>' +
+            '<span class="track-item__artist" style="display:block; font-size:11px; color: var(--color-text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + (track.artist || '') + '</span>' +
           '</div>' +
           '<div class="queue-reorder-controls" style="display:flex; align-items:center; gap:4px; flex-shrink:0;">' +
-            '<button type="button" class="btn--queue-up" data-queue-up="' + i + '" ' + (!canMoveUp ? 'disabled style="opacity:0.25; cursor:default;' : 'style="cursor:pointer;') + ' background:rgba(255,255,255,0.08); border:none; color:#fff; width:28px; height:28px; border-radius:6px; font-size:12px; display:flex; align-items:center; justify-content:center;" title="Mover arriba">▲</button>' +
-            '<button type="button" class="btn--queue-down" data-queue-down="' + i + '" ' + (!canMoveDown ? 'disabled style="opacity:0.25; cursor:default;' : 'style="cursor:pointer;') + ' background:rgba(255,255,255,0.08); border:none; color:#fff; width:28px; height:28px; border-radius:6px; font-size:12px; display:flex; align-items:center; justify-content:center;" title="Mover abajo">▼</button>' +
-            '<button type="button" class="btn--queue-remove" data-queue-remove="' + i + '" title="Quitar de la cola" style="background:rgba(255,71,87,0.12); border:none; color:#FF4757; width:28px; height:28px; border-radius:6px; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; cursor:pointer;">✕</button>' +
+            '<button type="button" class="btn--queue-up" data-queue-up="' + i + '" ' + (!canMoveUp ? 'disabled style="opacity:0.25; cursor:default;' : 'style="cursor:pointer;') + ' background: var(--color-card-bg); border:none; color: var(--color-text-primary); width:28px; height:28px; border-radius:6px; font-size:12px; display:flex; align-items:center; justify-content:center;" title="Mover arriba">▲</button>' +
+            '<button type="button" class="btn--queue-down" data-queue-down="' + i + '" ' + (!canMoveDown ? 'disabled style="opacity:0.25; cursor:default;' : 'style="cursor:pointer;') + ' background: var(--color-card-bg); border:none; color: var(--color-text-primary); width:28px; height:28px; border-radius:6px; font-size:12px; display:flex; align-items:center; justify-content:center;" title="Mover abajo">▼</button>' +
+            '<button type="button" class="btn--queue-remove" data-queue-remove="' + i + '" title="Quitar de la cola" style="background:rgba(var(--color-primary-rgb),0.12); border:none; color: var(--color-primary); width:28px; height:28px; border-radius:6px; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; cursor:pointer;">✕</button>' +
           '</div>' +
         '</div>';
       }).join('');
 
       listEl.innerHTML = html;
+
+      // Wire HTML5 Drag-and-Drop on Queue Items
+      var draggedIdx = null;
+      var items = listEl.querySelectorAll('.queue-item');
+      items.forEach(function (el) {
+        el.addEventListener('dragstart', function (e) {
+          draggedIdx = parseInt(el.getAttribute('data-queue-idx'), 10);
+          el.style.opacity = '0.4';
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(draggedIdx));
+        });
+
+        el.addEventListener('dragover', function (e) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          el.style.borderColor = 'var(--color-primary, #FF4757)';
+          el.style.background = 'rgba(255, 71, 87, 0.12)';
+        });
+
+        el.addEventListener('dragleave', function () {
+          el.style.borderColor = 'transparent';
+          el.style.background = '';
+        });
+
+        el.addEventListener('drop', function (e) {
+          e.preventDefault();
+          el.style.borderColor = 'transparent';
+          el.style.background = '';
+          var targetIdx = parseInt(el.getAttribute('data-queue-idx'), 10);
+          var fromIdx = draggedIdx !== null ? draggedIdx : parseInt(e.dataTransfer.getData('text/plain'), 10);
+          if (!isNaN(fromIdx) && !isNaN(targetIdx) && fromIdx !== targetIdx && Sonora.Player && Sonora.Player.moveInQueue) {
+            Sonora.Player.moveInQueue(fromIdx, targetIdx);
+            renderQueue();
+          }
+        });
+
+        el.addEventListener('dragend', function () {
+          el.style.opacity = '1';
+          items.forEach(function (it) {
+            it.style.borderColor = 'transparent';
+            it.style.background = '';
+          });
+        });
+      });
 
       var clearBtn = $('#btn-clear-queue', listEl);
       if (clearBtn) {
@@ -413,24 +458,10 @@
   var _syncedLines = [];
 
   function parseLrc(lrcText) {
-    if (!lrcText) return [];
-    var lines = lrcText.split('\n');
-    var result = [];
-    var timeRegex = /\[(\d{2}):(\d{2}(?:\.\d{1,3})?)\](.*)/;
-    for (var i = 0; i < lines.length; i++) {
-      var match = timeRegex.exec(lines[i]);
-      if (match) {
-        var minutes = parseInt(match[1], 10);
-        var seconds = parseFloat(match[2]);
-        var text = (match[3] || '').trim();
-        var totalTime = minutes * 60 + seconds;
-        if (text) {
-          result.push({ time: totalTime, text: text });
-        }
-      }
+    if (Sonora.Lyrics && typeof Sonora.Lyrics.parse === 'function') {
+      return Sonora.Lyrics.parse(lrcText);
     }
-    result.sort(function(a, b) { return a.time - b.time; });
-    return result;
+    return [];
   }
 
   function renderFloatingNotesAnimation() {
@@ -448,8 +479,8 @@
         '<span class="note-anim" style="bottom: 10px; left: 20px; animation-name: floatNote1; animation-delay: 1.8s;">✨</span>' +
         '<span class="note-anim" style="bottom: 5px; right: 15px; animation-name: floatNote2; animation-delay: 2.3s;">🎸</span>' +
       '</div>' +
-      '<div style="font-size: 17px; font-weight: 700; color: #ffffff; margin-top: 24px;">Sintiendo el ritmo 🎶</div>' +
-      '<div style="font-size: 13px; color: #8e8e93; margin-top: 6px; max-width: 280px;">No hay letra sincronizada disponible para esta canción. Disfruta de la música en alta fidelidad.</div>' +
+      '<div style="font-size: 17px; font-weight: 700; color: var(--color-text-primary); margin-top: 24px;">Sintiendo el ritmo 🎶</div>' +
+      '<div style="font-size: 13px; color: var(--color-text-secondary); margin-top: 6px; max-width: 280px;">No hay letra sincronizada disponible para esta canción. Disfruta de la música en alta fidelidad.</div>' +
     '</div>';
   }
 
@@ -491,7 +522,18 @@
   }
 
   /* ── Lyrics Panel ── */
-  async function showLyricsPanel() {
+  var _lyricsRenderSeq = 0;
+  var _lyricsReloadTimer = null;
+
+  function lyricsLoadingHtml() {
+    return '<div style="text-align: center; padding: 48px 20px; color: var(--color-text-secondary);">' +
+      '<div style="font-size: 32px; margin-bottom: 12px; animation: pulseGlow 1.5s infinite;">🔍</div>' +
+      '<p>Buscando letra…</p>' +
+      '<p style="font-size:12px;opacity:.65;margin-top:6px;">Sincronizada con la voz, no con la duración</p>' +
+      '</div>';
+  }
+
+  async function showLyricsPanel(force) {
     var panel = $('#lyrics-panel');
     if (!panel) return;
     panel.classList.remove('hidden');
@@ -500,231 +542,141 @@
     var content = $('#lyrics-content');
     if (!content) return;
 
-    // Portada difuminada + disco girando con el título pequeño en la cabecera
     updateLyricsHeader(track);
     if (track && track.artworkUrl) {
       try { Sonora.Themes.applyArtworkColor(track.artworkUrl); } catch (e) {}
     }
+
+    // Cancela la sincronización y las peticiones de la canción anterior.
+    if (_lyricsUnsub && typeof _lyricsUnsub.destroy === 'function') {
+      try { _lyricsUnsub.destroy(); } catch (e) {}
+    }
+    _lyricsUnsub = null;
+
+    var seq = ++_lyricsRenderSeq;
 
     if (!track) {
       content.innerHTML = renderFloatingNotesAnimation();
       return;
     }
 
-    content.innerHTML = '<div style="text-align: center; padding: 48px 20px; color: #8e8e93;"><div style="font-size: 32px; margin-bottom: 12px; animation: pulseGlow 1.5s infinite;">🔍</div><p>Buscando letra sincronizada...</p></div>';
+    var hasRendered = false;
 
-    var syncedLyricsText = track.syncedLyrics || null;
-    var plainLyricsText = track.lyrics || null;
-
-    // 0) Letras guardadas en la app (modo "usar letras guardadas").
-    //    Se comprueba antes de salir a internet para respetar las ediciones
-    //    del usuario y funcionar sin conexión.
-    if (!syncedLyricsText && !plainLyricsText && track.id !== undefined &&
-        Sonora.DB && Sonora.DB.tracks && typeof Sonora.DB.tracks.getById === 'function') {
+    function speakerTime() {
       try {
-        var savedTrack = await Sonora.DB.tracks.getById(track.id);
-        if (savedTrack) {
-          if (savedTrack.syncedLyrics) syncedLyricsText = savedTrack.syncedLyrics;
-          if (savedTrack.lyrics) plainLyricsText = savedTrack.lyrics;
-          if (syncedLyricsText) track.syncedLyrics = syncedLyricsText;
-          if (plainLyricsText) track.lyrics = plainLyricsText;
+        if (Sonora.Player && typeof Sonora.Player.getCurrentTime === 'function') {
+          return Number(Sonora.Player.getCurrentTime()) || 0;
         }
+        var progress = Sonora.Player && Sonora.Player.getProgress
+          ? Sonora.Player.getProgress() : null;
+        return progress ? Number(progress.current) || 0 : 0;
       } catch (e) {
-        console.warn('[Lyrics] no se pudo leer la letra guardada:', e);
+        return 0;
       }
     }
 
-    if (!syncedLyricsText) {
-      var cleanTitle = (track.title || '').replace(/\(.*?\)|\{.*?\}|\[.*?\]/g, '').trim();
-      var cleanArtist = (track.artist || '').replace(/\(.*?\)|\{.*?\}|\[.*?\]/g, '').trim();
-      var lrcData = null;
+    function renderSynced(lines) {
+      if (seq !== _lyricsRenderSeq || !lines || !lines.length) return;
+      hasRendered = true;
+      _syncedLines = lines;
 
-      // 1) A través de nuestro servidor (evita CORS y es más fiable)
-      var serverBase = (Sonora.API && typeof Sonora.API.getActiveUrl === 'function')
-        ? Sonora.API.getActiveUrl() : '';
-      if (serverBase) {
-        try {
-          var lyricsUrl = serverBase + '/api/lyrics?artist=' + encodeURIComponent(cleanArtist) +
-            '&title=' + encodeURIComponent(cleanTitle) +
-            '&album=' + encodeURIComponent(track.album || '');
-          var sResp = await fetch(lyricsUrl);
-          if (sResp.ok) {
-            var sData = await sResp.json();
-            if (sData && (sData.syncedLyrics || sData.plainLyrics)) lrcData = sData;
-          }
-        } catch (e) {
-          console.warn('[Lyrics] proxy del servidor falló:', e);
+      // Si veníamos de una letra plana o de otra versión, detener el bucle
+      // anterior antes de crear el nuevo.
+      if (_lyricsUnsub && typeof _lyricsUnsub.destroy === 'function') {
+        try { _lyricsUnsub.destroy(); } catch (e) {}
+      }
+      _lyricsUnsub = null;
+
+      var lineEls = Sonora.Lyrics.renderLines(content, lines, {
+        lineClass: 'lyrics-line',
+        idPrefix: 'lyric-line-',
+        tail: true,
+        wordSync: true
+      });
+
+      content.onclick = function (event) {
+        var lineEl = event.target.closest('.lyrics-line');
+        if (!lineEl) return;
+        var seekTime = parseFloat(lineEl.getAttribute('data-time'));
+        if (!isNaN(seekTime) && Sonora.Player && Sonora.Player.seek) {
+          Sonora.Player.seek(seekTime);
         }
-      }
+      };
 
-      // 2) Directo a LRCLIB como respaldo
-      if (!lrcData) {
-        try {
-          var apiUrl = 'https://lrclib.net/api/get?artist_name=' + encodeURIComponent(cleanArtist) +
-            '&track_name=' + encodeURIComponent(cleanTitle);
-          var resp = await fetch(apiUrl);
-          if (resp.ok) lrcData = await resp.json();
-        } catch (err) {
-          console.warn('[Lyrics] LRCLIB directo falló:', err);
+      var syncBtn = $('#lyrics-sync');
+
+      _lyricsUnsub = Sonora.Lyrics.createSync({
+        container: content,
+        scrollTarget: content,
+        lines: lines,
+        lineEls: lineEls,
+        offset: Sonora.Lyrics.getOffset(track),
+        autoScroll: true,
+        getTime: speakerTime,
+        onActive: function () {},
+        onUserScroll: function () {
+          if (syncBtn) syncBtn.classList.remove('hidden');
         }
-      }
+      });
 
-      if (lrcData) {
-        if (lrcData.syncedLyrics) syncedLyricsText = lrcData.syncedLyrics;
-        if (lrcData.plainLyrics && !plainLyricsText) plainLyricsText = lrcData.plainLyrics;
-      }
-
-      // Cachear en el objeto en memoria para no volver a pedirla al abrir
-      if (syncedLyricsText) track.syncedLyrics = syncedLyricsText;
-      if (plainLyricsText) track.lyrics = plainLyricsText;
-
-      // Guardar la letra en la base local para tenerla sin conexión
-      if ((syncedLyricsText || plainLyricsText) && Sonora.DB && Sonora.DB.tracks && track.id !== undefined) {
-        Sonora.DB.tracks.getById(track.id).then(function (dbTrack) {
-          // No pisar nunca una letra editada por el usuario.
-          if (dbTrack && dbTrack.lyricsEdited) return;
-          if (dbTrack && !dbTrack.syncedLyrics && !dbTrack.lyrics) {
-            dbTrack.syncedLyrics = syncedLyricsText || '';
-            dbTrack.lyrics = dbTrack.lyrics || plainLyricsText || '';
-            if (typeof Sonora.DB.tracks.update === 'function') Sonora.DB.tracks.update(dbTrack);
+      if (syncBtn) {
+        syncBtn.onclick = function () {
+          if (_lyricsUnsub && typeof _lyricsUnsub.recenter === 'function') {
+            _lyricsUnsub.recenter();
           }
-        }).catch(function () {});
+          syncBtn.classList.add('hidden');
+        };
+        syncBtn.classList.add('hidden');
       }
     }
 
-    if (syncedLyricsText) {
-      _syncedLines = parseLrc(syncedLyricsText);
-      if (_syncedLines.length > 0) {
-        content.innerHTML = '<div class="lyrics-container">' +
-          _syncedLines.map(function (line, idx) {
-            return '<div class="lyrics-line" id="lyric-line-' + idx + '" data-time="' + line.time + '">' + (line.text || '♪') + '</div>';
-          }).join('') +
-          '<div class="lyrics-tail-space"></div>' +
+    function renderPlain(text) {
+      if (seq !== _lyricsRenderSeq || !text) return;
+      var lines = Sonora.Lyrics.plainLines(text);
+      if (!lines.length) return;
+      hasRendered = true;
+
+      if (_lyricsUnsub && typeof _lyricsUnsub.destroy === 'function') {
+        try { _lyricsUnsub.destroy(); } catch (e) {}
+      }
+      _lyricsUnsub = null;
+      content.onclick = null;
+
+      content.innerHTML =
+        '<div style="text-align:center;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-secondary);padding:6px 0 14px;">' +
+          'Letra sin sincronizar · buscando versión sincronizada…' +
+        '</div>' +
+        '<div class="lyrics-text" style="font-size:16px;line-height:1.8;color:var(--color-text-primary);padding:0 8px 24px;white-space:pre-line;">' +
+          lines.map(function (line) { return escHtml(line); }).join('\n') +
         '</div>';
+    }
 
-        content.onclick = function (e) {
-          var lineEl = e.target.closest('.lyrics-line');
-          if (lineEl) {
-            var seekTime = parseFloat(lineEl.getAttribute('data-time'));
-            if (!isNaN(seekTime) && Sonora.Player && Sonora.Player.seek) {
-              Sonora.Player.seek(seekTime);
-            }
-          }
-        };
-
-        if (_lyricsUnsub) {
-          _lyricsUnsub();
-          _lyricsUnsub = null;
-        }
-
-        // ── Sincronización ──
-        // La letra se arrastra sola siguiendo la música, pero el usuario puede
-        // desplazarla libremente para leer TODA la canción. Si lo hace, aparece
-        // el botón "Sincronizar" para volver a la línea que suena.
-        var syncBtn = $('#lyrics-sync');
-        var autoScroll = true;
-        var programmatic = false;
-        var scrollTimer = null;
-        var expectedTop = null;
-
-        function scrollLineToCenter(el, smooth) {
-          if (!el || !content.clientHeight) return;
-          var cRect = content.getBoundingClientRect();
-          var lRect = el.getBoundingClientRect();
-          // Coloca la línea activa en el centro vertical del panel.
-          var delta = (lRect.top - cRect.top) + (lRect.height / 2) - (content.clientHeight / 2);
-          var target = Math.max(0, content.scrollTop + delta);
-          expectedTop = target;
-          programmatic = true;
-          clearTimeout(scrollTimer);
-          scrollTimer = setTimeout(function () {
-            programmatic = false;
-            expectedTop = null;
-          }, 1400);
-          try {
-            content.scrollTo({ top: target, behavior: smooth ? 'smooth' : 'auto' });
-          } catch (e) {
-            content.scrollTop = target;
-          }
-        }
-
-        function setAutoScroll(on) {
-          autoScroll = on;
-          if (syncBtn) syncBtn.classList.toggle('hidden', on);
-        }
-
-        content.onscroll = function () {
-          if (!autoScroll) return;
-          if (programmatic) return;
-          // Ignora el desplazamiento que hemos provocado nosotros mismos.
-          if (expectedTop !== null && Math.abs(content.scrollTop - expectedTop) < 6) return;
-          setAutoScroll(false);
-        };
-
-        if (syncBtn) {
-          syncBtn.onclick = function () {
-            setAutoScroll(true);
-            var el = content.querySelector('.lyrics-line.active') || content.querySelector('.lyrics-line');
-            scrollLineToCenter(el, true);
-          };
-        }
-        setAutoScroll(true);
-
-        var lastActiveIdx = -1;
-        _lyricsUnsub = Sonora.Store.subscribe('progress', function (prog) {
-          if (!prog || typeof prog.current !== 'number') return;
-          var curTime = prog.current;
-          var activeIdx = -1;
-          for (var i = 0; i < _syncedLines.length; i++) {
-            if (_syncedLines[i].time <= curTime + 0.2) {
-              activeIdx = i;
-            } else {
-              break;
-            }
-          }
-
-          if (activeIdx !== lastActiveIdx) {
-            lastActiveIdx = activeIdx;
-            var allLines = content.querySelectorAll('.lyrics-line');
-            allLines.forEach(function (el, idx) {
-              if (idx === activeIdx) {
-                el.classList.add('active');
-                if (autoScroll) scrollLineToCenter(el, true);
-              } else {
-                el.classList.remove('active');
-              }
-            });
-          }
-        });
-
-        // Al abrir, centra la línea que está sonando.
-        try {
-          var initialProg = Sonora.Player.getProgress && Sonora.Player.getProgress();
-          if (initialProg && typeof initialProg.current === 'number') {
-            var startIdx = -1;
-            for (var k = 0; k < _syncedLines.length; k++) {
-              if (_syncedLines[k].time <= initialProg.current + 0.2) startIdx = k; else break;
-            }
-            if (startIdx >= 0) {
-              lastActiveIdx = startIdx;
-              var startEl = content.querySelectorAll('.lyrics-line')[startIdx];
-              if (startEl) {
-                startEl.classList.add('active');
-                scrollLineToCenter(startEl, false);
-              }
-            }
-          }
-        } catch (e) {}
-        return;
+    function render(result) {
+      if (seq !== _lyricsRenderSeq || !result) return;
+      if (result.syncedLyrics) {
+        var lines = Sonora.Lyrics.parse(result.syncedLyrics);
+        if (lines.length) { renderSynced(lines); return; }
       }
+      if (result.plainLyrics) renderPlain(result.plainLyrics);
     }
 
-    if (plainLyricsText) {
-      content.innerHTML = '<div class="lyrics-text" style="font-size: 16px; line-height: 1.8; color: #ddd; padding: 20px 8px; white-space: pre-line;">' + plainLyricsText + '</div>';
-      return;
-    }
+    content.innerHTML = lyricsLoadingHtml();
 
-    content.innerHTML = renderFloatingNotesAnimation();
+    try {
+      var result = await Sonora.Lyrics.resolve(track, {
+        force: !!force,
+        onPartial: function (partial) {
+          if (seq !== _lyricsRenderSeq) return;
+          render(partial);
+        }
+      });
+      if (seq !== _lyricsRenderSeq) return;
+      if (result) render(result);
+      if (!hasRendered) content.innerHTML = renderFloatingNotesAnimation();
+    } catch (e) {
+      console.warn('[Lyrics] No se pudo cargar la letra:', e);
+      if (!hasRendered) content.innerHTML = renderFloatingNotesAnimation();
+    }
   }
 
   /* ── Menú de opciones de la letra (botón 3 puntos) ── */
@@ -792,6 +744,7 @@
       track.syncedLyrics = null;
     }
     track.lyricsEdited = 1;
+    track._lyricsEngine = Sonora.Lyrics ? Sonora.Lyrics.ENGINE_VERSION : 2;
 
     _syncedLines = isSynced ? parseLrc(text) : [];
 
@@ -830,15 +783,15 @@
     modal.className = 'modal';
     modal.innerHTML =
       '<div class="modal__backdrop"></div>' +
-      '<div class="modal__content" style="max-width: 420px; width: calc(100% - 32px); border-radius: 20px; padding: 18px; background: var(--color-surface); border: 1px solid rgba(255,255,255,0.12);">' +
-        '<h3 style="font-size: 16px; margin: 0 0 4px; text-align: center; color: #fff;">Editar letra</h3>' +
-        '<p style="font-size: 11px; color: #8e8e93; text-align: center; margin: 0 0 12px;">' +
+      '<div class="modal__content" style="max-width: 420px; width: calc(100% - 32px); border-radius: 20px; padding: 18px; background: var(--color-surface); border: 1px solid var(--color-divider);">' +
+        '<h3 style="font-size: 16px; margin: 0 0 4px; text-align: center; color: var(--color-text-primary);">Editar letra</h3>' +
+        '<p style="font-size: 11px; color: var(--color-text-secondary); text-align: center; margin: 0 0 12px;">' +
           'Usa <b>[mm:ss.xx]</b> al inicio de cada línea para sincronizarla. Si escribes texto normal, se guardará como letra sin sincronizar.' +
         '</p>' +
-        '<textarea id="lyrics-editor-text" spellcheck="false" style="width: 100%; height: 42vh; min-height: 220px; resize: vertical; box-sizing: border-box; background: var(--color-background); color: #fff; border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; padding: 12px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; line-height: 1.6;">' + escHtml(current) + '</textarea>' +
+        '<textarea id="lyrics-editor-text" spellcheck="false" style="width: 100%; height: 42vh; min-height: 220px; resize: vertical; box-sizing: border-box; background: var(--color-background); color: var(--color-text-primary); border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; padding: 12px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; line-height: 1.6;">' + escHtml(current) + '</textarea>' +
         '<div style="display: flex; gap: 8px; margin-top: 14px;">' +
-          '<button id="lyrics-editor-cancel" class="btn" style="flex: 1; background: var(--color-surface-elevated); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 11px; border-radius: 12px; cursor: pointer;">Cancelar</button>' +
-          '<button id="lyrics-editor-save" class="btn" style="flex: 1.4; background: var(--artwork-color, var(--color-primary)); border: none; color: #fff; font-weight: 700; padding: 11px; border-radius: 12px; cursor: pointer;">Guardar letra</button>' +
+          '<button id="lyrics-editor-cancel" class="btn" style="flex: 1; background: var(--color-surface-elevated); border: 1px solid var(--color-divider); color: var(--color-text-primary); padding: 11px; border-radius: 12px; cursor: pointer;">Cancelar</button>' +
+          '<button id="lyrics-editor-save" class="btn" style="flex: 1.4; background: var(--artwork-color, var(--color-primary)); border: none; color: var(--color-on-primary); font-weight: 700; padding: 11px; border-radius: 12px; cursor: pointer;">Guardar letra</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(modal);
@@ -868,10 +821,13 @@
   function resetLyricsForCurrentTrack() {
     var track = Sonora.Player.getCurrentTrack();
     if (!track) return Promise.resolve(false);
-    track.syncedLyrics = null;
-    track.lyrics = null;
     track.lyricsEdited = 0;
     _syncedLines = [];
+    if (Sonora.Lyrics && typeof Sonora.Lyrics.forget === 'function') {
+      return Sonora.Lyrics.forget(track);
+    }
+    track.syncedLyrics = null;
+    track.lyrics = null;
     if (track.id === undefined || !Sonora.DB || !Sonora.DB.tracks) return Promise.resolve(true);
     return Sonora.DB.tracks.getById(track.id).then(function (dbTrack) {
       if (!dbTrack) return true;
@@ -883,22 +839,42 @@
   }
 
   function openLyricsMenu() {
-    if (!Sonora.Player.getCurrentTrack()) {
+    var track = Sonora.Player.getCurrentTrack();
+    if (!track) {
       Sonora.Store.emit('toast', { message: 'Reproduce una canción para usar las opciones de letra', type: 'info' });
       return;
     }
+
+    var currentOffset = Sonora.Lyrics ? Sonora.Lyrics.getOffset(track) : 0;
+    var offsetText = (currentOffset > 0 ? '+' : '') + currentOffset.toFixed(1) + ' s';
 
     var modal = document.createElement('div');
     modal.className = 'modal';
     modal.innerHTML =
       '<div class="modal__backdrop"></div>' +
-      '<div class="modal__content" style="max-width: 320px; border-radius: 20px; padding: 18px; background: var(--color-surface); border: 1px solid rgba(255,255,255,0.12);">' +
-        '<h3 style="font-size: 16px; margin: 0 0 14px; text-align: center; color: #fff;">Opciones de letra</h3>' +
+      '<div class="modal__content" style="max-width: 340px; border-radius: 20px; padding: 18px; background: var(--color-surface); border: 1px solid var(--color-divider);">' +
+        '<h3 style="font-size: 16px; margin: 0 0 14px; text-align: center; color: var(--color-text-primary);">Opciones de letra</h3>' +
         '<div style="display: flex; flex-direction: column; gap: 9px;">' +
           '<button data-lyr-action="edit" class="btn" style="' + lyricsMenuBtnStyle + '">✏️ Editar letra</button>' +
           '<button data-lyr-action="dl-lrc" class="btn" style="' + lyricsMenuBtnStyle + '">🎵 Descargar letra (.lrc)</button>' +
           '<button data-lyr-action="dl-txt" class="btn" style="' + lyricsMenuBtnStyle + '">📄 Descargar letra (.txt)</button>' +
           '<button data-lyr-action="reset" class="btn" style="' + lyricsMenuBtnStyle + '">🔄 Restablecer y buscar de nuevo</button>' +
+        '</div>' +
+        '<div style="margin-top:14px;padding:12px;border-radius:14px;background:var(--color-surface-elevated);border:1px solid var(--color-divider);">' +
+          '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">' +
+            '<span style="font-size:12px;font-weight:700;color:var(--color-text-primary);">Ajuste de sincronización</span>' +
+            '<span id="lyrics-offset-value" style="font-size:12px;font-weight:800;color:var(--color-primary);">' + offsetText + '</span>' +
+          '</div>' +
+          '<div style="display:flex;gap:5px;">' +
+            '<button data-lyr-offset="-0.5" class="btn" style="flex:1;padding:8px 0;border-radius:10px;background:var(--color-background);border:1px solid var(--color-divider);color:var(--color-text-primary);font-size:12px;cursor:pointer;">−0.5s</button>' +
+            '<button data-lyr-offset="-0.1" class="btn" style="flex:1;padding:8px 0;border-radius:10px;background:var(--color-background);border:1px solid var(--color-divider);color:var(--color-text-primary);font-size:12px;cursor:pointer;">−0.1s</button>' +
+            '<button data-lyr-offset="0" data-lyr-offset-reset="1" class="btn" style="flex:1;padding:8px 0;border-radius:10px;background:var(--color-background);border:1px solid var(--color-divider);color:var(--color-text-primary);font-size:12px;cursor:pointer;">0</button>' +
+            '<button data-lyr-offset="0.1" class="btn" style="flex:1;padding:8px 0;border-radius:10px;background:var(--color-background);border:1px solid var(--color-divider);color:var(--color-text-primary);font-size:12px;cursor:pointer;">+0.1s</button>' +
+            '<button data-lyr-offset="0.5" class="btn" style="flex:1;padding:8px 0;border-radius:10px;background:var(--color-background);border:1px solid var(--color-divider);color:var(--color-text-primary);font-size:12px;cursor:pointer;">+0.5s</button>' +
+          '</div>' +
+          '<p style="font-size:10.5px;line-height:1.45;color:var(--color-text-secondary);margin:8px 0 0;">' +
+            'Si la letra va adelantada a la voz, usa los valores negativos. Si va atrasada, usa los positivos. Se guarda por canción.' +
+          '</p>' +
         '</div>' +
       '</div>';
     document.body.appendChild(modal);
@@ -907,6 +883,21 @@
     modal.querySelector('.modal__backdrop').onclick = close;
 
     modal.addEventListener('click', function (e) {
+      var offsetBtn = e.target.closest('[data-lyr-offset]');
+      if (offsetBtn) {
+        var value = parseFloat(offsetBtn.getAttribute('data-lyr-offset')) || 0;
+        var isReset = offsetBtn.getAttribute('data-lyr-offset-reset') === '1';
+        var next = isReset ? 0 : (Sonora.Lyrics.getOffset(track) + value);
+        next = Sonora.Lyrics.setOffset(track, next);
+
+        var label = modal.querySelector('#lyrics-offset-value');
+        if (label) label.textContent = (next > 0 ? '+' : '') + next.toFixed(1) + ' s';
+        if (_lyricsUnsub && typeof _lyricsUnsub.setOffset === 'function') {
+          _lyricsUnsub.setOffset(next);
+        }
+        return;
+      }
+
       var btn = e.target.closest('[data-lyr-action]');
       if (!btn) return;
       var action = btn.getAttribute('data-lyr-action');
@@ -920,13 +911,13 @@
         close();
         resetLyricsForCurrentTrack().then(function () {
           Sonora.Store.emit('toast', { message: 'Buscando la letra original…', type: 'info' });
-          showLyricsPanel();
+          showLyricsPanel(true);
         });
       }
     });
   }
 
-  var lyricsMenuBtnStyle = 'background: var(--color-surface-elevated); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;';
+  var lyricsMenuBtnStyle = 'background: var(--color-surface-elevated); border: 1px solid var(--color-divider); color: var(--color-text-primary); padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;';
 
   /* ── Sleep Timer ── */
   function showSleepTimer() {
@@ -934,8 +925,101 @@
     if (modal) modal.classList.remove('hidden');
   }
 
+  /* ── Playback sheet: velocidad + visualizador ── */
+  function savePlaybackSetting(key, value) {
+    try {
+      if (Sonora.DB && Sonora.DB.settings && typeof Sonora.DB.settings.set === 'function') {
+        Sonora.DB.settings.set(key, value);
+      }
+    } catch (e) {}
+    try { localStorage.setItem('sonora_' + key, JSON.stringify(value)); } catch (e) {}
+  }
+
+  function speedLabel(v) {
+    var n = Number(v) || 1;
+    return (Math.round(n * 100) / 100) + '×';
+  }
+
+  function refreshPlaybackUI() {
+    var speed = (Sonora.Player && Sonora.Player.getSpeed) ? Sonora.Player.getSpeed() : 1;
+    var label = $('#player-speed-label');
+    if (label) label.textContent = speedLabel(speed);
+    var pill = $('#player-speed');
+    if (pill) pill.classList.toggle('active', Math.abs(speed - 1) > 0.001);
+
+    $$('#playback-speed-chips .playback-chip').forEach(function (chip) {
+      var v = parseFloat(chip.getAttribute('data-speed'));
+      chip.classList.toggle('active', Math.abs(v - speed) < 0.001);
+    });
+
+    var viz = (Sonora.Visualizer && Sonora.Visualizer.getType) ? Sonora.Visualizer.getType() : 'wave';
+    $$('#playback-viz-chips .playback-chip').forEach(function (chip) {
+      chip.classList.toggle('active', chip.getAttribute('data-viz') === viz);
+    });
+    var vizBtn = $('#player-visualizer-toggle');
+    if (vizBtn) vizBtn.classList.toggle('active', viz !== 'none');
+  }
+
+  function showPlaybackSheet() {
+    var sheet = $('#playback-sheet');
+    if (!sheet) return;
+    refreshPlaybackUI();
+    sheet.classList.remove('hidden');
+  }
+
+  function hidePlaybackSheet() {
+    var sheet = $('#playback-sheet');
+    if (sheet) sheet.classList.add('hidden');
+  }
+
+  function bindPlaybackSheet() {
+    var sheet = $('#playback-sheet');
+    if (!sheet) return;
+
+    var closeBtn = $('#playback-sheet-close');
+    if (closeBtn) closeBtn.addEventListener('click', hidePlaybackSheet);
+    var backdrop = sheet.querySelector('.modal__backdrop');
+    if (backdrop) backdrop.addEventListener('click', hidePlaybackSheet);
+
+    $$('#playback-speed-chips .playback-chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        var v = parseFloat(chip.getAttribute('data-speed')) || 1;
+        if (Sonora.Player && Sonora.Player.setSpeed) Sonora.Player.setSpeed(v);
+        savePlaybackSetting('playback_speed', v);
+        refreshPlaybackUI();
+        Sonora.Store.emit('toast', { message: 'Velocidad: ' + speedLabel(v), type: 'info' });
+      });
+    });
+
+    $$('#playback-viz-chips .playback-chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        var type = chip.getAttribute('data-viz') || 'wave';
+        if (Sonora.Visualizer && Sonora.Visualizer.setType) Sonora.Visualizer.setType(type);
+        savePlaybackSetting('visualizer_type', type);
+        refreshPlaybackUI();
+        var names = { none: 'Apagado', wave: 'Onda', circular: 'Círculo', particle: 'Partículas', bar: 'Barras' };
+        Sonora.Store.emit('toast', { message: 'Visualizador: ' + (names[type] || type), type: 'info' });
+      });
+    });
+  }
+
+  function restorePlaybackPreferences() {
+    try {
+      Sonora.DB.settings.get('playback_speed').then(function (v) {
+        var n = Number(v);
+        if (n >= 0.5 && n <= 2 && Sonora.Player && Sonora.Player.setSpeed) Sonora.Player.setSpeed(n);
+        refreshPlaybackUI();
+      }).catch(function () {});
+
+      Sonora.DB.settings.get('visualizer_type').then(function (type) {
+        if (type && Sonora.Visualizer && Sonora.Visualizer.setType) Sonora.Visualizer.setType(type);
+        refreshPlaybackUI();
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
   /* ── Server status indicator ──
-     🔵 local · 🟢 nube (Render) · 🟡 conectado pero lento · 🔴 sin conexión */
+     🔵 local · 🚀 northflank · 🟢 nube (Render) · 🟡 conectado pero lento · 🔴 sin conexión */
   function updateServerStatus() {
     var dot = $('#server-dot');
     if (!dot) return;
@@ -943,15 +1027,20 @@
     var latency = Sonora.Store.get('serverLatency') || 0;
     dot.className = 'server-dot';
     dot.title = 'Sin conexión con el servidor';
-    if (mode === 'local' || mode === 'render') {
-      var who = mode === 'local' ? 'Servidor local' : 'Servidor en la nube';
+    if (mode === 'device') {
+      dot.classList.add('server-dot--device');
+      dot.title = 'Modo Dispositivo · solo música local';
+      return;
+    }
+    if (mode === 'local' || mode === 'render' || mode === 'northflank') {
+      var who = mode === 'local' ? 'Servidor local' : (mode === 'northflank' ? 'Servidor Northflank' : 'Servidor en la nube');
       if (latency > 1000) {
         // 🟠 Conectado pero muy lento
         dot.classList.add('server-dot--slow');
         dot.title = who + ' · lento (' + latency + ' ms)';
       } else if (latency > 0) {
         // 🟢 Conectado
-        dot.classList.add('server-dot--connected');
+        dot.classList.add(mode === 'northflank' ? 'server-dot--northflank' : 'server-dot--connected');
         dot.title = who + ' · ' + latency + ' ms';
       } else {
         // 🔴 Elegido pero sin respuesta
@@ -967,7 +1056,7 @@
   /** Mide la latencia del servidor activo y pinta el punto en consecuencia */
   function probeServerStatus() {
     var mode = Sonora.Store.get('serverMode') || 'off';
-    if (mode !== 'local' && mode !== 'render') { updateServerStatus(); return; }
+    if (mode !== 'local' && mode !== 'render' && mode !== 'northflank') { updateServerStatus(); return; }
     if (!(Sonora.API && typeof Sonora.API.testConnection === 'function')) { updateServerStatus(); return; }
     var t0 = Date.now();
     Sonora.API.testConnection(mode, mode === 'render' ? 22000 : 9000).then(function (res) {
@@ -1027,6 +1116,13 @@
     var serverBtn = $('#header-server-status');
     if (serverBtn) serverBtn.addEventListener('click', function () { Sonora.Router.navigate('/settings'); });
 
+    var dlBtn = $('#header-downloads-btn');
+    if (dlBtn) dlBtn.addEventListener('click', function () {
+      if (Sonora.Download && typeof Sonora.Download.openDownloadsModal === 'function') {
+        Sonora.Download.openDownloadsModal();
+      }
+    });
+
     // Mini player
     var miniContent = $('#mini-player-content');
     if (miniContent) miniContent.addEventListener('click', function (e) {
@@ -1081,23 +1177,17 @@
       Sonora.Player.setVolume(parseInt(volumeSlider.value) / 100);
     });
 
-    // Visualizer toggle
+    // Velocidad + visualizador: una sola hoja para ambos
     var vizToggle = $('#player-visualizer-toggle');
-    if (vizToggle) {
-      var vizTypes = ['wave', 'circular', 'particle', 'bar', 'none'];
-      var vizIdx = 0;
-      vizToggle.addEventListener('click', function () {
-        vizIdx = (vizIdx + 1) % vizTypes.length;
-        if (Sonora.Visualizer) {
-          Sonora.Visualizer.setType(vizTypes[vizIdx]);
-          Sonora.Store.emit('toast', { message: 'Visualizador: ' + vizTypes[vizIdx], type: 'info' });
-        }
-      });
-    }
+    var speedBtn = $('#player-speed');
+    if (vizToggle) vizToggle.addEventListener('click', showPlaybackSheet);
+    if (speedBtn) speedBtn.addEventListener('click', showPlaybackSheet);
+    bindPlaybackSheet();
+    refreshPlaybackUI();
 
     // Extras
     var lyricsBtn = $('#player-lyrics');
-    if (lyricsBtn) lyricsBtn.addEventListener('click', showLyricsPanel);
+    if (lyricsBtn) lyricsBtn.addEventListener('click', function () { showLyricsPanel(false); });
 
     var queueBtn = $('#player-queue');
     if (queueBtn) queueBtn.addEventListener('click', showQueuePanel);
@@ -1111,8 +1201,7 @@
       if (track) Sonora.Download.downloadTrack(track);
     });
 
-    var shareBtn = $('#player-share');
-    if (shareBtn) shareBtn.addEventListener('click', function () {
+    function shareCurrentTrack() {
       var track = Sonora.Player.getCurrentTrack();
       if (!track) return;
       var title = track.title || 'Canción';
@@ -1125,13 +1214,7 @@
       } else {
         Sonora.Store.emit('toast', { message: 'Compartir no está disponible', type: 'warning' });
       }
-    });
-
-    // Lark Player button
-    var larkBtn = $('#player-lark');
-    if (larkBtn) larkBtn.addEventListener('click', function () {
-      openInLarkPlayer();
-    });
+    }
 
     function openInLarkPlayer() {
       var track = Sonora.Player.getCurrentTrack();
@@ -1156,16 +1239,16 @@
         var track = Sonora.Player.getCurrentTrack();
         if (!track) return;
         var autoplayState = Sonora.Player.isAutoplay ? Sonora.Player.isAutoplay() : true;
+        var itemStyle = 'background: var(--color-surface-elevated); border: 1px solid var(--color-divider); color: var(--color-text-primary); padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer; width: 100%; font-size: 13.5px;';
         var modal = document.createElement('div');
         modal.className = 'modal';
         modal.innerHTML = '<div class="modal__backdrop"></div>' +
-          '<div class="modal__content" style="max-width: 320px; border-radius: 20px; padding: 20px; background: var(--color-surface); border: 1px solid rgba(255,255,255,0.12);">' +
-            '<h3 style="font-size: 17px; margin-bottom: 16px; text-align: center; color: #fff;">Opciones de reproducción</h3>' +
+          '<div class="modal__content" style="max-width: 320px; border-radius: 20px; padding: 20px; background: var(--color-surface); border: 1px solid var(--color-divider);">' +
+            '<h3 style="font-size: 17px; margin-bottom: 16px; text-align: center; color: var(--color-text-primary);">Opciones de reproducción</h3>' +
             '<div style="display: flex; flex-direction: column; gap: 10px;">' +
-              '<button id="opt-open-lark" class="btn" style="background: var(--color-surface-elevated); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer;">🎵 Abrir en Lark Player</button>' +
-              '<button id="opt-toggle-autoplay" class="btn" style="background: var(--color-surface-elevated); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer;">📻 Modo Radio: ' + (autoplayState ? 'Activado ✓' : 'Desactivado') + '</button>' +
-              '<button id="opt-show-lyrics" class="btn" style="background: var(--color-surface-elevated); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer;">📝 Ver letra sincronizada</button>' +
-              '<button id="opt-download" class="btn" style="background: var(--color-surface-elevated); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 12px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer;">📱 Descargar al dispositivo</button>' +
+              '<button id="opt-open-lark" class="btn" style="' + itemStyle + '">🎵 Abrir en Lark Player</button>' +
+              '<button id="opt-share" class="btn" style="' + itemStyle + '">📤 Compartir canción</button>' +
+              '<button id="opt-toggle-autoplay" class="btn" style="' + itemStyle + '">📻 Modo Radio: ' + (autoplayState ? 'Activado ✓' : 'Desactivado') + '</button>' +
             '</div>' +
           '</div>';
         document.body.appendChild(modal);
@@ -1178,21 +1261,15 @@
         var optLark = modal.querySelector('#opt-open-lark');
         if (optLark) optLark.onclick = function () { close(); openInLarkPlayer(); };
 
+        var optShare = modal.querySelector('#opt-share');
+        if (optShare) optShare.onclick = function () { close(); shareCurrentTrack(); };
+
         var optAuto = modal.querySelector('#opt-toggle-autoplay');
         if (optAuto) optAuto.onclick = function () {
           var newState = !autoplayState;
           if (Sonora.Player.setAutoplay) Sonora.Player.setAutoplay(newState);
           Sonora.Store.emit('toast', { message: 'Modo Radio: ' + (newState ? 'Activado (canciones similares automáticas)' : 'Desactivado'), type: 'info' });
           close();
-        };
-
-        var optLyrics = modal.querySelector('#opt-show-lyrics');
-        if (optLyrics) optLyrics.onclick = function () { close(); showLyricsPanel(); };
-
-        var optDl = modal.querySelector('#opt-download');
-        if (optDl) optDl.onclick = function () {
-          close();
-          if (track) Sonora.Download.downloadTrack(track);
         };
       });
     }
@@ -1213,7 +1290,15 @@
       if (disc) disc.classList.remove('spinning');
       var lyricsContent = $('#lyrics-content');
       if (lyricsContent) lyricsContent.onscroll = null;
-      if (_lyricsUnsub) { try { _lyricsUnsub(); } catch (e) {} _lyricsUnsub = null; }
+      // Cancela la sincronización activa para no dejar un bucle de RAF vivo.
+      _lyricsRenderSeq++;
+      if (_lyricsUnsub) {
+        try {
+          if (typeof _lyricsUnsub.destroy === 'function') _lyricsUnsub.destroy();
+          else _lyricsUnsub();
+        } catch (e) {}
+        _lyricsUnsub = null;
+      }
     });
 
     // Sleep timer options
@@ -1263,6 +1348,16 @@
     Sonora.Store.subscribe('currentTrack', function () {
       updateMiniPlayer();
       updateFullPlayer();
+
+      // Si el panel de letras está abierto, recargar la letra de la nueva
+      // canción automáticamente. Antes se quedaba con la letra anterior.
+      var lyricsPanel = $('#lyrics-panel');
+      if (lyricsPanel && !lyricsPanel.classList.contains('hidden')) {
+        if (_lyricsReloadTimer) clearTimeout(_lyricsReloadTimer);
+        _lyricsReloadTimer = setTimeout(function () {
+          if (Sonora.Player.getCurrentTrack()) showLyricsPanel(false);
+        }, 80);
+      }
     });
 
     Sonora.Store.subscribe('isPlaying', function () {
@@ -1417,7 +1512,7 @@
      MAIN INITIALIZATION
      ══════════════════════════════════════════════ */
   function boot() {
-    console.log('🎵 Sonora Music v4 Ultimate — Booting...');
+    console.log('🎵 Sonora Music v7.17.0 — Booting...');
 
     var splashScreen = $('#splash-screen');
 
@@ -1431,8 +1526,15 @@
 
         // Step 3: Init modules in parallel
         var inits = [];
-        if (Sonora.API && Sonora.API.init) inits.push(Sonora.API.init());
         if (Sonora.Themes && Sonora.Themes.init) inits.push(Sonora.Themes.init());
+
+        // Aplica el modo guardado de inmediato (sin probar la red): la app ya
+        // sabe si debe mostrar Modo Dispositivo, Local, Render o Northflank.
+        if (Sonora.DB && Sonora.DB.settings) {
+          inits.push(Sonora.DB.settings.get('serverMode').then(function (m) {
+            if (m && Sonora.API && Sonora.API.setMode) Sonora.API.setMode(m);
+          }).catch(function () {}));
+        }
 
         // Idioma guardado (Español / English)
         if (Sonora.i18n && Sonora.DB && Sonora.DB.settings) {
@@ -1455,6 +1557,7 @@
         if (Sonora.Player && Sonora.Player.init) {
           try { Sonora.Player.init(); } catch (e) { console.warn('Player init:', e); }
         }
+        restorePlaybackPreferences();
 
         // Step 5: Init notifications
         if (Sonora.Notifications && Sonora.Notifications.init) {
@@ -1487,14 +1590,23 @@
             setTimeout(function () {
               if (splashScreen.parentNode) splashScreen.parentNode.removeChild(splashScreen);
             }, 700);
-          }, 800);
+          }, 250);
         }
 
         // Step 8: Start router
         Sonora.Router.start();
 
-        // Step 9: Update server status
-        updateServerStatus();
+        // Step 9: Probar servidores en segundo plano. Render puede tardar
+        // hasta 25 s en despertar; la app ya es usable mientras tanto.
+        if (Sonora.API && Sonora.API.init) {
+          Sonora.API.init().then(function () {
+            updateServerStatus();
+          }).catch(function () {
+            updateServerStatus();
+          });
+        } else {
+          updateServerStatus();
+        }
 
         // Step 10: Create fallback icons
         createFallbackIcons();
@@ -1502,7 +1614,7 @@
         // Step 11: Register Service Worker
         registerSW();
 
-        console.log('🎵 Sonora Music v4 Ultimate — Ready!');
+        console.log('🎵 Sonora Music v7.17.0 — Ready!');
       })
       .catch(function (err) {
         console.error('[App] Boot error:', err);
@@ -1520,25 +1632,30 @@
 
   /* ── Service Worker registration ── */
   function registerSW() {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js')
-        .then(function (reg) {
-          console.log('[App] Service Worker registered', reg.scope);
-          reg.onupdatefound = function () {
-            var installingWorker = reg.installing;
-            if (installingWorker) {
-              installingWorker.onstatechange = function () {
-                if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                  Sonora.Store.emit('toast', { message: 'Nueva versión disponible. Recarga la página.', type: 'info' });
-                }
-              };
-            }
-          };
-        })
-        .catch(function (err) {
-          console.warn('[App] SW registration failed:', err);
-        });
-    }
+    if (!('serviceWorker' in navigator)) return;
+    // En file:// (APK) y tauri:// no hay Service Worker; en web usamos una
+    // ruta relativa para que también funcione si la app se sirve en un subpath.
+    if (!/^https?:$/.test(window.location.protocol)) return;
+    var swUrl;
+    try { swUrl = new URL('sw.js', document.baseURI).href; }
+    catch (e) { swUrl = 'sw.js'; }
+    navigator.serviceWorker.register(swUrl)
+      .then(function (reg) {
+        console.log('[App] Service Worker registered', reg.scope);
+        reg.onupdatefound = function () {
+          var installingWorker = reg.installing;
+          if (installingWorker) {
+            installingWorker.onstatechange = function () {
+              if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                Sonora.Store.emit('toast', { message: 'Nueva versión disponible. Recarga la página.', type: 'info' });
+              }
+            };
+          }
+        };
+      })
+      .catch(function (err) {
+        console.warn('[App] SW registration failed:', err);
+      });
   }
 
   /* ── Global error handler — prevent crashes ── */

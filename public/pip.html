@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sonora Mini</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #fff;
+    }
+
+    /* Container */
+    #pip-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.25s cubic-bezier(0.2, 0.9, 0.3, 1);
+    }
+
+    /* ═══════════════ MODE: BAR ═══════════════ */
+    .view-bar {
+      width: 100%;
+      height: 100%;
+      background: rgba(22, 22, 28, 0.92);
+      backdrop-filter: blur(28px) saturate(180%);
+      -webkit-backdrop-filter: blur(28px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 36px;
+      padding: 0 14px 0 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      position: relative;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65), 0 2px 6px rgba(0, 0, 0, 0.4);
+    }
+
+    .drag-handle {
+      cursor: grab;
+      color: rgba(255, 255, 255, 0.35);
+      font-size: 13px;
+      padding: 4px;
+      display: flex;
+      align-items: center;
+      letter-spacing: 1px;
+    }
+
+    .bar-art-wrap {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      overflow: hidden;
+      flex-shrink: 0;
+      background: #111;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+
+    .bar-art-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .bar-info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .bar-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .bar-artist {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.6);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+
+    .bar-ctrls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-ctrl {
+      background: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.85);
+      cursor: pointer;
+      padding: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+    }
+
+    .btn-ctrl:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.1);
+      transform: scale(1.08);
+    }
+
+    .btn-ctrl:active {
+      transform: scale(0.92);
+    }
+
+    .btn-play-main {
+      width: 34px;
+      height: 34px;
+      background: #fff;
+      color: #111;
+      border-radius: 50%;
+      box-shadow: 0 4px 12px rgba(255, 255, 255, 0.3);
+    }
+
+    .btn-play-main:hover {
+      background: #fff;
+      color: #111;
+      transform: scale(1.1);
+      box-shadow: 0 6px 16px rgba(255, 255, 255, 0.5);
+    }
+
+    .bar-modes {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      margin-left: 2px;
+      padding-left: 6px;
+      border-left: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .btn-mode-icon {
+      background: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 11px;
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 6px;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .btn-mode-icon:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .bar-progress-line {
+      position: absolute;
+      bottom: 0;
+      left: 18px;
+      right: 18px;
+      height: 2px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 1px;
+      overflow: hidden;
+    }
+
+    .bar-progress-fill {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #FF6B35, #FF4757);
+      transition: width 0.3s linear;
+    }
+
+    /* ═══════════════ MODE: DISC ═══════════════ */
+    .view-disc {
+      width: 74px;
+      height: 74px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #2a2a30 0%, #151518 70%, #000 100%);
+      border: 2px solid rgba(255, 255, 255, 0.18);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7), inset 0 0 10px rgba(0, 0, 0, 0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      cursor: pointer;
+      overflow: hidden;
+    }
+
+    .disc-grooves {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: repeating-radial-gradient(
+        circle at 50% 50%,
+        transparent 0,
+        transparent 3px,
+        rgba(255, 255, 255, 0.035) 4px,
+        transparent 5px
+      );
+      pointer-events: none;
+    }
+
+    .disc-cover {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      object-fit: cover;
+      box-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+    }
+
+    .disc-center-hole {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      background: #111;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .disc-expand-btn {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      background: rgba(0, 0, 0, 0.6);
+      color: rgba(255, 255, 255, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      font-size: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+
+    .view-disc:hover .disc-expand-btn {
+      opacity: 1;
+    }
+
+    .spinning {
+      animation: vinylSpin 2.4s linear infinite;
+    }
+
+    .braking {
+      animation: vinylBrake 0.7s cubic-bezier(0.2, 0.8, 0.25, 1) forwards;
+    }
+
+    @keyframes vinylSpin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes vinylBrake {
+      to { transform: rotate(180deg); }
+    }
+
+    /* ═══════════════ MODE: CARD ═══════════════ */
+    .view-card {
+      width: 100%;
+      height: 100%;
+      background: rgba(20, 20, 26, 0.94);
+      backdrop-filter: blur(32px) saturate(180%);
+      -webkit-backdrop-filter: blur(32px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 24px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.75);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      cursor: grab;
+    }
+
+    .card-header-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.5);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    .card-media-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .card-art {
+      width: 60px;
+      height: 60px;
+      border-radius: 12px;
+      object-fit: cover;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+      flex-shrink: 0;
+    }
+
+    .card-meta {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: 800;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .card-artist {
+      font-size: 12px;
+      color: var(--color-primary, #FF4757);
+      margin-top: 3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .card-lyrics-box {
+      flex: 1;
+      min-height: 0;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      margin-bottom: 10px;
+    }
+
+    .card-lyric-active {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1.35;
+      text-shadow: 0 0 16px rgba(255, 71, 87, 0.6);
+      transition: color 0.2s;
+    }
+
+    .card-lyric-next {
+      font-size: 11.5px;
+      color: rgba(255, 255, 255, 0.45);
+      margin-top: 4px;
+      line-height: 1.3;
+    }
+
+    .card-timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 10px;
+    }
+
+    .card-progress-bar {
+      width: 100%;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 2px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .card-progress-fill {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #FF6B35, #FF4757);
+      transition: width 0.25s linear;
+    }
+
+    .card-times {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    .card-ctrls {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="pip-container">
+    <!-- MODE BAR (Default) -->
+    <div id="pip-view-bar" class="view-bar">
+      <div class="drag-handle" data-tauri-drag-region title="Arrastrar widget">⠿</div>
+      <div class="bar-art-wrap" data-tauri-drag-region>
+        <img id="bar-art" src="" alt="Album cover" data-tauri-drag-region />
+      </div>
+      <div class="bar-info" data-tauri-drag-region>
+        <div id="bar-title" class="bar-title" data-tauri-drag-region>Sonora Music</div>
+        <div id="bar-artist" class="bar-artist" data-tauri-drag-region>Mini Player</div>
+      </div>
+      <div class="bar-ctrls">
+        <button id="btn-bar-prev" class="btn-ctrl" title="Anterior">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        </button>
+        <button id="btn-bar-play" class="btn-ctrl btn-play-main" title="Reproducir/Pausar">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path id="bar-play-icon" d="M8 5v14l11-7z"/>
+          </svg>
+        </button>
+        <button id="btn-bar-next" class="btn-ctrl" title="Siguiente">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zm2 0V6l6.5 6L8 18zm8-12v12h2V6h-2z"/></svg>
+        </button>
+      </div>
+      <div class="bar-modes">
+        <button class="btn-mode-icon" data-mode="disc" title="Modo Vinilo">💿</button>
+        <button class="btn-mode-icon" data-mode="card" title="Modo Tarjeta">▮</button>
+        <button id="btn-bar-close" class="btn-mode-icon" title="Cerrar">✕</button>
+      </div>
+      <div class="bar-progress-line">
+        <div id="bar-progress-fill" class="bar-progress-fill"></div>
+      </div>
+    </div>
+
+    <!-- MODE DISC -->
+    <div id="pip-view-disc" class="view-disc hidden" data-tauri-drag-region title="Click para pausar · Doble click o expandir para barra">
+      <div class="disc-grooves" data-tauri-drag-region></div>
+      <img id="disc-cover" class="disc-cover spinning" src="" alt="" data-tauri-drag-region />
+      <div class="disc-center-hole"></div>
+      <button id="btn-disc-expand" class="disc-expand-btn" title="Expandir a barra">⤢</button>
+    </div>
+
+    <!-- MODE CARD -->
+    <div id="pip-view-card" class="view-card hidden">
+      <div class="card-header" data-tauri-drag-region>
+        <span class="card-header-title" data-tauri-drag-region>Sonora Mini</span>
+        <div style="display:flex;gap:4px;">
+          <button class="btn-mode-icon" data-mode="disc" title="Modo Vinilo">💿</button>
+          <button class="btn-mode-icon" data-mode="bar" title="Modo Barra">▬</button>
+          <button id="btn-card-close" class="btn-mode-icon" title="Cerrar">✕</button>
+        </div>
+      </div>
+      <div class="card-media-row" data-tauri-drag-region>
+        <img id="card-art" class="card-art" src="" alt="" data-tauri-drag-region />
+        <div class="card-meta" data-tauri-drag-region>
+          <div id="card-title" class="card-title" data-tauri-drag-region>Sonora Music</div>
+          <div id="card-artist" class="card-artist" data-tauri-drag-region>—</div>
+        </div>
+      </div>
+      <div class="card-lyrics-box" data-tauri-drag-region>
+        <div id="card-lyric-active" class="card-lyric-active" data-tauri-drag-region>Sonora Music</div>
+        <div id="card-lyric-next" class="card-lyric-next" data-tauri-drag-region>Tu reproductor profesional</div>
+      </div>
+      <div class="card-timeline">
+        <div id="card-progress-bar" class="card-progress-bar">
+          <div id="card-progress-fill" class="card-progress-fill"></div>
+        </div>
+        <div class="card-times">
+          <span id="card-cur-time">0:00</span>
+          <span id="card-dur-time">0:00</span>
+        </div>
+      </div>
+      <div class="card-ctrls">
+        <button id="btn-card-prev" class="btn-ctrl" title="Anterior">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        </button>
+        <button id="btn-card-play" class="btn-ctrl btn-play-main" style="width:40px;height:40px;" title="Reproducir/Pausar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path id="card-play-icon" d="M8 5v14l11-7z"/>
+          </svg>
+        </button>
+        <button id="btn-card-next" class="btn-ctrl" title="Siguiente">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zm2 0V6l6.5 6L8 18zm8-12v12h2V6h-2z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var currentMode = 'bar'; // 'bar' | 'disc' | 'card'
+      var isPlaying = false;
+      var currentDuration = 0;
+
+      var viewBar = document.getElementById('pip-view-bar');
+      var viewDisc = document.getElementById('pip-view-disc');
+      var viewCard = document.getElementById('pip-view-card');
+
+      // Elements
+      var barArt = document.getElementById('bar-art');
+      var barTitle = document.getElementById('bar-title');
+      var barArtist = document.getElementById('bar-artist');
+      var barPlayIcon = document.getElementById('bar-play-icon');
+      var barProgressFill = document.getElementById('bar-progress-fill');
+
+      var discCover = document.getElementById('disc-cover');
+
+      var cardArt = document.getElementById('card-art');
+      var cardTitle = document.getElementById('card-title');
+      var cardArtist = document.getElementById('card-artist');
+      var cardPlayIcon = document.getElementById('card-play-icon');
+      var cardLyricActive = document.getElementById('card-lyric-active');
+      var cardLyricNext = document.getElementById('card-lyric-next');
+      var cardProgressFill = document.getElementById('card-progress-fill');
+      var cardCurTime = document.getElementById('card-cur-time');
+      var cardDurTime = document.getElementById('card-dur-time');
+
+      // Format time helper
+      function fmtTime(sec) {
+        var s = Math.floor(sec || 0);
+        var m = Math.floor(s / 60);
+        var rem = s % 60;
+        return m + ':' + (rem < 10 ? '0' : '') + rem;
+      }
+
+      // Broadcast channel for sync with main window
+      var channel = new BroadcastChannel('sonora_playback');
+
+      function sendAction(action, data) {
+        channel.postMessage({ action: action, data: data });
+      }
+
+      // Mode switching
+      function setMode(mode) {
+        currentMode = mode;
+        viewBar.classList.add('hidden');
+        viewDisc.classList.add('hidden');
+        viewCard.classList.add('hidden');
+
+        if (mode === 'disc') viewDisc.classList.remove('hidden');
+        else if (mode === 'card') viewCard.classList.remove('hidden');
+        else viewBar.classList.remove('hidden');
+
+        // Request Tauri resize
+        if (window.__TAURI__ || window.__TAURI_INTERNALS__) {
+          try {
+            var invoke = (window.__TAURI__.core && window.__TAURI__.core.invoke) || window.__TAURI__.invoke;
+            invoke('set_pip_mode', { mode: mode });
+          } catch (e) {}
+        }
+      }
+
+      function closePiP() {
+        if (window.__TAURI__ || window.__TAURI_INTERNALS__) {
+          try {
+            var invoke = (window.__TAURI__.core && window.__TAURI__.core.invoke) || window.__TAURI__.invoke;
+            invoke('close_pip_window');
+          } catch (e) {}
+        }
+      }
+
+      // Mode buttons
+      document.querySelectorAll('[data-mode]').forEach(function (btn) {
+        btn.onclick = function (e) {
+          e.stopPropagation();
+          setMode(btn.getAttribute('data-mode'));
+        };
+      });
+
+      var discExpand = document.getElementById('btn-disc-expand');
+      if (discExpand) discExpand.onclick = function (e) {
+        e.stopPropagation();
+        setMode('bar');
+      };
+
+      var closeBar = document.getElementById('btn-bar-close');
+      if (closeBar) closeBar.onclick = closePiP;
+      var closeCard = document.getElementById('btn-card-close');
+      if (closeCard) closeCard.onclick = closePiP;
+
+      // Playback actions
+      function togglePlay() { sendAction('toggle'); }
+      function prevTrack() { sendAction('prev'); }
+      function nextTrack() { sendAction('next'); }
+
+      document.getElementById('btn-bar-play').onclick = togglePlay;
+      document.getElementById('btn-bar-prev').onclick = prevTrack;
+      document.getElementById('btn-bar-next').onclick = nextTrack;
+
+      document.getElementById('btn-card-play').onclick = togglePlay;
+      document.getElementById('btn-card-prev').onclick = prevTrack;
+      document.getElementById('btn-card-next').onclick = nextTrack;
+
+      // Disc click toggles play/pause with vinyl braking animation
+      viewDisc.onclick = function (e) {
+        if (e.target === discExpand) return;
+        togglePlay();
+      };
+
+      // Card timeline scrub
+      var cardBar = document.getElementById('card-progress-bar');
+      if (cardBar) {
+        cardBar.onclick = function (e) {
+          var rect = cardBar.getBoundingClientRect();
+          var pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+          if (currentDuration > 0) {
+            sendAction('seek', pct * currentDuration);
+          }
+        };
+      }
+
+      // Update UI from main window events
+      function updatePlayState(playing) {
+        isPlaying = !!playing;
+        var playPath = isPlaying ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z';
+        if (barPlayIcon) barPlayIcon.setAttribute('d', playPath);
+        if (cardPlayIcon) cardPlayIcon.setAttribute('d', playPath);
+
+        if (discCover) {
+          if (isPlaying) {
+            discCover.classList.remove('braking');
+            discCover.classList.add('spinning');
+          } else {
+            discCover.classList.remove('spinning');
+            discCover.classList.add('braking');
+          }
+        }
+      }
+
+      function updateTrack(track) {
+        if (!track) return;
+        currentDuration = track.duration || 0;
+        var title = track.title || 'Sonora Music';
+        var artist = track.artist || '—';
+        var art = track.artworkUrl || '';
+
+        if (barTitle) barTitle.textContent = title;
+        if (barArtist) barArtist.textContent = artist;
+        if (barArt && art) barArt.src = art;
+
+        if (discCover && art) discCover.src = art;
+
+        if (cardTitle) cardTitle.textContent = title;
+        if (cardArtist) cardArtist.textContent = artist;
+        if (cardArt && art) cardArt.src = art;
+        if (cardDurTime) cardDurTime.textContent = fmtTime(currentDuration);
+      }
+
+      function updateProgress(prog) {
+        if (!prog) return;
+        var cur = prog.current || 0;
+        var dur = prog.duration || currentDuration;
+        var pct = prog.percent != null ? prog.percent : (dur > 0 ? (cur / dur) * 100 : 0);
+
+        if (barProgressFill) barProgressFill.style.width = pct + '%';
+        if (cardProgressFill) cardProgressFill.style.width = pct + '%';
+        if (cardCurTime) cardCurTime.textContent = fmtTime(cur);
+        if (cardDurTime) cardDurTime.textContent = fmtTime(dur);
+      }
+
+      function updateLyric(data) {
+        if (!data) return;
+        if (cardLyricActive && data.currentText) cardLyricActive.textContent = data.currentText;
+        if (cardLyricNext && data.nextText) cardLyricNext.textContent = data.nextText;
+      }
+
+      // Listen to channel messages from main window
+      channel.onmessage = function (e) {
+        var msg = e.data || {};
+        if (msg.type === 'track') updateTrack(msg.track);
+        else if (msg.type === 'playState') updatePlayState(msg.isPlaying);
+        else if (msg.type === 'progress') updateProgress(msg.progress);
+        else if (msg.type === 'lyric') updateLyric(msg.data);
+      };
+
+      // Request initial state on startup
+      sendAction('requestState');
+    })();
+  </script>
+</body>
+</html>

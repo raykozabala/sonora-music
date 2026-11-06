@@ -985,7 +985,9 @@
       duration: item.duration || 0,
       artworkUrl: item.thumbnail || '',
       sourceUrl: item.url || '',
-      streamUrl: base + '/api/stream/external?url=' + encodeURIComponent(item.url || ''),
+      streamUrl: (Sonora.API && typeof Sonora.API.externalStreamUrl === 'function')
+        ? Sonora.API.externalStreamUrl(item.url || '')
+        : base + '/api/stream/external?url=' + encodeURIComponent(item.url || ''),
       platform: platform
     };
   }
@@ -993,9 +995,12 @@
   /** Rellena una sección con resultados reales del servidor (YouTube/SoundCloud) */
   async function fetchOnlineTracks(query) {
     if (!query) return [];
-    const base = (Sonora.API && typeof Sonora.API.getActiveUrl === 'function')
-      ? Sonora.API.getActiveUrl()
-      : 'http://192.168.1.132:3000';
+    // En Modo Dispositivo getActiveUrl() es ''; usamos Render como respaldo
+    // para que Discover siga mostrando música online.
+    const base = (Sonora.API && typeof Sonora.API.getMediaBase === 'function')
+      ? Sonora.API.getMediaBase()
+      : ((Sonora.API && typeof Sonora.API.getActiveUrl === 'function') ? Sonora.API.getActiveUrl() : '');
+    if (!base) return [];
     try {
       const res = await fetch(base + '/api/search/external?q=' + encodeURIComponent(query), { headers: { 'Accept': 'application/json' } });
       if (!res.ok) return [];

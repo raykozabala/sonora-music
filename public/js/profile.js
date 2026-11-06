@@ -160,6 +160,108 @@
     } catch (e) {}
   }
 
+  function setPersistenceBadge(state) {
+    const badge = document.getElementById('storage-persist-badge');
+    if (!badge) return;
+    const styles = {
+      granted: ['Activo', 'rgba(46,213,115,0.2)', '#2ed573'],
+      denied: ['No concedido', 'rgba(255,165,0,0.18)', '#ffa500'],
+      unavailable: ['No disponible', 'rgba(160,165,186,0.18)', 'var(--color-text-secondary, #A0A5BA)']
+    };
+    const conf = styles[state] || styles.unavailable;
+    badge.textContent = conf[0];
+    badge.style.background = conf[1];
+    badge.style.color = conf[2];
+  }
+
+  async function refreshPersistenceBadge() {
+    if (typeof navigator === 'undefined' || !navigator.storage || typeof navigator.storage.persisted !== 'function') {
+      setPersistenceBadge('unavailable');
+      return false;
+    }
+    try {
+      const persisted = await navigator.storage.persisted();
+      setPersistenceBadge(persisted ? 'granted' : 'denied');
+      return persisted;
+    } catch (e) {
+      setPersistenceBadge('unavailable');
+      return false;
+    }
+  }
+
+  async function exportBackupFile() {
+    if (!Sonora.DB || typeof Sonora.DB.exportData !== 'function') {
+      showToast('La base de datos aún no está lista', 'error');
+      return false;
+    }
+    const payload = await Sonora.DB.exportData();
+    payload.appVersion = (Sonora.Updater && Sonora.Updater.getCurrentVersion)
+      ? Sonora.Updater.getCurrentVersion() : '7.17.0';
+    const text = JSON.stringify(payload, null, 2);
+    const date = new Date().toISOString().slice(0, 10);
+    const filename = `Sonora_Backup_${date}.json`;
+
+    if (Sonora.Download && typeof Sonora.Download.saveTextFile === 'function') {
+      const ok = await Sonora.Download.saveTextFile(text, filename, 'application/json');
+      if (ok) {
+        const count = (payload.data && payload.data.tracks) ? payload.data.tracks.length : 0;
+        showToast(`Copia exportada (${count} pistas). Guárdala en un lugar seguro.`, 'success');
+        return true;
+      }
+    }
+    showToast('No se pudo guardar la copia de seguridad', 'error');
+    return false;
+  }
+
+  async function importBackupFile(file) {
+    if (!file) return false;
+    if (file.size > 25 * 1024 * 1024) {
+      showToast('La copia es demasiado grande (máximo 25 MB)', 'error');
+      return false;
+    }
+    let payload;
+    try {
+      const text = await file.text();
+      payload = JSON.parse(text);
+    } catch (e) {
+      showToast('El archivo no es un JSON válido', 'error');
+      return false;
+    }
+    if (!payload || payload.format !== 'sonora-backup' || !payload.data) {
+      showToast('Ese archivo no es una copia de seguridad de Sonora', 'error');
+      return false;
+    }
+
+    const ok = window.confirm('Importar esta copia reemplazará tus listas, favoritos, historial y ajustes actuales. ¿Continuar?');
+    if (!ok) return false;
+
+    try {
+      await Sonora.DB.importData(payload, { replace: true });
+
+      // Refleja los ajustes restaurados en localStorage: el reproductor,
+      // el actualizador y las notificaciones leen claves "sonora_*" de forma
+      // síncrona antes de que la base de datos termine de abrir.
+      try {
+        const settings = (payload.data && payload.data.settings) || [];
+        settings.forEach(function (s) {
+          if (s && s.key) {
+            localStorage.setItem('sonora_' + s.key, JSON.stringify(s.value));
+          }
+        });
+      } catch (e) {}
+
+      showToast('Copia restaurada. Recargando Sonora…', 'success');
+      setTimeout(function () {
+        try { window.location.reload(); } catch (e) {}
+      }, 900);
+      return true;
+    } catch (e) {
+      console.error('[Profile] Import backup failed:', e);
+      showToast('No se pudo restaurar la copia: ' + (e && e.message ? e.message : 'error'), 'error');
+      return false;
+    }
+  }
+
   const Profile = {
     /**
      * Render Profile page skeleton and styles
@@ -679,6 +781,57 @@
             </div>
           </div>
 
+          <!-- Copia de seguridad y almacenamiento -->
+          <div class="profile-section">
+            <h2 class="profile-section-title">
+              ☁️ Copia de seguridad y datos
+            </h2>
+            <div style="background:var(--color-surface, #1a1a2e);border:1px solid var(--color-card-border, rgba(255,255,255,0.08));border-radius:var(--radius-md, 14px);padding:18px 20px;display:flex;flex-direction:column;gap:14px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+                <div style="flex:1;min-width:240px;">
+                  <div style="font-weight:700;font-size:14px;color:var(--color-text-primary, #fff);display:flex;align-items:center;gap:8px;">
+                    <span>🛡️ Almacenamiento local persistente:</span>
+                    <span id="storage-persist-badge" class="badge" style="padding:2px 8px;border-radius:10px;font-size:11px;font-weight:800;">Comprobando…</span>
+                  </div>
+                  <div style="font-size:12px;color:var(--color-text-secondary, #A0A5BA);margin-top:4px;">
+                    Evita que el navegador borre tus canciones y listas al cerrar pestañas.
+                  </div>
+                </div>
+                <button id="btn-storage-persist" class="btn-action btn-action--secondary" style="font-size:12px;padding:7px 14px;">
+                  Solicitar persistencia
+                </button>
+              </div>
+
+              <div style="border-top:1px solid var(--color-divider, rgba(255,255,255,0.08));padding-top:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+                <div style="flex:1;min-width:240px;">
+                  <div style="font-weight:700;font-size:14px;color:var(--color-text-primary, #fff);">Copia de seguridad de Sonora</div>
+                  <div style="font-size:12px;color:var(--color-text-secondary, #A0A5BA);margin-top:2px;">Exporta listas, favoritos, historial y ajustes a un archivo .json y restáuralo en la web, Mac o teléfono. Los archivos de audio no se incluyen.</div>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <button id="btn-backup-export" class="btn-action btn-action--primary" style="font-size:12px;padding:8px 14px;">⬇️ Exportar copia</button>
+                  <button id="btn-backup-import" class="btn-action btn-action--secondary" style="font-size:12px;padding:8px 14px;">⬆️ Importar copia</button>
+                  <input type="file" id="backup-import-file" accept="application/json,.json" style="display:none;" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Versión y Actualizaciones -->
+          <div class="profile-section">
+            <h2 class="profile-section-title">
+              🚀 Sonora Music & Actualizaciones
+            </h2>
+            <div style="background:var(--color-surface, #1a1a2e);border:1px solid var(--color-card-border, rgba(255,255,255,0.08));border-radius:var(--radius-md, 14px);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;">
+              <div>
+                <div style="font-weight:700;font-size:14px;color:#fff;">Versión instalada: <span style="color:var(--color-primary, #FF4757);">v7.17.0</span></div>
+                <div style="font-size:12px;color:var(--color-text-secondary, #A0A5BA);margin-top:2px;">Comprueba si hay nuevas versiones de Sonora para Mac, Web o Android.</div>
+              </div>
+              <button id="btn-profile-check-updates" class="btn-update-action" style="padding:8px 16px;font-size:12px;font-weight:700;border-radius:20px;">
+                🔄 Buscar actualizaciones
+              </button>
+            </div>
+          </div>
+
           <!-- Edit Profile Modal -->
           <div class="sonora-modal-overlay" id="modal-edit-profile">
             <div class="sonora-modal-card">
@@ -1106,6 +1259,73 @@
       if (btnBadge) addTrackedListener(btnBadge, 'click', openModal);
       if (btnClose) addTrackedListener(btnClose, 'click', closeModal);
       if (btnCancel) addTrackedListener(btnCancel, 'click', closeModal);
+
+      // Copia de seguridad real (exportar / importar JSON) y persistencia.
+      refreshPersistenceBadge();
+
+      const btnPersist = $('#btn-storage-persist');
+      if (btnPersist) {
+        addTrackedListener(btnPersist, 'click', async () => {
+          if (typeof navigator === 'undefined' || !navigator.storage || typeof navigator.storage.persist !== 'function') {
+            showToast('Este navegador no permite solicitar almacenamiento persistente', 'warning');
+            return;
+          }
+          btnPersist.disabled = true;
+          try {
+            const granted = await navigator.storage.persist();
+            setPersistenceBadge(granted ? 'granted' : 'denied');
+            showToast(granted
+              ? 'Almacenamiento persistente concedido'
+              : 'El navegador no concedió la persistencia; exporta una copia de seguridad', granted ? 'success' : 'warning');
+          } catch (e) {
+            showToast('No se pudo solicitar la persistencia', 'error');
+          } finally {
+            btnPersist.disabled = false;
+            refreshPersistenceBadge();
+          }
+        });
+      }
+
+      const btnExport = $('#btn-backup-export');
+      if (btnExport) {
+        addTrackedListener(btnExport, 'click', async () => {
+          btnExport.disabled = true;
+          try { await exportBackupFile(); }
+          catch (e) { showToast('No se pudo exportar la copia', 'error'); }
+          finally { btnExport.disabled = false; }
+        });
+      }
+
+      const btnImport = $('#btn-backup-import');
+      const importInput = $('#backup-import-file');
+      if (btnImport && importInput) {
+        addTrackedListener(btnImport, 'click', () => importInput.click());
+        addTrackedListener(importInput, 'change', async () => {
+          const file = importInput.files && importInput.files[0];
+          importInput.value = '';
+          if (!file) return;
+          btnImport.disabled = true;
+          try { await importBackupFile(file); }
+          finally { btnImport.disabled = false; }
+        });
+      }
+
+      // Check updates button
+      const btnProfUpdates = $('#btn-profile-check-updates');
+      if (btnProfUpdates) {
+        addTrackedListener(btnProfUpdates, 'click', async () => {
+          btnProfUpdates.disabled = true;
+          btnProfUpdates.textContent = '⏳ Comprobando...';
+          try {
+            if (Sonora.Updater && Sonora.Updater.check) {
+              await Sonora.Updater.check(true);
+            }
+          } finally {
+            btnProfUpdates.disabled = false;
+            btnProfUpdates.textContent = '🔄 Buscar actualizaciones';
+          }
+        });
+      }
 
       // Handle avatar file selection
       if (fileInput) {

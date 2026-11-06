@@ -1,6 +1,6 @@
 /**
- * Sonora Music Server v7.10.0
- * Dual-mode backend server (Local PC & Render.com compatible)
+ * Sonora Music Server v7.17.0
+ * Triple-mode backend server (Local PC, Render.com & Northflank compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
 
@@ -9,7 +9,6 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const crypto = require('crypto');
 const http = require('http');
 const https = require('https');
 const multer = require('multer');
@@ -17,16 +16,15 @@ const { spawn, execSync } = require('child_process');
 
 // Determine Server Mode & Environment
 const PORT = process.env.PORT || 3000;
-const SERVER_MODE = (process.env.SERVER_MODE || (process.env.RENDER ? 'render' : 'local')).toLowerCase();
+const SERVER_MODE = (process.env.SERVER_MODE || (process.env.RENDER ? 'render' : (process.env.NORTHFLANK ? 'northflank' : 'local'))).toLowerCase();
 const isRender = SERVER_MODE === 'render';
+const isNorthflank = SERVER_MODE === 'northflank';
 
 // Paths
-// DATA_DIR / MUSIC_DIR / DB_PATH permiten montar un volumen persistente en
-// Northflank, Render u otro hosting sin tocar el código.
-const publicDir = path.resolve(__dirname, '../public');
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : __dirname;
-const musicDir = process.env.MUSIC_DIR ? path.resolve(process.env.MUSIC_DIR) : path.resolve(__dirname, '../music');
-const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : path.resolve(__dirname, 'sonora.db');
+const publicDir = process.env.PUBLIC_DIR ? path.resolve(process.env.PUBLIC_DIR) : (fs.existsSync(path.resolve(__dirname, 'public')) ? path.resolve(__dirname, 'public') : path.resolve(__dirname, '../public'));
+const musicDir = process.env.MUSIC_DIR ? path.resolve(process.env.MUSIC_DIR) : path.resolve(dataDir, 'music');
+const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : path.resolve(dataDir, 'sonora.db');
 
 // Ensure directories exist
 try {
@@ -37,7 +35,7 @@ try {
     fs.mkdirSync(musicDir, { recursive: true });
   }
 } catch (err) {
-  console.error('[Startup] Failed to create data/music directory:', err);
+  console.error('[Startup] Failed to create directories:', err);
 }
 
 // ---------------------------------------------------------------------------
@@ -493,9 +491,11 @@ function seedDatabase() {
       { id: 9, name: 'Chill Mix', description: 'Música tranquila y relajante para desconectar y concentrarse.', artwork_url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=400&q=80', track_ids: JSON.stringify([9, 10, 31, 32, 33, 41, 42, 43, 53, 55, 35, 45]), type: 'personal', genre: 'Chillout', mood: 'Chill' }
     ];
 
-    // Sin playlists sembradas: sólo las que crea el usuario (las listas
-    // antiguas tipo "Favoritas del Momento" / "Para Entrenar" ya no se generan).
-    const playlists = [];
+    const playlists = [
+      { id: 1, name: 'Favoritas del Momento', description: 'Mis canciones favoritas y más escuchadas.', artwork_url: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=400&q=80', track_ids: JSON.stringify([1, 2, 3, 4, 5]), created_at: now, updated_at: now, is_collaborative: 0, owner_id: 1 },
+      { id: 2, name: 'Para Entrenar', description: 'Energía pura, rock y beats para el gimnasio.', artwork_url: 'https://images.unsplash.com/photo-1464375117522-1311d6a5b81f?auto=format&fit=crop&w=400&q=80', track_ids: JSON.stringify([11, 12, 13, 36, 37, 46, 47, 56, 57, 14]), created_at: now, updated_at: now, is_collaborative: 0, owner_id: 1 },
+      { id: 3, name: 'Sesión Acústica e Indie', description: 'Vibras acústicas y tranquilas para tardes de relax.', artwork_url: 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=400&q=80', track_ids: JSON.stringify([31, 32, 33, 41, 42, 51, 52, 9, 10, 34]), created_at: now, updated_at: now, is_collaborative: 0, owner_id: 1 }
+    ];
 
     // Seed transaction
     const insertArtist = db.prepare(`
@@ -581,18 +581,6 @@ function seedDatabase() {
 // Execute initial seed
 seedDatabase();
 
-// Migración: quitar las playlists sembradas antiguas de bases ya existentes
-// (el usuario sólo quiere ver las playlists que él mismo creó).
-try {
-  const legacy = [[1, 'Favoritas del Momento'], [2, 'Para Entrenar'], [3, 'Sesión Acústica e Indie']];
-  const del = db.prepare('DELETE FROM playlists WHERE id = ? AND name = ?');
-  let removed = 0;
-  legacy.forEach(([id, name]) => { try { removed += del.run(id, name).changes; } catch (e) {} });
-  if (removed > 0) console.log(`[Migración] ${removed} playlists sembradas antiguas eliminadas`);
-} catch (err) {
-  console.warn('[Migración] No se pudieron limpiar las playlists antiguas:', err.message);
-}
-
 // ---------------------------------------------------------------------------
 // Multer Configuration (File Upload Support)
 // ---------------------------------------------------------------------------
@@ -638,9 +626,11 @@ app.get('/api/health', (req, res) => {
   try {
     res.json({
       status: 'ok',
-      server: isRender ? 'render' : 'local',
+      server: isNorthflank ? 'northflank' : (isRender ? 'render' : 'local'),
       uptime: Math.floor(process.uptime()),
-      version: '7.11.0'
+      version: '7.17.0',
+      mode: SERVER_MODE,
+      connected: true
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
@@ -669,15 +659,27 @@ function findBinary(name) {
 }
 const YTDLP_BIN = findBinary('yt-dlp');
 const FFMPEG_BIN = findBinary('ffmpeg');
-// Deno es el runtime que yt-dlp usa para resolver los desafíos de YouTube.
-// Sin él la extracción falla con "Requested format is not available".
+
+// Deno es el runtime de JavaScript que yt-dlp usa para resolver los desafíos
+// de YouTube (nsig / PO token). Sin él, en servidores como Render la
+// extracción falla con "Requested format is not available".
 const DENO_BIN = findBinary('deno');
 
-// ---------------------------------------------------------------------------
-// Cookies de YouTube
-// Necesarias cuando la IP del servidor está marcada por YouTube
-// ("Sign in to confirm you're not a bot"), que es el caso de Render.
-// ---------------------------------------------------------------------------
+/** Ejecuta un comando corto y devuelve la salida, o '' si falla. */
+function safeExec(cmd, timeoutMs) {
+  try {
+    return execSync(cmd, { encoding: 'utf8', timeout: timeoutMs || 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * Cookies de YouTube.
+ * Cuando la IP del servidor está marcada por YouTube ("Sign in to confirm
+ * you're not a bot", habitual en Render) hacen falta cookies de una sesión.
+ * Se pueden subir como Secret File o pasar en base64 por variable de entorno.
+ */
 const COOKIES_CANDIDATES = [
   process.env.YTDLP_COOKIES_FILE,
   '/etc/secrets/youtube-cookies.txt',
@@ -687,18 +689,15 @@ const COOKIES_CANDIDATES = [
   path.join(process.cwd(), 'cookies.txt')
 ].filter(Boolean);
 
-// Permite pasar las cookies como variable de entorno en base64
 if (process.env.YTDLP_COOKIES_B64) {
   try {
-    const raw = String(process.env.YTDLP_COOKIES_B64).trim();
-    const decoded = Buffer.from(raw, 'base64');
+    const decoded = Buffer.from(String(process.env.YTDLP_COOKIES_B64).trim(), 'base64');
     if (decoded.length > 50) {
       fs.writeFileSync('/tmp/sonora-cookies.txt', decoded);
-      const txt = decoded.toString('utf8');
-      const looksValid = txt.indexOf('youtube.com') !== -1;
-      console.log('[Cookies] YTDLP_COOKIES_B64 -> ' + decoded.length + ' bytes, válido=' + looksValid);
+      const looksValid = decoded.toString('utf8').indexOf('youtube.com') !== -1;
+      console.log('[Cookies] base64 -> ' + decoded.length + ' bytes, válido=' + looksValid);
       if (!looksValid) {
-        console.error('[Cookies] ⚠️ El valor de YTDLP_COOKIES_B64 no parece un cookies.txt válido (¿se cortó al pegar?)');
+        console.error('[Cookies] ⚠️ YTDLP_COOKIES_B64 no parece un cookies.txt válido');
       }
     } else {
       console.error('[Cookies] ⚠️ YTDLP_COOKIES_B64 demasiado corto: ' + decoded.length + ' bytes');
@@ -708,737 +707,114 @@ if (process.env.YTDLP_COOKIES_B64) {
   }
 }
 
-// yt-dlp necesita ESCRIBIR en el archivo de cookies (renueva tokens de sesión).
-// Los Secret Files de Render son de solo lectura, así que trabajamos siempre
-// sobre una copia escribible en /tmp.
+// yt-dlp reescribe el archivo de cookies, así que trabajamos sobre una copia
+// escribible: los Secret Files de Render son de solo lectura.
 const WRITABLE_COOKIES = '/tmp/sonora-cookies-rw.txt';
 let COOKIES_PATH = null;
 
-function prepareCookies() {
+(function prepareCookies() {
   try {
     let src = null;
-    for (const c of COOKIES_CANDIDATES) {
+    for (const candidate of COOKIES_CANDIDATES) {
       try {
-        if (fs.existsSync(c) && fs.statSync(c).size > 50) { src = c; break; }
+        if (fs.existsSync(candidate) && fs.statSync(candidate).size > 50) { src = candidate; break; }
       } catch (e) {}
     }
-
     if (!src) {
-      COOKIES_PATH = null;
-      console.warn('[Cookies] SIN cookies: YouTube puede bloquear las descargas desde este servidor');
+      console.warn('[Cookies] sin cookies: YouTube puede bloquear las descargas desde este servidor');
       return;
     }
-
     if (path.resolve(src) !== path.resolve(WRITABLE_COOKIES)) {
       fs.copyFileSync(src, WRITABLE_COOKIES);
       try { fs.chmodSync(WRITABLE_COOKIES, 0o600); } catch (e) {}
     }
     COOKIES_PATH = WRITABLE_COOKIES;
-
-    let size = 0;
-    try { size = fs.statSync(COOKIES_PATH).size; } catch (e) {}
-    console.log('[Cookies] listas | origen=' + src + ' | copia escribible=' + COOKIES_PATH + ' (' + size + ' bytes)');
+    console.log('[Cookies] listas | origen=' + src + ' | copia=' + WRITABLE_COOKIES);
   } catch (e) {
     console.warn('[Cookies] error preparando las cookies:', e.message);
     COOKIES_PATH = null;
   }
-}
-
-function getCookiesFile() {
-  return COOKIES_PATH;
-}
-
-function withCookies(args) {
-  return COOKIES_PATH ? args.concat(['--cookies', COOKIES_PATH]) : args.slice();
-}
-
-prepareCookies();
-
-// Los desafíos de YouTube (nsig/PO token) requieren un runtime de JavaScript.
-// Deno es el único habilitado por defecto en yt-dlp.
-(function logJsRuntimeStatus() {
-  const deno = safeExec(`"${DENO_BIN}" --version`);
-  if (deno) console.log('[JS] deno disponible: ' + deno.split('\n')[0]);
-  else console.warn('[JS] SIN deno: yt-dlp no podrá resolver los desafíos de YouTube (las descargas fallarán)');
 })();
 
-// ---------------------------------------------------------------------------
-// Helpers: yt-dlp / ffmpeg wrappers robustos
-// ---------------------------------------------------------------------------
-function safeExec(cmd, timeoutMs) {
-  try {
-    return execSync(cmd, { encoding: 'utf8', timeout: timeoutMs || 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  } catch (e) {
-    return '';
-  }
+/** Añade las cookies a los argumentos de yt-dlp si están disponibles. */
+function withCookies(args) {
+  return COOKIES_PATH ? ['--cookies', COOKIES_PATH].concat(args) : args.slice();
 }
 
-// Player clients probados, de más compatible a más específico. Sirve para
-// esquivar el bloqueo "Sign in to confirm you're not a bot" en servidores cloud.
-// Ojo: android_vr / tv_embedded / mweb son los que suelen pasar en datacenter.
-const YT_CLIENT_FALLBACKS = [
-  null,             // "default" (web + deno + cookies): verificado OK en Render
-  'tv_embedded',    // verificado OK en Render
-  'android_vr',
-  'web_safari'
-];
-// Para STREAMING sólo tienen sentido los dos que funcionan desde datacenter;
-// probar los demás sólo añade espera (piden PO token y fallan).
-const YT_RESOLVE_CLIENTS = [null, 'tv_embedded'];
-// Presupuesto por cliente: deno tarda ~40 s en la CPU del plan gratuito de
-// Render, y el streaming debe dejar margen para la red de seguridad (plan D).
-const YTDLP_CLIENT_TIMEOUT = 45000;
+/** Clientes de YouTube a probar, del más compatible al más específico. */
+const YT_CLIENT_FALLBACKS = [null, 'tv_embedded', 'android_vr'];
+const YT_FALLBACK_ERROR = /sign in to confirm|not a bot|requested format|no video formats|unable to extract|player response|403|410/i;
 
-/**
- * Ejecuta yt-dlp (--get-url) con un "player client" concreto.
- * Devuelve { url, error }: url si funcionó, o el motivo del fallo.
- */
-function ytdlpResolveWithClient(targetUrl, client, formatSpec) {
-  return new Promise((resolve) => {
-    const args = [
-      '--no-playlist',
-      '--no-warnings',
-      '--quiet',
-      '--no-check-certificates',
-      '-f', formatSpec || 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
-      '--get-url'
-    ];
-    if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
-
-    // Copia única de las cookies por proceso: yt-dlp REESCRIBE el archivo de
-    // cookies, así que dos procesos en paralelo se pisarían entre sí.
-    let cookieCopy = null;
-    if (COOKIES_PATH) {
-      try {
-        cookieCopy = path.join(os.tmpdir(),
-          'sonora-ck-' + process.pid + '-' + Math.random().toString(36).slice(2, 8) + '.txt');
-        fs.copyFileSync(COOKIES_PATH, cookieCopy);
-        args.push('--cookies', cookieCopy);
-      } catch (e) { cookieCopy = null; }
-    }
-
-    const finalArgs = args.slice();
-    finalArgs.push(targetUrl);
-
-    const proc = spawn(YTDLP_BIN, finalArgs);
-    let out = '';
-    let err = '';
-    let done = false;
-    const label = client || 'default';
-
-    const cleanup = () => {
-      if (cookieCopy) { try { fs.unlinkSync(cookieCopy); } catch (e) {} }
-    };
-
-    const timer = setTimeout(() => {
-      if (done) return;
-      done = true;
-      try { proc.kill('SIGKILL'); } catch (e) {}
-      cleanup();
-      console.warn('[yt-dlp] client=' + label + ' timeout (' + Math.round(YTDLP_CLIENT_TIMEOUT / 1000) + 's)');
-      resolve({ url: null, error: label + ': tiempo de espera agotado' });
-    }, YTDLP_CLIENT_TIMEOUT);
-
-    proc.stdout.on('data', (d) => { out += d.toString(); });
-    proc.stderr.on('data', (d) => { err += d.toString(); });
-
-    proc.on('error', (e) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      cleanup();
-      resolve({ url: null, error: label + ': ' + e.message });
-    });
-
-    proc.on('close', (code) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      cleanup();
-      const first = out.trim().split('\n').map(s => s.trim()).filter(Boolean)[0];
-      if (code === 0 && first && /^https?:\/\//.test(first)) {
-        return resolve({ url: first, error: null });
-      }
-      const msg = err.trim().split('\n').pop() || ('yt-dlp salió con código ' + code);
-      console.warn('[yt-dlp] client=' + label + ' falló: ' + msg);
-      resolve({ url: null, error: label + ': ' + msg });
-    });
-  });
-}
-
-/**
- * Resuelve la URL directa de audio probando varios "player clients".
- * Se lanzan de 2 en 2: el primero casi siempre es "default", que es el que
- * funciona; el segundo va de reserva por si aquél se atasca.
- */
-function ytdlpResolveAudioUrl(targetUrl) {
-  return new Promise((resolve, reject) => {
-    const CONCURRENCY = 2;
-    let idx = 0;
-    let pending = 0;
-    let settled = false;
-    const errors = [];
-
-    function launch() {
-      while (!settled && pending < CONCURRENCY && idx < YT_RESOLVE_CLIENTS.length) {
-        const client = YT_RESOLVE_CLIENTS[idx++];
-        pending++;
-        ytdlpResolveWithClient(targetUrl, client).then((res) => {
-          if (settled) return;
-          pending--;
-          if (res && res.url) {
-            settled = true;
-            return resolve(res.url);
-          }
-          if (res && res.error) errors.push(res.error);
-          if (pending === 0 && idx >= YT_RESOLVE_CLIENTS.length) {
-            settled = true;
-            return reject(new Error('ningún player client funcionó | ' + errors.join(' | ')));
-          }
-          launch();
-        });
-      }
-    }
-
-    launch();
-  });
-}
-
-// Caché de URLs de audio ya resueltas. La resolución es lenta (yt-dlp + deno +
-// cookies), así que se reutiliza durante 20 min: hace instantáneos los
-// "seeks" y las repeticiones que hace el reproductor.
-const RESOLVED_URL_CACHE = new Map();
-const RESOLVED_URL_TTL = 20 * 60 * 1000;
-
-function getResolvedUrl(key) {
-  const e = RESOLVED_URL_CACHE.get(key);
-  if (!e) return null;
-  if (e.exp <= Date.now()) { RESOLVED_URL_CACHE.delete(key); return null; }
-  return e.url;
-}
-
-function setResolvedUrl(key, url) {
-  if (RESOLVED_URL_CACHE.size > 300) RESOLVED_URL_CACHE.clear();
-  RESOLVED_URL_CACHE.set(key, { url: url, exp: Date.now() + RESOLVED_URL_TTL });
-}
-
-// ---------------------------------------------------------------------------
-// Streaming de vídeo: YouTube ya no sirve los MP4 "progresivos" (itag 18) a
-// la mayoría de clientes (HTTP 403), pero sí entrega las pistas DASH de vídeo
-// y audio por separado. El reproductor pide las dos y las sincroniza.
-// ---------------------------------------------------------------------------
-
-/** Comprueba que el CDN entrega bytes de verdad (no un 403/HTML). */
-function probeMediaUrl(url, timeoutMs) {
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (ok, status, ct) => {
-      if (settled) return;
-      settled = true;
-      resolve({ ok: ok, status: status || 0, contentType: ct || '' });
-    };
-    let lib;
-    try { lib = url.startsWith('https') ? https : http; } catch (e) { return finish(false, 0, ''); }
-
-    const req = lib.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.youtube.com/',
-        'Range': 'bytes=0-1023'
-      }
-    }, (up) => {
-      const ct = String(up.headers['content-type'] || '');
-      const ok = up.statusCode >= 200 && up.statusCode < 400 &&
-        ct.indexOf('text/') !== 0 && ct.indexOf('text/html') === -1;
-      up.destroy();
-      finish(ok, up.statusCode, ct);
-    });
-    req.on('error', () => finish(false, 0, ''));
-    req.setTimeout(timeoutMs || 8000, () => { try { req.destroy(); } catch (e) {} finish(false, 0, 'timeout'); });
-  });
-}
-
-const STREAM_RESOLVE_CACHE = new Map();
-const STREAM_RESOLVE_TTL = 8 * 60 * 1000;
-const STREAM_INFLIGHT = new Map();
-
-function getStreamCache(key) {
-  const e = STREAM_RESOLVE_CACHE.get(key);
-  if (!e) return null;
-  if (e.exp <= Date.now()) { STREAM_RESOLVE_CACHE.delete(key); return null; }
-  return e.url;
-}
-
-function setStreamCache(key, url) {
-  if (STREAM_RESOLVE_CACHE.size > 240) STREAM_RESOLVE_CACHE.clear();
-  STREAM_RESOLVE_CACHE.set(key, { url: url, exp: Date.now() + STREAM_RESOLVE_TTL });
-}
-
-function invalidateStreamCache(key) {
-  STREAM_RESOLVE_CACHE.delete(key);
-}
-
-/**
- * Resuelve la URL DASH de una pista (vídeo o audio) probando varios clientes.
- * Se lanzan de dos en dos y se valida la URL con una petición Range real:
- * una URL que el CDN rechaza se descarta y se sigue con el siguiente cliente.
- */
-function resolveDashStream(targetUrl, kind, height) {
-  const h = Math.max(144, parseInt(height, 10) || 720);
-  const isAudio = kind === 'audio';
-  const cacheKey = (isAudio ? 'a|' : 'v|') + h + '|' + targetUrl;
-  const cached = getStreamCache(cacheKey);
-  if (cached) return Promise.resolve({ url: cached, cacheKey: cacheKey });
-
-  // Si el reproductor (o el prefetch del modal) ya está resolviendo esta
-  // misma pista, se comparte la promesa: no se lanzan dos yt-dlp iguales.
-  if (STREAM_INFLIGHT.has(cacheKey)) return STREAM_INFLIGHT.get(cacheKey);
-
-  const formats = isAudio
-    ? ['bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio']
-    : [
-        'bestvideo[height<=' + h + '][ext=mp4]/bestvideo[height<=' + h + ']',
-        'bestvideo[ext=mp4]/bestvideo'
-      ];
-  const clients = isAudio ? [null, 'tv_embedded', 'android_vr'] : [null, 'android_vr', 'tv_embedded', 'mweb'];
-
-  const promise = new Promise((resolve, reject) => {
-    const CONCURRENCY = 2;
-    let idx = 0;
-    let pending = 0;
-    let settled = false;
-    const errors = [];
-
-    function tryNext() {
-      while (!settled && pending < CONCURRENCY && idx < clients.length) {
-        const client = clients[idx++];
-        pending++;
-        const spec = formats[0];
-        ytdlpResolveWithClient(targetUrl, client, spec).then((res) => {
-          if (settled) return;
-          if (!res || !res.url) {
-            pending--;
-            if (res && res.error) errors.push(res.error);
-            if (pending === 0 && idx >= clients.length) {
-              settled = true;
-              reject(new Error('ningún cliente entregó la pista | ' + errors.join(' | ')));
-            } else {
-              tryNext();
-            }
-            return;
-          }
-          probeMediaUrl(res.url, 9000).then((probe) => {
-            if (settled) return;
-            pending--;
-            if (probe.ok) {
-              settled = true;
-              setStreamCache(cacheKey, res.url);
-              return resolve({ url: res.url, cacheKey: cacheKey });
-            }
-            errors.push((client || 'default') + ': CDN ' + probe.status + ' ' + probe.contentType);
-            if (pending === 0 && idx >= clients.length) {
-              settled = true;
-              reject(new Error('el CDN rechazó todas las pistas | ' + errors.join(' | ')));
-            } else {
-              tryNext();
-            }
-          }).catch(() => {
-            pending--;
-            if (pending === 0 && idx >= clients.length) {
-              settled = true;
-              reject(new Error('no se pudo validar la pista'));
-            } else {
-              tryNext();
-            }
-          });
-        });
-      }
-    }
-    tryNext();
-  });
-
-  STREAM_INFLIGHT.set(cacheKey, promise);
-  promise.finally(function () { STREAM_INFLIGHT.delete(cacheKey); });
-  return promise;
-}
-
-/**
- * Hace proxy de una URL de audio respetando el header Range (permite "seek").
- */
-function proxyAudioStream(directUrl, req, res, onReject, defaultType, redirectsLeft) {
-  const lib = directUrl.startsWith('https') ? https : http;
-  const headers = {
-    'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-    'Accept': '*/*',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Referer': 'https://www.youtube.com/'
-  };
-  if (req.headers.range) headers['Range'] = req.headers.range;
-
-  const upstream = lib.get(directUrl, { headers }, (up) => {
-    const ct = String(up.headers['content-type'] || '');
-
-    // Redirecciones del CDN (302 a otro nodo de googlevideo).
-    if (up.statusCode >= 300 && up.statusCode < 400 && up.headers.location) {
-      up.resume();
-      const left = (typeof redirectsLeft === 'number' ? redirectsLeft : 2);
-      if (left <= 0) {
-        if (!res.headersSent) res.status(502).json({ error: 'Demasiadas redirecciones del CDN' });
-        return;
-      }
-      const next = new URL(up.headers.location, directUrl).toString();
-      return proxyAudioStream(next, req, res, onReject, defaultType, left - 1);
-    }
-
-    const rejected = (up.statusCode && up.statusCode >= 400) || ct.indexOf('text/html') !== -1;
-    if (rejected) {
-      // El CDN de YouTube devolvió una página de error en lugar del audio.
-      console.warn('[Stream] el CDN rechazó la URL: HTTP ' + up.statusCode + ' ' + (ct || 'sin content-type'));
-      up.resume();
-      if (typeof onReject === 'function') {
-        try { onReject(up.statusCode, ct); } catch (e) {}
-        return;
-      }
-      if (!res.headersSent) {
-        res.status(502).json({
-          error: 'El CDN de YouTube rechazó el audio',
-          detail: 'HTTP ' + (up.statusCode || '?') + ' ' + (ct || 'sin content-type')
-        });
-      }
-      return;
-    }
-    res.status(up.statusCode || 200);
-    ['content-type', 'content-length', 'accept-ranges', 'content-range', 'content-encoding'].forEach((h) => {
-      if (up.headers[h]) res.setHeader(h, up.headers[h]);
-    });
-    if (!up.headers['content-type']) res.setHeader('Content-Type', defaultType || 'audio/mpeg');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
-    up.pipe(res);
-  });
-
-  upstream.on('error', (err) => {
-    console.error('[Stream] upstream error:', err.message);
-    if (!res.headersSent) res.status(502).json({ error: 'No se pudo leer el audio', detail: err.message });
-    else res.end();
-  });
-
-  upstream.setTimeout(45000, () => { upstream.destroy(new Error('timeout')); });
-  req.on('close', () => { try { upstream.destroy(); } catch (e) {} });
-}
-
-/** Tipo MIME según la extensión del fichero de audio. */
-function audioContentType(filePath) {
-  const e = path.extname(String(filePath || '')).toLowerCase();
-  if (e === '.m4a' || e === '.mp4' || e === '.aac') return 'audio/mp4';
-  if (e === '.webm') return 'audio/webm';
-  if (e === '.opus' || e === '.ogg') return 'audio/ogg';
-  return 'audio/mpeg';
-}
-
-/**
- * Tipo MIME mirando los primeros bytes del fichero. Es más fiable que la
- * extensión: yt-dlp a veces guarda MP4/M4A en un fichero con otro nombre, y
- * Android puede negarse a reproducirlo si el Content-Type no encaja.
- */
-function sniffAudioContentType(filePath) {
-  try {
-    const fd = fs.openSync(filePath, 'r');
-    const buf = Buffer.alloc(16);
-    const n = fs.readSync(fd, buf, 0, 16, 0);
-    fs.closeSync(fd);
-    if (n >= 12) {
-      const four = buf.slice(0, 4).toString('latin1');
-      if (buf.slice(4, 8).toString('latin1') === 'ftyp') return 'audio/mp4';
-      if (four === 'OggS') return 'audio/ogg';
-      if (four === 'fLaC') return 'audio/flac';
-      if (four === 'RIFF') return 'audio/wav';
-      if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return 'audio/webm';
-      if (four.slice(0, 3) === 'ID3') return 'audio/mpeg';
-      if (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) return 'audio/mpeg';
-    }
-  } catch (e) {}
-  return audioContentType(filePath);
-}
-
-/** Sirve un fichero de audio local respetando Range (permite "seek"). */
-function serveAudioFileWithRanges(filePath, req, res) {
-  const stat = fs.statSync(filePath);
-  const fileSize = stat.size;
-  const range = req.headers.range;
-  const contentType = sniffAudioContentType(filePath);
-
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
-
-  if (range) {
-    const parts = String(range).replace(/bytes=/, '').split('-');
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-    if (isNaN(start) || start >= fileSize || end >= fileSize || start > end) {
-      res.status(416).set({ 'Content-Range': `bytes */${fileSize}` }).send('Requested Range Not Satisfiable');
-      return;
-    }
-    res.writeHead(206, {
-      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-      'Accept-Ranges': 'bytes',
-      'Content-Length': (end - start) + 1,
-      'Content-Type': contentType
-    });
-    fs.createReadStream(filePath, { start, end }).pipe(res);
-  } else {
-    res.writeHead(200, {
-      'Content-Length': fileSize,
-      'Accept-Ranges': 'bytes',
-      'Content-Type': contentType
-    });
-    fs.createReadStream(filePath).pipe(res);
-  }
-}
-
-/**
- * Red de seguridad del streaming (plan D). Cuando YouTube no nos deja
- * proxificar el audio desde una IP de datacenter, generamos el fichero en el
- * servidor — la misma vía que usan las descargas, que sí funciona — y lo
- * servimos desde disco. La primera vez tarda; después sale de la caché.
- * Devuelve true si consiguió servir el audio.
- */
-async function serveGeneratedAudio(targetUrl, req, res) {
-  try {
-    // 1) ¿Ya existe el MP3 de una descarga anterior? (instantáneo)
-    const mp3Path = downloadCachePath(targetUrl, 'mp3', '320k');
-    const cachedMp3 = getCachedDownload(mp3Path);
-    if (cachedMp3) {
-      console.log('[Stream] plan D: reutilizando el MP3 ya descargado');
-      serveAudioFileWithRanges(cachedMp3, req, res);
-      return true;
-    }
-
-    // 2) ¿Audio sin transcodificar guardado de antes?
-    const key = crypto.createHash('sha1').update('streamaudio|' + String(targetUrl)).digest('hex');
-    let cachedAudio = null;
-    try {
-      const hit = fs.readdirSync(CACHE_DIR).find((f) => f.indexOf(key + '.') === 0);
-      if (hit) cachedAudio = getCachedDownload(path.join(CACHE_DIR, hit));
-    } catch (e) {}
-    if (cachedAudio) {
-      console.log('[Stream] plan D: audio ya en caché');
-      serveAudioFileWithRanges(cachedAudio, req, res);
-      return true;
-    }
-
-    // 3) Descargarlo SIN transcodificar (bastante más rápido que convertir a MP3)
-    const tmpDir = path.join(os.tmpdir(), 'sonora-stream');
-    try { fs.mkdirSync(tmpDir, { recursive: true }); } catch (e) {}
-    const stamp = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-    const args = [
-      '--no-playlist', '--no-warnings', '--no-check-certificates',
-      '-f', 'bestaudio[ext=m4a]/bestaudio/best'
-    ];
-    const generated = await ytdlpDownloadToFile(args, targetUrl, tmpDir, stamp);
-    if (!generated) return false;
-
-    // Guardamos en caché conservando la extensión (ayuda al Content-Type).
-    // OJO: CACHE_DIR sólo lo creaba la ruta de descargas, así que en un
-    // contenedor nuevo (Render) esta copia fallaba con ENOENT y el audio se
-    // regeneraba en cada petición. Lo creamos aquí también.
-    let finalPath = generated;
-    try {
-      fs.mkdirSync(CACHE_DIR, { recursive: true });
-      const ext = path.extname(generated) || '.m4a';
-      const cachedPath = path.join(CACHE_DIR, key + ext);
-      fs.copyFileSync(generated, cachedPath);
-      finalPath = cachedPath;
-      console.log('[Stream] plan D: audio guardado en caché (' + path.basename(cachedPath) + ')');
-    } catch (copyErr) {
-      console.warn('[Stream] plan D: no se pudo cachear: ' + copyErr.message);
-    }
-
-    console.log('[Stream] plan D: audio generado en el servidor');
-    serveAudioFileWithRanges(finalPath, req, res);
-    return true;
-  } catch (e) {
-    console.warn('[Stream] plan D falló: ' + e.message);
-    return false;
-  }
-}
+(function logJsRuntimeStatus() {
+  const deno = safeExec('"' + DENO_BIN + '" --version');
+  if (deno) console.log('[JS] deno disponible: ' + deno.split('\n')[0]);
+  else console.warn('[JS] SIN deno: yt-dlp no podrá resolver los desafíos de YouTube');
+})();
 
 /**
  * GET /api/system
- * Diagnóstico: modo, versiones y disponibilidad de yt-dlp / ffmpeg
+ * Diagnóstico de binarios y cookies (sin exponer el contenido de las cookies).
  */
 app.get('/api/system', (req, res) => {
-  const ytdlpVersion = safeExec(`"${YTDLP_BIN}" --version`);
-  const ffmpegRaw = safeExec(`"${FFMPEG_BIN}" -version`);
-  const denoRaw = safeExec(`"${DENO_BIN}" --version`);
+  const ytdlpVersion = safeExec('"' + YTDLP_BIN + '" --version');
+  const ffmpegRaw = safeExec('"' + FFMPEG_BIN + '" -version');
+  const denoRaw = safeExec('"' + DENO_BIN + '" --version');
+  let cookies = { available: false, path: null };
+  if (COOKIES_PATH) {
+    try {
+      const buf = fs.readFileSync(COOKIES_PATH);
+      const sha = require('crypto').createHash('sha256').update(buf).digest('hex');
+      cookies = {
+        available: true,
+        path: COOKIES_PATH,
+        size: buf.length,
+        sha256: sha,
+        valid: buf.toString('utf8').indexOf('youtube.com') !== -1
+      };
+    } catch (e) {
+      cookies = { available: false, path: COOKIES_PATH, error: e.message };
+    }
+  }
   res.json({
     status: 'ok',
-    mode: isRender ? 'render' : 'local',
+    mode: SERVER_MODE,
     node: process.version,
     platform: process.platform,
-    version: '7.10.0',
-    ytdlp: {
-      path: YTDLP_BIN,
-      available: !!ytdlpVersion,
-      version: ytdlpVersion || null
-    },
-    ffmpeg: {
-      path: FFMPEG_BIN,
-      available: !!ffmpegRaw,
-      version: ffmpegRaw ? ffmpegRaw.split('\n')[0] : null
-    },
-    deno: {
-      path: DENO_BIN,
-      available: !!denoRaw,
-      version: denoRaw ? denoRaw.split('\n')[0] : null
-    },
-    cookies: (function () {
-      const c = getCookiesFile();
-      if (!c) return { available: false, path: null };
-      let size = 0, sha = null, preview = null, valid = false;
-      try {
-        const buf = fs.readFileSync(c);
-        size = buf.length;
-        sha = crypto.createHash('sha256').update(buf).digest('hex');
-        preview = buf.toString('utf8', 0, 60).replace(/[\r\n]+/g, ' / ');
-        valid = buf.toString('utf8').indexOf('youtube.com') !== -1;
-      } catch (e) {}
-      return { available: true, path: c, size: size, sha256: sha, preview: preview, valid: valid };
-    })()
+    version: '7.17.0',
+    ytdlp: { path: YTDLP_BIN, available: !!ytdlpVersion, version: ytdlpVersion || null },
+    ffmpeg: { path: FFMPEG_BIN, available: !!ffmpegRaw, version: ffmpegRaw ? ffmpegRaw.split('\n')[0] : null },
+    deno: { path: DENO_BIN, available: !!denoRaw, version: denoRaw ? denoRaw.split('\n')[0] : null },
+    cookies: cookies
   });
 });
-
-// ---------------------------------------------------------------------------
-// Diagnóstico de yt-dlp: qué "player client" de YouTube funciona desde aquí
-// ---------------------------------------------------------------------------
-function runCapture(bin, args, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(bin, args);
-    let out = '';
-    let err = '';
-    let done = false;
-    const timer = setTimeout(() => {
-      if (done) return;
-      done = true;
-      try { proc.kill('SIGKILL'); } catch (e) {}
-      reject(new Error('timeout'));
-    }, timeoutMs || 45000);
-
-    proc.stdout.on('data', (d) => { out += d.toString(); });
-    proc.stderr.on('data', (d) => { err += d.toString(); });
-    proc.on('error', (e) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      reject(e);
-    });
-    proc.on('close', (code) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      const first = out.trim().split('\n').map((s) => s.trim()).filter(Boolean)[0];
-      if (code === 0 && first) return resolve(first);
-      const lines = err.trim().split('\n').filter(Boolean);
-      reject(new Error(lines.slice(-1)[0] || ('código ' + code)));
-    });
-  });
-}
-
-app.get('/api/ytdiag', async (req, res) => {
-  const id = req.query.id || 'kXYiU_JCYtU';
-  const videoUrl = 'https://www.youtube.com/watch?v=' + id;
-  const clients = ['default', 'android_vr', 'tv_embedded', 'android', 'mweb', 'web_embedded', 'tv', 'ios', 'web_safari'];
-  const results = {};
-  for (const c of clients) {
-    const args = withCookies(['--no-playlist', '--no-warnings', '--quiet', '--no-check-certificates',
-      '-f', 'bestaudio[ext=m4a]/bestaudio/best', '--get-url']);
-    if (c !== 'default') args.push('--extractor-args', 'youtube:player_client=' + c);
-    args.push(videoUrl);
-    try {
-      const direct = await runCapture(YTDLP_BIN, args, 45000);
-      const host = (direct.match(/^https?:\/\/([^/]+)/) || [])[1] || '?';
-      results[c] = { ok: true, host: host, prefix: direct.slice(0, 60) };
-    } catch (e) {
-      results[c] = { ok: false, error: String(e.message).slice(0, 150) };
-    }
-  }
-  res.json({ id: id, mode: isRender ? 'render' : 'local', clients: results });
-});
-
-// ---------------------------------------------------------------------------
-// Letras (proxy a LRCLIB: evita CORS y permite cachear)
-// ---------------------------------------------------------------------------
-const lyricsCache = new Map();
-
-async function fetchLrclib(url) {
-  const resp = await fetch(url, {
-    headers: {
-      'User-Agent': 'SonoraMusic/7.10.0 (+https://github.com/raykozabala/sonora-music)'
-    }
-  });
-  if (resp.status === 404) return null;
-  if (!resp.ok) throw new Error('LRCLIB HTTP ' + resp.status);
-  return resp.json();
-}
 
 /**
- * GET /api/lyrics?artist=...&title=...&album=...
- * Devuelve { syncedLyrics, plainLyrics, found }
+ * GET /api/ytdiag?id=VIDEO_ID
+ * Prueba varios "player clients" de YouTube y devuelve cuáles funcionan.
+ * Sirve para diagnosticar bloqueos desde Render.
  */
-app.get('/api/lyrics', async (req, res) => {
-  const artist = (req.query.artist || '').trim();
-  const title = (req.query.title || '').trim();
-  const album = (req.query.album || '').trim();
-
-  res.setHeader('Access-Control-Allow-Origin', '*');
-
-  if (!title) return res.status(400).json({ error: 'Falta el parámetro title' });
-
-  const cacheKey = (artist + '|' + title + '|' + album).toLowerCase();
-  if (lyricsCache.has(cacheKey)) {
-    return res.json(lyricsCache.get(cacheKey));
-  }
-
-  try {
-    const qs = new URLSearchParams();
-    if (artist) qs.set('artist_name', artist);
-    qs.set('track_name', title);
-    if (album) qs.set('album_name', album);
-
-    let data = await fetchLrclib('https://lrclib.net/api/get?' + qs.toString());
-
-    if (!data || (!data.syncedLyrics && !data.plainLyrics)) {
-      const search = await fetchLrclib(
-        'https://lrclib.net/api/search?q=' + encodeURIComponent((artist + ' ' + title).trim())
-      );
-      if (Array.isArray(search) && search.length > 0) {
-        data = search.find((x) => x && x.syncedLyrics) || search[0];
-      }
+app.get('/api/ytdiag', async (req, res) => {
+  const id = String(req.query.id || 'kXYiU_JCYtU').replace(/[^A-Za-z0-9_-]/g, '');
+  const videoUrl = 'https://www.youtube.com/watch?v=' + id;
+  const clients = ['default', 'android_vr', 'tv_embedded', 'mweb', 'web_safari'];
+  const results = {};
+  for (const client of clients) {
+    const args = ['--no-playlist', '--no-warnings', '--quiet', '-f', 'bestaudio[ext=m4a]/bestaudio/best', '--get-url'];
+    if (client !== 'default') args.push('--extractor-args', 'youtube:player_client=' + client);
+    args.push(videoUrl);
+    try {
+      const { stdout } = await runYtDlp(args, 45000);
+      const direct = stdout.trim().split(/\r?\n/)[0] || '';
+      results[client] = {
+        ok: !!direct,
+        host: (direct.match(/^https?:\/\/([^/]+)/) || [])[1] || null
+      };
+    } catch (e) {
+      results[client] = { ok: false, error: String(e.message).slice(0, 150) };
     }
-
-    const out = {
-      syncedLyrics: (data && data.syncedLyrics) || '',
-      plainLyrics: (data && data.plainLyrics) || '',
-      instrumental: !!(data && data.instrumental),
-      found: !!(data && (data.syncedLyrics || data.plainLyrics))
-    };
-
-    if (out.found) {
-      lyricsCache.set(cacheKey, out);
-      if (lyricsCache.size > 400) lyricsCache.clear();
-    }
-    res.json(out);
-  } catch (err) {
-    console.warn('[Lyrics] error:', err.message);
-    res.status(502).json({ error: 'No se pudo obtener la letra', detail: err.message, found: false });
   }
+  res.json({ id: id, mode: SERVER_MODE, clients: results });
 });
-
 
 /**
  * GET /api/search/external?q=
@@ -1449,174 +825,26 @@ app.get('/api/search/external', async (req, res) => {
     const q = (req.query.q || '').trim();
     if (!q) return res.json([]);
 
-    // Cuántos resultados devolver (el cliente pide más cuando usa filtros).
-    let maxResults = parseInt(req.query.limit, 10);
-    if (!maxResults || maxResults < 10) maxResults = 44;
-    if (maxResults > 90) maxResults = 90;
-
-    // ------------------------------------------------------------------
-    // Modo VÍDEOS: resultados de YouTube sin mezclar con audio/SoundCloud.
-    // Busca variantes amplias para que aparezcan también vídeos largos
-    // (documentales, conciertos, mixes de 1-3 h) y no sólo clips cortos.
-    // ------------------------------------------------------------------
-    if (String(req.query.mode || '').toLowerCase() === 'video') {
-      try {
-        // Si pegan una URL de YouTube, devolvemos ese vídeo directamente
-        // (con título real vía oEmbed) en lugar de buscar el texto de la URL.
-        if (/^(https?:\/\/)?(www\.|m\.|music\.)?(youtube\.com|youtu\.be)\//i.test(q)) {
-          const vid = extractYouTubeId(q);
-          if (vid) {
-            let title = 'Vídeo de YouTube';
-            let author = 'YouTube';
-            try {
-              const o = await fetch(
-                'https://www.youtube.com/oembed?url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + vid) + '&format=json',
-                { headers: { 'User-Agent': 'SonoraMusic/7.11.0' } }
-              );
-              if (o.ok) {
-                const j = await o.json();
-                if (j.title) title = j.title;
-                if (j.author_name) author = j.author_name;
-              }
-            } catch (e) {}
-            return res.json([{
-              id: 'ytv_' + vid,
-              videoId: vid,
-              title: title,
-              artist: author,
-              duration: 0,
-              durationText: '',
-              thumbnail: `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`,
-              platform: 'youtube',
-              kind: 'video',
-              views: 0,
-              ago: '',
-              isLive: false,
-              url: 'https://www.youtube.com/watch?v=' + vid
-            }]);
-          }
-        }
-
-        const yts = require('yt-search');
-        const vq = [];
-        const seenQ = new Set();
-        const addQ = (s) => {
-          const t = String(s || '').replace(/\s+/g, ' ').trim();
-          if (t && !seenQ.has(t.toLowerCase())) { seenQ.add(t.toLowerCase()); vq.push(t); }
-        };
-        addQ(q);
-        // Si la consulta ya es una URL de YouTube, no hace falta buscar.
-        if (!/youtu\.?be|youtube\.com/i.test(q)) {
-          addQ(q + ' full video');
-          addQ(q + ' documental completo');
-          addQ(q + ' en español');
-          addQ(q + ' 4k');
-        }
-
-        const batches = await Promise.allSettled(vq.slice(0, 4).map((v) => yts(v)));
-        const lists = batches.map((r) =>
-          (r.status === 'fulfilled' && r.value && r.value.videos) ? r.value.videos : []
-        );
-
-        const merged = [];
-        const seen = new Set();
-        const maxLen = lists.reduce((m, l) => Math.max(m, l.length), 0);
-        for (let round = 0; round < maxLen && merged.length < maxResults; round++) {
-          for (const list of lists) {
-            const v = list[round];
-            if (!v || !v.videoId || seen.has(v.videoId)) continue;
-            seen.add(v.videoId);
-            merged.push(v);
-            if (merged.length >= maxResults) break;
-          }
-        }
-
-        const videos = merged.map((v) => ({
-          id: 'ytv_' + v.videoId,
-          videoId: v.videoId,
-          title: v.title,
-          artist: (v.author && v.author.name) || 'YouTube',
-          duration: v.seconds || 0,
-          durationText: v.timestamp || '',
-          thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-          platform: 'youtube',
-          kind: 'video',
-          views: v.views || 0,
-          ago: v.ago || '',
-          isLive: !!v.isLive,
-          url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`
-        }));
-
-        return res.json(videos);
-      } catch (err) {
-        console.warn('[Search] modo vídeo falló:', err.message);
-        return res.status(502).json({ error: 'No se pudieron buscar vídeos', detail: err.message });
-      }
-    }
-
     const results = [];
 
-    // 1. YouTube & YouTube Music — buscamos varias variantes y las mezclamos
-    //    para que el resultado sea AMPLIO: lo oficial, las versiones largas
-    //    (1–3 h), los covers y las versiones en español. Antes se hacía una
-    //    sola búsqueda y sólo salían los primeros resultados oficiales.
+    // 1. YouTube & YouTube Music search using yt-search
     try {
       const yts = require('yt-search');
-
-      const variants = [];
-      const seenVariant = new Set();
-      const pushVariant = (v) => {
-        const t = String(v || '').replace(/\s+/g, ' ').trim();
-        if (t && t.length > 1 && !seenVariant.has(t.toLowerCase())) {
-          seenVariant.add(t.toLowerCase());
-          variants.push(t);
+      const r = await yts(q);
+      if (r && r.videos && r.videos.length > 0) {
+        for (const v of r.videos.slice(0, 18)) {
+          results.push({
+            id: 'yt_' + v.videoId,
+            videoId: v.videoId,
+            title: v.title,
+            artist: v.author ? v.author.name : 'YouTube Music',
+            duration: v.seconds || 210,
+            durationText: v.timestamp || '3:30',
+            thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+            platform: 'youtube',
+            url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`
+          });
         }
-      };
-
-      pushVariant(q);
-      if (/\b(full|completo|completa|hours?|hora|cover|covers|espa|letra|lyric|mix)\b/i.test(q)) {
-        // Ya pide algo concreto: basta con quitar matices para ampliar.
-        pushVariant(q.replace(/\b(full|completo|completa|hours?|hora|cover|covers)\b/gi, ''));
-      } else {
-        pushVariant(q + ' cover');
-        pushVariant(q + ' full');
-        pushVariant(q + ' espa\u00f1ol');
-      }
-      pushVariant(q + ' lyrics');
-
-      const batches = await Promise.allSettled(variants.slice(0, 4).map(v => yts(v)));
-      const lists = batches.map(r => (r.status === 'fulfilled' && r.value && r.value.videos) ? r.value.videos : []);
-
-      // Mezcla "por rondas": la 1ª de cada búsqueda, luego la 2ª, etc. Así
-      // conviven oficiales, covers y versiones largas en vez de copar la lista
-      // los 18 primeros de una única consulta.
-      const merged = [];
-      const seen = new Set();
-      // Reservamos un par de huecos para los resultados de SoundCloud.
-      const ytLimit = Math.max(10, maxResults - 4);
-      const maxLen = lists.reduce((m, l) => Math.max(m, l.length), 0);
-      for (let round = 0; round < maxLen && merged.length < ytLimit; round++) {
-        for (const list of lists) {
-          const v = list[round];
-          if (!v || !v.videoId || seen.has(v.videoId)) continue;
-          seen.add(v.videoId);
-          merged.push(v);
-          if (merged.length >= ytLimit) break;
-        }
-      }
-
-      for (const v of merged) {
-        results.push({
-          id: 'yt_' + v.videoId,
-          videoId: v.videoId,
-          title: v.title,
-          artist: v.author ? v.author.name : 'YouTube Music',
-          duration: v.seconds || 210,
-          durationText: v.timestamp || '3:30',
-          thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-          platform: 'youtube',
-          url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`
-        });
       }
     } catch(err) {
       console.warn('[Search] yt-search fallback:', err.message);
@@ -1659,10 +887,750 @@ app.get('/api/search/external', async (req, res) => {
       console.warn('[Search] SoundCloud error:', err.message);
     }
 
-    res.json(results.slice(0, maxResults));
+    res.json(results);
   } catch (err) {
     console.error('Error in external search:', err);
     res.status(500).json({ error: 'External search failed', message: err.message });
+  }
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+   LETRAS — resolución multi-proveedor con coincidencia estricta
+   ──────────────────────────────────────────────────────────────────────────
+   Reglas:
+   - Nunca elegir una canción solo por artista.
+   - La duración forma parte de la clave de caché.
+   - Se rechaza cualquier candidato cuyo título no coincida o cuya duración
+     se aleje demasiado (evita versiones en vivo, covers y canciones distintas).
+   - Se lanzan todas las fuentes en paralelo y gana la primera letra
+     sincronizada válida.
+   ────────────────────────────────────────────────────────────────────────── */
+
+const _lyricsCache = new Map();
+const LYRICS_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
+const LYRICS_CACHE_MAX = 3000;
+
+const NETEASE_COOKIE = 'NMTID=00OAVK3xqDG726ITU6jopU6jF2yMk0AAAGCO8l1BA; JSESSIONID-WYYY=8KQo11YK2GZP45RMlz8Kn80vHZ9%2FGvwzRKQXXy0iQoFKycWdBlQjbfT0MJrFa6hwRfmpfBYKeHliUPH287JC3hNW99WQjrh9b9RmKT%2Fg1Exc2VwHZcsqi7ITxQgfEiee50po28x5xTTZXKoP%2FRMctN2jpDeg57kdZrXz%2FD%2FWghb%5C4DuZ%3A1659124633932; _iuqxldmzr_=32; _ntes_nnid=0db6667097883aa9596ecfe7f188c3ec,1659122833973; _ntes_nuid=0db6667097883aa9596ecfe7f188c3ec; WNMCID=xygast.1659122837568.01.0; WEVNSM=1.0.0';
+
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS lyrics_cache (
+      key TEXT PRIMARY KEY,
+      payload TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+} catch (err) {
+  console.warn('[Lyrics] No se pudo crear la caché persistente:', err.message);
+}
+
+function lyricsCacheGet(key) {
+  if (_lyricsCache.has(key)) return _lyricsCache.get(key);
+
+  try {
+    const row = db.prepare('SELECT payload, updated_at FROM lyrics_cache WHERE key = ?').get(key);
+    if (row && row.payload && (Date.now() - Number(row.updated_at || 0)) < LYRICS_CACHE_TTL) {
+      const parsed = JSON.parse(row.payload);
+      _lyricsCache.set(key, parsed);
+      return parsed;
+    }
+  } catch (err) {}
+
+  return null;
+}
+
+function lyricsCacheSet(key, payload) {
+  _lyricsCache.set(key, payload);
+  if (_lyricsCache.size > LYRICS_CACHE_MAX) {
+    const first = _lyricsCache.keys().next();
+    if (!first.done) _lyricsCache.delete(first.value);
+  }
+
+  try {
+    db.prepare('INSERT OR REPLACE INTO lyrics_cache (key, payload, updated_at) VALUES (?, ?, ?)')
+      .run(key, JSON.stringify(payload), Date.now());
+  } catch (err) {}
+}
+
+function lyricsSafeString(value) {
+  return value === null || value === undefined ? '' : String(value);
+}
+
+function lyricsSqueeze(value) {
+  return lyricsSafeString(value).replace(/\s+/g, ' ').trim();
+}
+
+function lyricsLower(value) {
+  try {
+    return lyricsSqueeze(value)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[’'`´]/g, "'");
+  } catch (err) {
+    return lyricsSqueeze(value).toLowerCase();
+  }
+}
+
+function lyricsWords(value) {
+  return lyricsLower(value)
+    .replace(/[^a-z0-9\u00c0-\uffff]+/g, ' ')
+    .split(' ')
+    .filter(Boolean);
+}
+
+function lyricsCleanTitle(value) {
+  let text = lyricsSqueeze(value);
+  if (!text) return '';
+
+  const noise = /[\(\[\{][^\)\]\}]*(?:official|oficial|lyric|letra|video|audio|visualizer|visualiser|remaster|remastered|hd|hq|4k|8k|en\s*vivo|live|concert|cover|karaoke|instrumental|sped\s*up|slowed|reverb|nightcore|sub(?:titulad[oa]s?)?|traducci[oó]n|espa[nñ]ol|english|ingl[eé]s)[^\)\]\}]*[\)\]\}]/gi;
+
+  text = text.replace(/\s*\|\s*(?:official|oficial|video|audio|lyrics?|letra).*$/i, '');
+  text = text.replace(noise, ' ');
+  text = text.replace(/\b(?:official\s*(?:music\s*)?video|official\s*audio|lyric\s*video|visualizer|visualiser|letra|subtitulad[oa]s?|en\s*vivo)\b/gi, ' ');
+  text = text.replace(/\s*[-–—]\s*(?:official|oficial|lyric|letra|audio|video)\b.*$/i, ' ');
+  text = text.replace(/\s+(?:ft\.?|feat\.?|featuring)\s+.*$/i, ' ');
+  text = text.replace(/\s*[-–—]\s*topic\s*$/i, ' ');
+
+  return lyricsSqueeze(text);
+}
+
+function lyricsCleanArtist(value) {
+  let text = lyricsSqueeze(value);
+  if (!text) return '';
+  text = text.replace(/[\(\[\{][^\)\]\}]*[\)\]\}]/g, ' ');
+  text = text.replace(/\s*[-–—]\s*topic\s*$/i, ' ');
+  text = text.replace(/\bvevo\b/gi, ' ');
+  text = text.replace(/\bofficial\b/gi, ' ');
+  return lyricsSqueeze(text);
+}
+
+const LYRICS_GENERIC_ARTISTS = new Set([
+  '', 'youtube', 'youtube music', 'sonora', 'sonora music', 'topic', 'vevo',
+  'unknown', 'unknown artist', 'various artists', 'desconocido', 'artista desconocido'
+]);
+
+function lyricsIsGenericArtist(value) {
+  return LYRICS_GENERIC_ARTISTS.has(lyricsLower(value));
+}
+
+// Palabras que identifican una versión distinta de la misma canción.
+// Si la pista es "Song (Live)", no se debe usar la letra del estudio.
+const LYRICS_VERSION_WORDS_RE = /\b(live|en vivo|remix|cover|karaoke|instrumental|acoustic|demo|sped up|slowed|nightcore|reverb)\b/gi;
+
+function lyricsVersionWords(value) {
+  const text = lyricsLower(value);
+  const out = [];
+  let match;
+  LYRICS_VERSION_WORDS_RE.lastIndex = 0;
+  while ((match = LYRICS_VERSION_WORDS_RE.exec(text)) !== null) out.push(match[1]);
+  return out;
+}
+
+function lyricsHasVersionMismatch(candidateTitle, requestedVersions) {
+  const candidateVersions = lyricsVersionWords(candidateTitle);
+  const requested = requestedVersions || [];
+
+  for (const word of candidateVersions) {
+    if (!requested.includes(word)) return true;
+  }
+  for (const word of requested) {
+    if (!candidateVersions.includes(word)) return true;
+  }
+
+  return false;
+}
+
+function lyricsSplitArtistTitle(rawTitle, rawArtist) {
+  let title = lyricsSqueeze(rawTitle);
+  let artist = lyricsSqueeze(rawArtist);
+
+  const generic = !artist || ['youtube', 'youtube music', 'sonora', 'sonora music', 'topic', 'vevo', 'unknown', 'unknown artist', 'various artists', 'desconocido'].includes(lyricsLower(artist));
+  const parts = title.split(/\s+[-–—]\s+/);
+
+  if (parts.length >= 2 && generic) {
+    const maybeArtist = parts[0].trim();
+    if (maybeArtist.length <= 60) {
+      artist = maybeArtist;
+      title = parts.slice(1).join(' - ').trim();
+    }
+  }
+
+  if (artist && lyricsLower(title).indexOf(lyricsLower(artist) + ' - ') === 0) {
+    title = title.slice(artist.length + 3).trim();
+  }
+
+  artist = artist.replace(/\s*[-–—]\s*topic\s*$/i, '').trim();
+  return { title, artist };
+}
+
+function lyricsTitleSimilarity(a, b) {
+  const left = lyricsLower(a);
+  const right = lyricsLower(b);
+  if (!left || !right) return 0;
+  if (left === right) return 1;
+
+  const leftWords = lyricsWords(left);
+  const rightWords = lyricsWords(right);
+  if (!leftWords.length || !rightWords.length) return 0;
+
+  const smaller = leftWords.length <= rightWords.length ? leftWords : rightWords;
+  const bigger = leftWords.length <= rightWords.length ? rightWords : leftWords;
+  const map = new Map();
+  bigger.forEach(word => map.set(word, (map.get(word) || 0) + 1));
+
+  let hits = 0;
+  smaller.forEach(word => {
+    const count = map.get(word) || 0;
+    if (count > 0) { map.set(word, count - 1); hits++; }
+  });
+
+  const containment = hits / smaller.length;
+  const prefix = (left.indexOf(right) === 0 || right.indexOf(left) === 0) ? 0.97 : 0;
+  const compactLeft = leftWords.join('');
+  const compactRight = rightWords.join('');
+  const compact = (compactLeft.indexOf(compactRight) !== -1 || compactRight.indexOf(compactLeft) !== -1) ? 0.92 : 0;
+
+  return Math.max(containment, prefix, compact);
+}
+
+function lyricsArtistSimilarity(a, b) {
+  const left = lyricsLower(a);
+  const right = lyricsLower(b);
+  if (!left || !right) return 0.6;
+  if (left === right) return 1;
+
+  const leftWords = lyricsWords(left);
+  const rightWords = lyricsWords(right);
+  if (!leftWords.length || !rightWords.length) return 0.6;
+
+  const smaller = leftWords.length <= rightWords.length ? leftWords : rightWords;
+  const bigger = leftWords.length <= rightWords.length ? rightWords : leftWords;
+  const map = new Map();
+  bigger.forEach(word => map.set(word, (map.get(word) || 0) + 1));
+
+  let hits = 0;
+  smaller.forEach(word => {
+    const count = map.get(word) || 0;
+    if (count > 0) { map.set(word, count - 1); hits++; }
+  });
+
+  return hits / smaller.length;
+}
+
+function lyricsScore(candidate, info) {
+  const title = candidate.title || '';
+  const artist = candidate.artist || '';
+  const duration = Number(candidate.duration) || 0;
+  const genericRequested = lyricsIsGenericArtist(info.artist);
+  const hasArtist = !!lyricsSqueeze(artist);
+
+  const titleScore = lyricsTitleSimilarity(info.title, title);
+  const artistScore = (!genericRequested && info.artist && hasArtist)
+    ? lyricsArtistSimilarity(info.artist, artist)
+    : 0.6;
+  const normalizedArtistScore = (hasArtist && title && lyricsLower(artist).includes(lyricsLower(title)))
+    ? Math.min(artistScore, 0.3)
+    : artistScore;
+  const durationDiff = (info.duration > 0 && duration > 0) ? Math.abs(info.duration - duration) : null;
+
+  let score = normalizedArtistScore * 20 + titleScore * 70;
+  if (durationDiff !== null) score += Math.max(0, 10 - Math.min(10, durationDiff / 2));
+  if (candidate.syncedLyrics) {
+    score += 8;
+    // Preferir letras con timestamps por palabra.
+    if (/<\d{1,3}:\d{2}/.test(candidate.syncedLyrics)) score += 6;
+  } else if (candidate.plainLyrics) {
+    score += 2;
+  }
+
+  let ok = true;
+  if (!candidate.syncedLyrics && !candidate.plainLyrics) ok = false;
+  if (titleScore < 0.58) ok = false;
+
+  // Una versión distinta (live, remix, cover, karaoke...) tiene otra letra y
+  // otro tiempo: no se debe usar para esta pista.
+  if (lyricsHasVersionMismatch(title, info.versions)) ok = false;
+
+  // Fuentes que no distinguen versiones (lyrics.ovh) no sirven para pistas
+  // que piden explícitamente una versión concreta.
+  if (candidate.versionAgnostic && Array.isArray(info.versions) && info.versions.length) ok = false;
+
+  // El artista debe coincidir. Si la fuente no lo trae o el artista de la
+  // pista es genérico, solo se acepta con duración muy compatible.
+  if (!genericRequested && hasArtist) {
+    if (normalizedArtistScore < 0.45) ok = false;
+  } else {
+    const durationConfirmed = info.duration > 0 && duration > 0 && Math.abs(info.duration - duration) <= 5;
+    if (!durationConfirmed) ok = false;
+  }
+
+  if (durationDiff !== null && durationDiff > 12 && (titleScore < 0.97 || (Array.isArray(info.versions) && info.versions.length))) ok = false;
+
+  // Sin título/artista de la fuente solo se acepta si la duración confirma
+  // que se trata de la misma canción.
+  if (candidate.metadataMissing) {
+    const metaDurationConfirmed = info.duration > 0 && duration > 0 && Math.abs(info.duration - duration) <= 5;
+    if (!metaDurationConfirmed) ok = false;
+    else score -= 25;
+  }
+
+  return { ok, score, titleScore, artistScore: normalizedArtistScore, durationDiff };
+}
+
+const LYRICS_CREDIT_RE = /^\s*(?:作词|作曲|制作|编曲|录音|混音|母带|吉他|贝斯|鼓|键盘|和声|策划|出品|监制|发行|词|曲|演唱|原唱|lyrics?\s*by|composed\s*by|written\s*by|produced\s*by|arranged\s*by|music\s*by|songwriters?)\s*[:：]/i;
+
+function lyricsIsCredit(text) {
+  return LYRICS_CREDIT_RE.test(lyricsSafeString(text));
+}
+
+function lyricsFormatTime(seconds) {
+  const safe = Math.max(0, Number(seconds) || 0);
+  const minutes = Math.floor(safe / 60);
+  const rest = safe - minutes * 60;
+  return `${minutes < 10 ? '0' : ''}${minutes}:${rest < 10 ? '0' : ''}${rest.toFixed(2)}`;
+}
+
+function lyricsParseDuration(value) {
+  if (typeof value === 'number' && isFinite(value)) return value;
+  const text = lyricsSqueeze(value);
+  if (!text) return 0;
+  const parts = text.split(':').map(part => parseFloat(part));
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  const direct = parseFloat(text);
+  return isFinite(direct) ? direct : 0;
+}
+
+function lyricsPlainFromLrc(lrc) {
+  return lyricsSafeString(lrc)
+    .split('\n')
+    .map(line => line.replace(/\[[^\]]*\]|<[^>]*>/g, '').trim())
+    .filter(line => line.length > 0 && !lyricsIsCredit(line))
+    .join('\n');
+}
+
+async function lyricsFetchJson(url, timeoutMs = 4000, retries = 1, extraHeaders = {}) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: Object.assign({
+          'User-Agent': 'SonoraMusic/7.17.0 (https://sonora-music.app)',
+          'Accept': 'application/json'
+        }, extraHeaders),
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+
+      if (response.status === 429 || response.status === 503) {
+        if (attempt < retries) {
+          const retryAfter = parseInt(response.headers.get('retry-after') || '0', 10);
+          await new Promise(resolve => setTimeout(resolve, Math.min(2500, (retryAfter > 0 ? retryAfter * 1000 : 700) + attempt * 150)));
+          continue;
+        }
+        return null;
+      }
+
+      if (!response.ok) return null;
+      return await response.json();
+    } catch (err) {
+      if (attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+        continue;
+      }
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Detecta cabeceras de créditos que algunas fuentes (QQ Music) entregan como
+ * si fueran la primera línea de la letra: "Título - Artista", el nombre del
+ * artista, listas de compositores separadas por "/" o líneas muy cortas.
+ */
+function lyricsLooksLikeLeadingCredit(text, lineDurationMs, effectiveTitle, effectiveArtist) {
+  const low = lyricsLower(text);
+  if (!low) return true;
+
+  const titleLow = lyricsLower(effectiveTitle);
+  const artistLow = lyricsLower(effectiveArtist);
+
+  if (artistLow && low === artistLow) return true;
+  if (titleLow && low === titleLow) return true;
+
+  if (titleLow && artistLow
+    && low.includes(titleLow)
+    && low.includes(artistLow)
+    && text.length <= String(effectiveTitle).length + String(effectiveArtist).length + 30) {
+    return true;
+  }
+
+  // Líneas tipo "Nombre/Apellido/Nombre/Apellido" (compositores).
+  const slashParts = text.split('/').map(part => part.trim()).filter(Boolean);
+  if (slashParts.length >= 2) {
+    const personLike = slashParts.every(part => {
+      const pieces = part.split(/\s+/).filter(Boolean);
+      if (!pieces.length || pieces.length > 4) return false;
+      return pieces.every(piece =>
+        /^[A-ZÀ-Þ][a-zà-ÿ'’.\-]*$/.test(piece) || /^[A-Z]{2,4}$/.test(piece)
+      );
+    });
+    if (personLike) return true;
+
+    if (slashParts.length >= 3) {
+      const nameLike = slashParts.filter(part => /^[A-Za-zÀ-ÿ'".\- ]{3,}$/.test(part)).length;
+      if (nameLike >= Math.max(2, slashParts.length - 1)) return true;
+    }
+  }
+
+  // Créditos con duración casi nula (p. ej. 36–90 ms).
+  const numericDuration = Number(lineDurationMs);
+  if (numericDuration > 0 && numericDuration < 200) return true;
+
+  return false;
+}
+
+async function lyricsFromLyricsPlus(artist, title, duration) {
+  const url = `https://lyricsplus.prjktla.my.id/v2/lyrics/get?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&duration=${Math.round(duration || 0)}`;
+  const data = await lyricsFetchJson(url, 5000, 1);
+  if (!data || !Array.isArray(data.lyrics) || !data.lyrics.length) return null;
+
+  const meta = data.metadata || {};
+  let metaTitle = lyricsCleanTitle(meta.title);
+  let metaArtist = lyricsCleanArtist(meta.artist);
+  if (lyricsLower(metaTitle) === 'none') metaTitle = '';
+  if (lyricsLower(metaArtist) === 'none') metaArtist = '';
+  const effectiveTitle = metaTitle || title;
+  const effectiveArtist = metaArtist || artist;
+  const metadataMissing = !metaTitle || !metaArtist;
+  const lines = [];
+  let leading = true;
+
+  for (const item of data.lyrics) {
+    if (!item) continue;
+    const time = Number(item.time);
+    if (!isFinite(time) || time < 0) continue;
+
+    const text = lyricsSqueeze(item.text);
+    if (!text || lyricsIsCredit(text)) continue;
+
+    if (leading) {
+      if (lyricsLooksLikeLeadingCredit(text, item.duration, effectiveTitle, effectiveArtist)) continue;
+      leading = false;
+    }
+
+    let wordList = null;
+    if (Array.isArray(item.syllabus) && item.syllabus.length) {
+      wordList = [];
+      for (const syllable of item.syllabus) {
+        if (!syllable) continue;
+        const wordTime = Number(syllable.time);
+        if (!isFinite(wordTime)) continue;
+        const wordText = lyricsSafeString(syllable.text);
+        if (!wordText) continue;
+        wordList.push({
+          time: wordTime / 1000,
+          duration: (Number(syllable.duration) || 0) / 1000,
+          text: wordText
+        });
+      }
+      if (!wordList.length) wordList = null;
+    }
+
+    lines.push({ time: time / 1000, text, words: wordList });
+  }
+
+  if (!lines.length) return null;
+  lines.sort((a, b) => a.time - b.time);
+
+  const syncedLyrics = lines.map(line => {
+    const head = `[${lyricsFormatTime(line.time)}]`;
+    const body = line.words && line.words.length
+      ? line.words.map(word => `<${lyricsFormatTime(word.time)}>${word.text}`).join('')
+      : line.text;
+    return head + body;
+  }).join('\n');
+
+  return {
+    syncedLyrics,
+    plainLyrics: lines.map(line => line.text).join('\n'),
+    title: effectiveTitle,
+    artist: effectiveArtist,
+    duration: lyricsParseDuration(meta.totalDuration),
+    metadataMissing,
+    source: 'lyricsplus'
+  };
+}
+
+async function lyricsFromLrclibExact(artist, title, duration) {
+  const params = new URLSearchParams({ track_name: title });
+  if (artist) params.set('artist_name', artist);
+  if (duration > 0) params.set('duration', String(Math.round(duration)));
+
+  const data = await lyricsFetchJson(`https://lrclib.net/api/get?${params.toString()}`, 4000, 1);
+  if (!data || data.statusCode || !data.trackName) return null;
+  if (!data.syncedLyrics && !data.plainLyrics) return null;
+
+  return {
+    syncedLyrics: data.syncedLyrics || null,
+    plainLyrics: data.plainLyrics || null,
+    title: data.trackName,
+    artist: data.artistName || artist,
+    duration: Number(data.duration) || duration,
+    source: 'lrclib'
+  };
+}
+
+async function lyricsFromLrclibSearch(artist, title, duration) {
+  const query = [artist, title].filter(Boolean).join(' ');
+  let list = await lyricsFetchJson(`https://lrclib.net/api/search?q=${encodeURIComponent(query)}`, 4000, 1);
+
+  if (!Array.isArray(list) || !list.length) {
+    list = await lyricsFetchJson(`https://lrclib.net/api/search?track_name=${encodeURIComponent(title)}`, 4000, 0);
+  }
+  if (!Array.isArray(list) || !list.length) return null;
+
+  const info = { title, artist, duration };
+  let best = null;
+  let bestScore = -1;
+
+  for (const item of list) {
+    if (!item) continue;
+    const candidate = {
+      syncedLyrics: item.syncedLyrics || null,
+      plainLyrics: item.plainLyrics || null,
+      title: item.trackName || '',
+      artist: item.artistName || '',
+      duration: Number(item.duration) || 0,
+      source: 'lrclib-search'
+    };
+    const scored = lyricsScore(candidate, info);
+    if (!scored.ok) continue;
+    if (scored.score > bestScore) {
+      bestScore = scored.score;
+      best = candidate;
+    }
+  }
+
+  return best;
+}
+
+async function lyricsFromNetEase(artist, title, duration) {
+  const query = [artist, title].filter(Boolean).join(' ');
+  const searchUrl = `https://music.163.com/api/search/pc?${new URLSearchParams({
+    limit: '10',
+    type: '1',
+    offset: '0',
+    s: query
+  }).toString()}`;
+
+  const data = await lyricsFetchJson(searchUrl, 4000, 1, {
+    'Cookie': NETEASE_COOKIE,
+    'Referer': 'https://music.163.com/'
+  });
+
+  const songs = data && data.result && Array.isArray(data.result.songs) ? data.result.songs : [];
+  if (!songs.length) return null;
+
+  const info = { title, artist, duration };
+  let best = null;
+  let bestScore = -1;
+
+  for (const song of songs) {
+    if (!song) continue;
+    const songArtists = Array.isArray(song.artists) ? song.artists.map(a => a && a.name).filter(Boolean).join(', ') : '';
+    const candidate = {
+      title: song.name || '',
+      artist: songArtists,
+      duration: (Number(song.duration) || 0) / 1000
+    };
+    const scored = lyricsScore(candidate, info);
+    if (!scored.ok) continue;
+    if (scored.score > bestScore) {
+      bestScore = scored.score;
+      best = song;
+    }
+  }
+
+  if (!best) return null;
+
+  const lyricUrl = `https://music.163.com/api/song/lyric?id=${best.id}&lv=1&kv=1&tv=-1`;
+  const lyricData = await lyricsFetchJson(lyricUrl, 4000, 0, {
+    'Cookie': NETEASE_COOKIE,
+    'Referer': 'https://music.163.com/'
+  });
+
+  const lrc = lyricData && lyricData.lrc && lyricData.lrc.lyric ? lyricData.lrc.lyric : '';
+  if (!lrc || lrc.indexOf('[') === -1) return null;
+
+  return {
+    syncedLyrics: lrc,
+    plainLyrics: lyricsPlainFromLrc(lrc),
+    title: best.name || title,
+    artist: (Array.isArray(best.artists) ? best.artists.map(a => a && a.name).filter(Boolean).join(', ') : artist),
+    duration: (Number(best.duration) || 0) / 1000,
+    source: 'netease'
+  };
+}
+
+async function lyricsFromOvh(artist, title, duration) {
+  if (!artist || !title) return null;
+  const data = await lyricsFetchJson(
+    `https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`,
+    3500,
+    0
+  );
+  if (!data || !data.lyrics) return null;
+
+  return {
+    syncedLyrics: null,
+    plainLyrics: lyricsSafeString(data.lyrics).trim(),
+    title,
+    artist,
+    duration,
+    // lyrics.ovh no distingue versiones: sólo se usa cuando la pista pedida
+    // no declara live/remix/cover/etc.
+    versionAgnostic: true,
+    source: 'lyricsovh'
+  };
+}
+
+function resolveLyrics(info) {
+  return new Promise(resolve => {
+    let settled = false;
+    let bestPlain = null;
+    let bestSynced = null;
+    let syncedGraceTimer = null;
+    let remaining = 5;
+
+    const found = [];
+
+    const deadline = setTimeout(() => finish(), 7000);
+
+    function finish() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      if (syncedGraceTimer) clearTimeout(syncedGraceTimer);
+
+      if (bestSynced) found.push(bestSynced);
+      if (bestPlain) found.push(bestPlain);
+      found.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+      resolve(found);
+    }
+
+    function handle(candidate) {
+      if (settled) return;
+
+      if (candidate) {
+        const scored = lyricsScore(candidate, info);
+        if (scored.ok) {
+          candidate.score = scored.score;
+
+          if (candidate.syncedLyrics) {
+            // Si ya hay timestamps por palabra, es la mejor opción.
+            if (/<\d{1,3}:\d{2}/.test(candidate.syncedLyrics)) {
+              found.push(candidate);
+              finish();
+              return;
+            }
+
+            if (!bestSynced || candidate.score > bestSynced.score) bestSynced = candidate;
+            if (!syncedGraceTimer) {
+              syncedGraceTimer = setTimeout(finish, 220);
+            }
+            remaining--;
+            if (remaining <= 0) finish();
+            return;
+          }
+
+          if (!bestPlain) bestPlain = candidate;
+        }
+      }
+
+      remaining--;
+      if (remaining <= 0) finish();
+    }
+
+    const tasks = [
+      lyricsFromLyricsPlus(info.artist, info.title, info.duration),
+      lyricsFromLrclibExact(info.artist, info.title, info.duration),
+      lyricsFromLrclibSearch(info.artist, info.title, info.duration),
+      lyricsFromNetEase(info.artist, info.title, info.duration),
+      lyricsFromOvh(info.artist, info.title, info.duration)
+    ];
+
+    tasks.forEach(task => {
+      task.then(handle).catch(() => handle(null));
+    });
+  });
+}
+
+/**
+ * GET /api/lyrics
+ * Resuelve la letra correcta por título + artista + duración.
+ * Devuelve metadatos de la coincidencia para que el cliente pueda validarla.
+ */
+app.get('/api/lyrics', async (req, res) => {
+  try {
+    const rawArtist = String(req.query.artist || '').trim();
+    const rawTitle = String(req.query.title || '').trim();
+    const duration = parseFloat(req.query.duration) || 0;
+
+    if (!rawTitle) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+
+    const split = lyricsSplitArtistTitle(rawTitle, rawArtist);
+    const title = lyricsCleanTitle(split.title);
+    const artist = lyricsCleanArtist(split.artist);
+
+    if (!title) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+
+    const versions = lyricsVersionWords(rawTitle);
+    const versionKey = versions.slice().sort().join(',');
+    const cacheKey = `v5::${lyricsLower(artist)}::${lyricsLower(title)}::${duration > 0 ? Math.round(duration) : 0}::${versionKey}`;
+    const cached = lyricsCacheGet(cacheKey);
+    if (cached) {
+      return res.json(Object.assign({}, cached, { cached: true }));
+    }
+
+    const found = await resolveLyrics({
+      title,
+      artist,
+      duration,
+      versions
+    });
+    if (!found.length) {
+      return res.status(404).json({
+        error: 'No se encontró una letra que coincida con la canción',
+        found: false
+      });
+    }
+
+    const best = found[0];
+    const payload = {
+      syncedLyrics: best.syncedLyrics || null,
+      plainLyrics: best.plainLyrics || (best.syncedLyrics ? lyricsPlainFromLrc(best.syncedLyrics) : null),
+      matchedTitle: best.title || title,
+      matchedArtist: best.artist || artist,
+      matchedDuration: Number(best.duration) || duration,
+      source: best.source || 'unknown',
+      score: Math.round(Number(best.score) || 0),
+      cached: false
+    };
+
+    if (payload.syncedLyrics || payload.plainLyrics) {
+      lyricsCacheSet(cacheKey, payload);
+    }
+
+    return res.json(payload);
+  } catch (err) {
+    console.warn('[Lyrics] API error:', err.message);
+    return res.status(500).json({ error: 'Lyrics fetch failed', message: err.message });
   }
 });
 
@@ -1672,7 +1640,7 @@ app.get('/api/search/external', async (req, res) => {
  */
 app.get('/api/stream/external', async (req, res) => {
   try {
-    let targetUrl = normalizeYtdlpTarget(req.query.url);
+    let targetUrl = req.query.url;
     if (!targetUrl && req.query.id) {
       const cleanId = String(req.query.id).replace('yt_', '');
       targetUrl = `https://www.youtube.com/watch?v=${cleanId}`;
@@ -1689,851 +1657,478 @@ app.get('/api/stream/external', async (req, res) => {
       }
     }
 
-    if (!targetUrl) return res.status(400).json({ error: 'Falta url, id o q' });
+    if (!targetUrl) return res.status(400).send('Falta url, id o q');
+
+    // Calidad de audio elegida en Ajustes: 96/160/320 kbps.
+    const requestedQuality = String(req.query.quality || '').toLowerCase();
+    const audioBitrate = ['96k', '128k', '160k', '192k', '256k', '320k'].includes(requestedQuality)
+      ? requestedQuality
+      : ({ low: '96k', normal: '160k', high: '320k' }[requestedQuality] || '192k');
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Accept-Ranges', 'bytes');
 
-    // Resolvemos la URL directa del audio y hacemos proxy (soporta Range => seek).
-    // Plan A: caché. Plan B: yt-dlp. Plan C: Invidious.
-    // Plan D (red de seguridad): generar el audio en el servidor y servirlo
-    // desde disco, que es la vía de las descargas y sí funciona desde Render.
-    if (String(req.query.force || '') === 'file') {
-      console.log('[Stream] forzado el plan D (diagnóstico)');
-      if (await serveGeneratedAudio(targetUrl, req, res)) return;
-      return res.status(502).json({ error: 'El plan D (generar el audio) falló' });
-    }
+    // Clean streaming flags: --quiet and --no-progress prevent text logs from polluting the audio stream
+    const ytdlpArgs = [
+      '--no-playlist',
+      '--no-progress',
+      '--quiet',
+      '--no-warnings',
+      '-f', 'bestaudio/best',
+      '-o', '-',
+      targetUrl
+    ];
 
-    // En Render (IP de datacenter) YouTube no deja proxificar el audio: la
-    // petición al CDN vuelve como página de error y perderíamos 45 s de espera
-    // para nada. Ahí la vía fiable es generar el fichero en el servidor —lo
-    // mismo que hacen las descargas, ya verificado— y servirlo desde disco.
-    // En local el proxy sí funciona y es más rápido (7 s la primera vez), así
-    // que se mantiene el camino completo.
-    if (SERVER_MODE === 'render') {
-      console.log('[Stream] servidor en la nube -> generamos el audio (plan D)');
-      if (await serveGeneratedAudio(targetUrl, req, res)) return;
-      return res.status(502).json({
-        error: 'No se pudo obtener el audio de esta canción',
-        detail: 'El servidor no pudo generar el audio'
+    const proc = spawn(YTDLP_BIN, withCookies(ytdlpArgs));
+
+    // If ffmpeg is available, pipe through ffmpeg to guarantee valid MP3 frames
+    if (FFMPEG_BIN && fs.existsSync(FFMPEG_BIN)) {
+      const ffmpegArgs = [
+        '-i', 'pipe:0',
+        '-vn',
+        '-f', 'mp3',
+        '-acodec', 'libmp3lame',
+        '-b:a', audioBitrate,
+        '-ar', '44100',
+        'pipe:1'
+      ];
+      const ffmpegProc = spawn(FFMPEG_BIN, ffmpegArgs);
+      proc.stdout.pipe(ffmpegProc.stdin);
+      ffmpegProc.stdout.pipe(res);
+
+      proc.on('error', (err) => {
+        console.error('[Stream] yt-dlp error:', err.message);
+        if (!res.headersSent) res.status(500).send('Error en streaming');
       });
-    }
-
-    let lastResolveError = '';
-    let directUrl = getResolvedUrl(targetUrl);
-    if (directUrl) {
-      console.log('[Stream] URL de audio reutilizada de la caché');
+      ffmpegProc.on('error', (err) => {
+        console.error('[Stream] ffmpeg error:', err.message);
+      });
+      res.on('close', () => {
+        try { proc.kill(); } catch (e) {}
+        try { ffmpegProc.kill(); } catch (e) {}
+      });
     } else {
-      try {
-        directUrl = await ytdlpResolveAudioUrl(targetUrl);
-        if (directUrl) setResolvedUrl(targetUrl, directUrl);
-      } catch (ytErr) {
-        lastResolveError = ytErr.message;
-        console.warn('[Stream] yt-dlp falló: ' + ytErr.message);
-      }
-    }
-    if (!directUrl) {
-      const vid = extractYouTubeId(targetUrl);
-      if (vid) {
-        try { directUrl = await resolveViaInvidious(vid); } catch (e) {}
-      }
-    }
-
-    if (!directUrl) {
-      if (await serveGeneratedAudio(targetUrl, req, res)) return;
-      return res.status(502).json({
-        error: 'No se pudo obtener el audio de esta canción',
-        detail: lastResolveError || 'YouTube bloqueó la descarga y los servidores alternativos no respondieron'
+      proc.stdout.pipe(res);
+      proc.on('error', (err) => {
+        console.error('[Stream] error:', err.message);
+        if (!res.headersSent) res.status(500).send('Error en streaming');
+      });
+      res.on('close', () => {
+        try { proc.kill(); } catch (e) {}
       });
     }
+  } catch (outerErr) {
+    console.error('[Stream] Fatal route error:', outerErr);
+    if (!res.headersSent) res.status(500).send('Error interno en streaming');
+  }
+});
 
-    console.log('[Stream] proxy ->', directUrl.substring(0, 80) + '...');
-    return proxyAudioStream(directUrl, req, res, async (status, ct) => {
-      console.warn('[Stream] el CDN rechazó el audio (HTTP ' + status + ' ' + ct + '); paso al plan D');
-      if (await serveGeneratedAudio(targetUrl, req, res)) return;
-      if (!res.headersSent) {
-        res.status(502).json({
-          error: 'El CDN de YouTube rechazó el audio',
-          detail: 'HTTP ' + (status || '?') + ' ' + (ct || 'sin content-type')
-        });
+/* ──────────────────────────────────────────────────────────────────────────
+   VIDEO — proxy de video/audio y subtítulos con yt-dlp
+   El reproductor propio (public/js/video-player.js) pide dos pistas
+   sincronizadas: mode=video y mode=audio. Estas rutas no existían y el
+   cliente caía siempre al iframe de YouTube.
+   ────────────────────────────────────────────────────────────────────────── */
+
+const VIDEO_URL_CACHE = new Map();
+const VIDEO_URL_TTL = 10 * 60 * 1000;
+
+/** Ejecuta yt-dlp y devuelve stdout/stderr con timeout y limpieza. */
+function runYtDlp(args, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    let finished = false;
+    let proc;
+    try {
+      proc = spawn(YTDLP_BIN, withCookies(args));
+    } catch (e) {
+      reject(e);
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      try { proc.kill('SIGKILL'); } catch (e) {}
+      reject(new Error('yt-dlp timeout'));
+    }, timeoutMs || 20000);
+
+    proc.stdout.on('data', (d) => { stdout += d; });
+    proc.stderr.on('data', (d) => {
+      stderr += d;
+      if (stderr.length > 20000) stderr = stderr.slice(-20000);
+    });
+    proc.on('error', (err) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+    proc.on('close', (code) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (code === 0) resolve({ stdout, stderr });
+      else {
+        const lastLine = stderr.trim().split('\n').filter(Boolean).pop() || ('yt-dlp exited with ' + code);
+        reject(new Error(lastLine));
       }
     });
-  } catch (outerErr) {
-    console.error('[Stream] Fatal route error:', outerErr.message);
-    if (!res.headersSent) {
-      res.status(502).json({
-        error: 'No se pudo iniciar el streaming',
-        detail: outerErr.message
+  });
+}
+
+/**
+ * Ejecuta yt-dlp probando varios "player clients" de YouTube. En Render el
+ * cliente por defecto a veces exige PO token; tv_embedded/android_vr suelen
+ * pasar. El primer intento mantiene el comportamiento normal.
+ */
+async function runYtDlpWithFallback(baseArgs, timeoutMs) {
+  let lastErr = null;
+  for (const client of YT_CLIENT_FALLBACKS) {
+    const args = baseArgs.slice();
+    if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
+    try {
+      return await runYtDlp(args, timeoutMs);
+    } catch (e) {
+      lastErr = e;
+      const msg = String((e && e.message) || '');
+      if (!YT_FALLBACK_ERROR.test(msg)) throw e;
+    }
+  }
+  throw lastErr || new Error('yt-dlp falló');
+}
+
+function videoFormatSpec(mode, quality) {
+  const height = Math.max(144, Math.min(2160, parseInt(String(quality).replace('p', ''), 10) || 720));
+  if (mode === 'audio') return 'bestaudio[ext=m4a]/bestaudio';
+  // El cliente reproduce video (mudo) + audio en elementos separados, así
+  // que pedimos una pista de video sola, no un MP4 combinado.
+  return 'bestvideo[height<=' + height + '][ext=mp4]/bestvideo[height<=' + height + ']/best[height<=' + height + '][ext=mp4]/best[height<=' + height + ']';
+}
+
+function videoCacheGet(key) {
+  const rec = VIDEO_URL_CACHE.get(key);
+  if (!rec) return null;
+  if (Date.now() > rec.expires) {
+    VIDEO_URL_CACHE.delete(key);
+    return null;
+  }
+  return rec.url;
+}
+
+function videoCacheSet(key, url) {
+  // Evita crecer sin límite en servidores de larga vida.
+  if (VIDEO_URL_CACHE.size > 200) {
+    const oldest = VIDEO_URL_CACHE.keys().next().value;
+    if (oldest) VIDEO_URL_CACHE.delete(oldest);
+  }
+  VIDEO_URL_CACHE.set(key, { url: url, expires: Date.now() + VIDEO_URL_TTL });
+}
+
+/** Redirige/proxya una URL directa de googlevideo manteniendo Range. */
+function proxyVideoToClient(sourceUrl, req, res, redirectsLeft) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    let parsed;
+    try { parsed = new URL(sourceUrl); } catch (e) {
+      done({ ok: false, status: 400, error: 'URL de medios inválida' });
+      return;
+    }
+
+    const mod = parsed.protocol === 'https:' ? https : http;
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+      'Accept': '*/*'
+    };
+    if (req.headers.range) headers.Range = req.headers.range;
+    if (req.headers['if-range']) headers['If-Range'] = req.headers['if-range'];
+
+    const upstream = mod.get(parsed, { headers }, (pres) => {
+      const code = pres.statusCode || 0;
+
+      if ([301, 302, 303, 307, 308].includes(code) && pres.headers.location && redirectsLeft > 0) {
+        pres.resume();
+        const next = new URL(pres.headers.location, sourceUrl).href;
+        proxyVideoToClient(next, req, res, redirectsLeft - 1).then(done);
+        return;
+      }
+
+      if (code === 403 || code === 410) {
+        pres.resume();
+        done({ ok: false, forbidden: true, status: code, error: 'Medios caducados' });
+        return;
+      }
+
+      if (code !== 200 && code !== 206) {
+        pres.resume();
+        done({ ok: false, status: code, error: 'Upstream HTTP ' + code });
+        return;
+      }
+
+      try {
+        res.status(code);
+        ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag'].forEach((h) => {
+          if (pres.headers[h]) res.setHeader(h, pres.headers[h]);
+        });
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+        if (!res.getHeader('Accept-Ranges')) res.setHeader('Accept-Ranges', 'bytes');
+        if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      } catch (e) {}
+
+      pres.pipe(res);
+      pres.on('end', () => done({ ok: true, status: code }));
+      pres.on('error', (err) => {
+        try { res.destroy(err); } catch (e) {}
+        done({ ok: false, error: err.message });
       });
+    });
+
+    upstream.on('error', (err) => done({ ok: false, error: err.message }));
+    upstream.setTimeout(30000, () => {
+      try { upstream.destroy(new Error('upstream timeout')); } catch (e) {}
+      done({ ok: false, error: 'upstream timeout' });
+    });
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        try { upstream.destroy(); } catch (e) {}
+      }
+    });
+  });
+}
+
+/**
+ * GET /api/video/stream?url=...&quality=720p&mode=video|audio
+ * Devuelve la pista de video o audio proxificada con soporte de Range,
+ * para que el reproductor pueda buscar (seek) sin descargar todo el video.
+ */
+app.get('/api/video/stream', async (req, res) => {
+  const targetUrl = req.query.url;
+  if (!targetUrl) return res.status(400).json({ error: 'Falta el parámetro url' });
+
+  const mode = req.query.mode === 'audio' ? 'audio' : 'video';
+  const quality = req.query.quality || '720p';
+  const formatSpec = videoFormatSpec(mode, quality);
+  const cacheKey = String(targetUrl) + '|' + formatSpec;
+
+  const resolveDirect = async (force) => {
+    if (!force) {
+      const cached = videoCacheGet(cacheKey);
+      if (cached) return cached;
+    }
+    const { stdout } = await runYtDlpWithFallback([
+      '--no-playlist', '--no-warnings', '--no-progress',
+      '-f', formatSpec, '-g', '--', String(targetUrl)
+    ], 40000);
+    const direct = stdout.trim().split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0];
+    if (!direct) throw new Error('yt-dlp no devolvió una URL de medios');
+    videoCacheSet(cacheKey, direct);
+    return direct;
+  };
+
+  try {
+    let direct = await resolveDirect(false);
+    let result = await proxyVideoToClient(direct, req, res, 3);
+
+    // La URL de googlevideo caducó: se invalida y se extrae de nuevo una vez.
+    if (!result.ok && result.forbidden) {
+      VIDEO_URL_CACHE.delete(cacheKey);
+      direct = await resolveDirect(true);
+      result = await proxyVideoToClient(direct, req, res, 3);
+    }
+
+    if (!result.ok && !res.headersSent) {
+      res.status(result.status && result.status >= 400 && result.status < 600 ? result.status : 502)
+        .json({ error: result.error || 'No se pudo abrir el medio' });
+    }
+  } catch (err) {
+    console.warn('[Video] stream error:', err.message);
+    if (!res.headersSent) res.status(502).json({ error: 'No se pudo preparar el video', message: err.message });
+    else { try { res.end(); } catch (e) {} }
+  }
+});
+
+/**
+ * GET /api/video/info?url=...
+ * Metadatos reales (título, duración, calidades y subtítulos disponibles).
+ */
+app.get('/api/video/info', async (req, res) => {
+  const targetUrl = req.query.url;
+  if (!targetUrl) return res.status(400).json({ error: 'Falta el parámetro url' });
+  try {
+    const { stdout } = await runYtDlpWithFallback([
+      '--dump-single-json', '--no-playlist', '--no-warnings', '--no-progress', '--', String(targetUrl)
+    ], 45000);
+    const info = JSON.parse(stdout);
+
+    const heights = [];
+    (info.formats || []).forEach((f) => {
+      if (!f || !f.height || !f.vcodec || f.vcodec === 'none') return;
+      if (!heights.includes(f.height)) heights.push(f.height);
+    });
+    heights.sort((a, b) => b - a);
+
+    const subtitleMap = {};
+    [info.subtitles, info.automatic_captions].forEach((group, idx) => {
+      if (!group || typeof group !== 'object') return;
+      Object.keys(group).forEach((lang) => {
+        if (!subtitleMap[lang]) subtitleMap[lang] = { lang: lang, label: lang, auto: idx === 1 };
+      });
+    });
+
+    res.json({
+      title: info.title || '',
+      author: info.uploader || info.channel || '',
+      duration: Number(info.duration) || 0,
+      thumbnail: info.thumbnail || '',
+      viewCount: Number(info.view_count) || 0,
+      qualities: heights.map((h) => ({ height: h, label: h + 'p', container: 'mp4' })),
+      subtitles: Object.values(subtitleMap)
+    });
+  } catch (err) {
+    console.warn('[Video] info error:', err.message);
+    res.status(502).json({ error: 'No se pudo obtener la información del video', message: err.message });
+  }
+});
+
+/** Convierte SRT simple a WebVTT (el elemento <track> exige WEBVTT). */
+function srtToVtt(text) {
+  const body = String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/^\uFEFF/, '')
+    .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+  return 'WEBVTT\n\n' + body.replace(/^\d+\s*$/gm, '').trim() + '\n';
+}
+
+/**
+ * GET /api/video/subtitles?url=...&lang=es&auto=1
+ * Descarga subtítulos (manuales o automáticos) y los devuelve como VTT.
+ */
+app.get('/api/video/subtitles', async (req, res) => {
+  const targetUrl = req.query.url;
+  const lang = String(req.query.lang || 'es').toLowerCase();
+  if (!targetUrl) return res.status(400).json({ error: 'Falta el parámetro url' });
+  if (!/^[a-z]{2,3}(-[a-z0-9]{2,8})?$/.test(lang)) {
+    return res.status(400).json({ error: 'Idioma no válido' });
+  }
+
+  let tmpDir = '';
+  try {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sonora-subs-'));
+    const outTemplate = path.join(tmpDir, 'sub');
+    await runYtDlpWithFallback([
+      '--no-playlist', '--no-warnings', '--no-progress', '--skip-download',
+      '--write-subs', '--write-auto-subs',
+      '--sub-langs', lang + ',es,en',
+      '--sub-format', 'vtt/srt/best',
+      '-o', outTemplate,
+      '--', String(targetUrl)
+    ], 45000);
+
+    const files = fs.readdirSync(tmpDir).filter((f) => /\.(vtt|srt)$/i.test(f));
+    if (!files.length) {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(404).json({ error: 'Sin subtítulos disponibles' });
+    }
+
+    // Preferimos el idioma pedido; si no, español y luego inglés.
+    const rank = (f) => {
+      const lower = f.toLowerCase();
+      if (lower.includes('.' + lang + '.')) return 0;
+      if (lower.includes('.es.')) return 1;
+      if (lower.includes('.en.')) return 2;
+      return 3;
+    };
+    files.sort((a, b) => rank(a) - rank(b));
+    const filePath = path.join(tmpDir, files[0]);
+    let text = fs.readFileSync(filePath, 'utf8');
+    if (!/^\uFEFF?WEBVTT/.test(text)) text = srtToVtt(text);
+
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.send(text);
+  } catch (err) {
+    console.warn('[Video] subtitles error:', err.message);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(404).json({ error: 'No se pudieron obtener los subtítulos', message: err.message });
+  } finally {
+    if (tmpDir) {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
     }
   }
 });
 
-// ---------------------------------------------------------------------------
-// Descarga real a archivo temporal (yt-dlp + ffmpeg en el servidor)
-// ---------------------------------------------------------------------------
-function runOnce(bin, args) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(bin, args);
-    let err = '';
-    proc.stdout.on('data', () => {});
-    proc.stderr.on('data', (d) => { err += d.toString(); });
-    proc.on('error', reject);
-    proc.on('close', (code) => {
-      if (code === 0) return resolve();
-      const lines = err.trim().split('\n').filter(Boolean);
-      reject(new Error(lines.slice(-2).join(' | ') || ('código ' + code)));
-    });
-  });
-}
-
-function findGeneratedFiles(dir, prefix) {
-  try {
-    return fs.readdirSync(dir)
-      .filter((f) => f.startsWith(prefix))
-      .map((f) => {
-        const p = path.join(dir, f);
-        let size = 0;
-        try { size = fs.statSync(p).size; } catch (e) {}
-        return { name: f, path: p, size };
-      })
-      .filter((f) => f.size > 1024)
-      .sort((a, b) => b.size - a.size);
-  } catch (e) {
-    return [];
-  }
-}
-
-/**
- * Descarga con yt-dlp probando varios player clients hasta lograr el archivo.
- */
-async function ytdlpDownloadToFile(baseArgs, targetUrl, tmpDir, stamp) {
-  let lastError = '';
-  for (let i = 0; i < YT_CLIENT_FALLBACKS.length; i++) {
-    const client = YT_CLIENT_FALLBACKS[i];
-    const prefix = `sonora_${stamp}_${i}_`;
-    const template = path.join(tmpDir, prefix + '%(ext)s');
-    const args = withCookies(baseArgs);
-    if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
-    args.push('-o', template, targetUrl);
-    try {
-      await runOnce(YTDLP_BIN, args);
-      const files = findGeneratedFiles(tmpDir, prefix);
-      if (files.length > 0) return files[0].path;
-      lastError = 'yt-dlp no generó archivo';
-    } catch (e) {
-      lastError = e.message;
-      console.warn('[Download] client=' + (client || 'default') + ' falló: ' + lastError);
-    }
-  }
-  throw new Error(lastError || 'No se pudo descargar el archivo');
-}
-
-// ---------------------------------------------------------------------------
-// Plan B: resolver el audio por Invidious cuando YouTube bloquea el servidor
-// ---------------------------------------------------------------------------
-const INVIDIOUS_INSTANCES = [
-  'https://invidious.privacyredirect.com',
-  'https://inv.nadeko.net',
-  'https://invidious.nerdvpn.de',
-  'https://yewtu.be',
-  'https://invidious.fdn.fr',
-  'https://iv.melmac.space'
-];
-
-function extractYouTubeId(input) {
-  const s = String(input || '');
-  let m = s.match(/[?&]v=([A-Za-z0-9_-]{11})/);
-  if (m) return m[1];
-  m = s.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
-  if (m) return m[1];
-  m = s.match(/\/embed\/([A-Za-z0-9_-]{11})/);
-  if (m) return m[1];
-  m = s.match(/^([A-Za-z0-9_-]{11})$/);
-  if (m) return m[1];
-  return null;
-}
-
-/**
- * La app, cuando una canción no trae videoId, manda como respaldo una URL de
- * RESULTADOS de búsqueda de YouTube. yt-dlp no sabe abrir esa URL, así que la
- * convertimos a su búsqueda nativa (ytsearch1:) para que la descarga y el
- * streaming funcionen igualmente.
- */
-function normalizeYtdlpTarget(targetUrl) {
-  if (!targetUrl) return targetUrl;
-  const s = String(targetUrl).trim();
-
-  // https://www.youtube.com/results?search_query=artista+cancion
-  const m = s.match(/youtube\.com\/results\?[^#]*?search_query=([^&]+)/i);
-  if (m) {
-    let q = m[1];
-    try { q = decodeURIComponent(q.replace(/\+/g, ' ')); } catch (e) {}
-    return 'ytsearch1:' + q;
-  }
-
-  // https://music.youtube.com/search?q=artista+cancion
-  if (/music\.youtube\.com\/search/i.test(s)) {
-    try {
-      const q = new URL(s).searchParams.get('q');
-      if (q) return 'ytsearch1:' + q;
-    } catch (e) {}
-  }
-
-  return s;
-}
-
-async function resolveViaInvidious(videoId) {
-  for (const base of INVIDIOUS_INSTANCES) {
-    try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 12000);
-      const r = await fetch(base + '/api/v1/videos/' + videoId, {
-        headers: { 'User-Agent': 'SonoraMusic/7.10.0' },
-        signal: ctrl.signal
-      });
-      clearTimeout(t);
-      if (!r.ok) continue;
-      const data = await r.json();
-
-      const fmts = (data.adaptiveFormats || []).filter(
-        (f) => typeof f.type === 'string' && f.type.indexOf('audio/') === 0 && f.url
-      );
-      if (!fmts.length) continue;
-
-      // Preferimos audio/mp4 (AAC), que es el más compatible
-      fmts.sort((a, b) => (/audio\/mp4/.test(b.type) ? 1 : 0) - (/audio\/mp4/.test(a.type) ? 1 : 0));
-
-      let u = fmts[0].url;
-      if (u.startsWith('/')) u = base + u;
-      if (u.indexOf('/videoplayback') !== -1 && u.indexOf('local=') === -1) u += '&local=true';
-      console.log('[Fallback] Invidious OK via ' + base);
-      return u;
-    } catch (e) {
-      console.warn('[Fallback] Invidious ' + base + ' falló: ' + e.message);
-    }
-  }
-  return null;
-}
-
-/**
- * Convierte cualquier fuente de audio accesible por URL a un MP3 en disco.
- */
-function ffmpegTranscodeToFile(sourceUrl, outPath, title, artist) {
-  return new Promise((resolve, reject) => {
-    const args = [
-      '-y', '-loglevel', 'error',
-      '-i', sourceUrl,
-      '-vn', '-acodec', 'libmp3lame', '-b:a', '320k', '-ar', '44100',
-      '-metadata', 'title=' + (title || ''),
-      '-metadata', 'artist=' + (artist || ''),
-      outPath
-    ];
-    const proc = spawn(FFMPEG_BIN, args);
-    let err = '';
-    proc.stderr.on('data', (d) => { err += d.toString(); });
-    proc.on('error', reject);
-    proc.on('close', (code) => {
-      if (code === 0) return resolve(outPath);
-      const lines = err.trim().split('\n').filter(Boolean);
-      reject(new Error(lines.slice(-2).join(' | ') || ('ffmpeg código ' + code)));
-    });
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Caché de descargas (evita reconvertir la misma canción dos veces)
-// ---------------------------------------------------------------------------
-const CACHE_DIR = path.join(os.tmpdir(), 'sonora-cache');
-const CACHE_TTL = 30 * 60 * 1000; // 30 minutos
-
-function downloadCachePath(targetUrl, format, quality) {
-  const key = crypto.createHash('sha1')
-    .update(String(targetUrl) + '|' + format + '|' + quality)
-    .digest('hex');
-  return path.join(CACHE_DIR, key + '.' + (format === 'mp4' ? 'mp4' : 'mp3'));
-}
-
-function getCachedDownload(cachePath) {
-  try {
-    const st = fs.statSync(cachePath);
-    if (st.size > 1024 && (Date.now() - st.mtimeMs) < CACHE_TTL) return cachePath;
-  } catch (e) {}
-  return null;
-}
-
-function pruneDownloadCache() {
-  try {
-    const now = Date.now();
-    for (const f of fs.readdirSync(CACHE_DIR)) {
-      const p = path.join(CACHE_DIR, f);
-      try {
-        const st = fs.statSync(p);
-        if (now - st.mtimeMs > CACHE_TTL) fs.unlinkSync(p);
-      } catch (e) {}
-    }
-  } catch (e) {}
-}
-
 /**
  * GET /api/download/external
- * Descarga real en MP3 (320/192/128k) o MP4 (1080/720/360p) con metadatos.
- * Usa caché en disco y devuelve un error real (502) si algo falla.
+ * Downloads in chosen format (MP3: 320k/192k/128k, MP4: 1080p/720p/360p) with embedded ID3 metadata & thumbnail
  */
-app.get('/api/download/external', async (req, res) => {
-  const targetUrl = normalizeYtdlpTarget(req.query.url);
+app.get('/api/download/external', (req, res) => {
+  const targetUrl = req.query.url;
   const format = (req.query.format || 'mp3').toLowerCase();
   const quality = (req.query.quality || (format === 'mp3' ? '320k' : '720p')).toLowerCase();
   const title = (req.query.title || 'Cancion').replace(/[/\\?%*:|"<>]/g, '_').trim();
   const artist = (req.query.artist || 'Sonora').replace(/[/\\?%*:|"<>]/g, '_').trim();
 
-  if (!targetUrl) return res.status(400).json({ error: 'Falta el parámetro url' });
+  if (!targetUrl) {
+    return res.status(400).send('Falta el parámetro url');
+  }
 
   const filename = `${artist} - ${title}.${format}`;
-  const tmpDir = path.join(os.tmpdir(), 'sonora-downloads');
-  try { fs.mkdirSync(tmpDir, { recursive: true }); } catch (e) {}
-  const stamp = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
 
-  let baseArgs;
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+
   if (format === 'mp3') {
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+
     const q = ['320k', '192k', '128k'].includes(quality) ? quality : '320k';
-    baseArgs = [
-      '--no-playlist', '--no-warnings', '--no-check-certificates',
-      '-x', '--audio-format', 'mp3', '--audio-quality', q,
-      '--add-metadata', '--embed-thumbnail'
-    ];
+    // Embed ID3 metadata (artist, title) and embedded cover thumbnail
+    const args = ['-x', '--audio-format', 'mp3', '--audio-quality', q, '--add-metadata', '--embed-thumbnail', '-o', '-', targetUrl];
+    const proc = spawn(YTDLP_BIN, withCookies(args));
+
+    proc.stdout.pipe(res);
+    proc.stderr.on('data', () => {});
+    proc.on('error', err => {
+      console.error('[Download] yt-dlp error:', err);
+      if (!res.headersSent) res.status(500).send('Error procesando descarga');
+    });
+    res.on('close', () => proc.kill());
   } else {
+    // MP4 Video
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+
     let formatSpec = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
-    if (quality === '1080p') formatSpec = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best';
-    else if (quality === '720p') formatSpec = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best';
-    else if (quality === '360p') formatSpec = 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360]/best';
-    baseArgs = [
-      '--no-playlist', '--no-warnings', '--no-check-certificates',
-      '-f', formatSpec, '--merge-output-format', 'mp4', '--add-metadata'
-    ];
-  }
-
-  // 1) ¿Está ya en caché?
-  const cachePath = downloadCachePath(targetUrl, format, quality);
-  let filePath = getCachedDownload(cachePath);
-  let isCached = !!filePath;
-
-  // 2) Si no, generarlo
-  if (!filePath) {
-    let generated = null;
-    try {
-      generated = await ytdlpDownloadToFile(baseArgs, targetUrl, tmpDir, stamp);
-    } catch (err) {
-      console.warn('[Download] yt-dlp falló: ' + err.message);
-      // Plan B: Invidious + ffmpeg (solo audio MP3)
-      const vid = extractYouTubeId(targetUrl);
-      if (vid && FFMPEG_BIN && format === 'mp3') {
-        const src = await resolveViaInvidious(vid);
-        if (src) {
-          const outPath = path.join(tmpDir, 'sonora_' + stamp + '_fb.mp3');
-          try {
-            await ffmpegTranscodeToFile(src, outPath, title, artist);
-            generated = outPath;
-            console.log('[Download] recuperado por plan B (Invidious + ffmpeg)');
-          } catch (ffErr) {
-            console.error('[Download] plan B falló: ' + ffErr.message);
-            return res.status(502).json({
-              error: 'No se pudo descargar la canción',
-              detail: err.message + ' / ' + ffErr.message
-            });
-          }
-        }
-      }
-      if (!generated) {
-        return res.status(502).json({
-          error: 'No se pudo descargar ni convertir la canción',
-          detail: err.message
-        });
-      }
+    if (quality === '1080p') {
+      formatSpec = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best';
+    } else if (quality === '720p') {
+      formatSpec = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best';
+    } else if (quality === '360p') {
+      formatSpec = 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360]/best';
     }
 
-    try {
-      fs.mkdirSync(CACHE_DIR, { recursive: true });
-      fs.copyFileSync(generated, cachePath);
-      fs.unlinkSync(generated);
-      filePath = cachePath;
-      isCached = true;
-    } catch (copyErr) {
-      filePath = generated;
-    }
-    pruneDownloadCache();
-  } else {
-    console.log('[Download] servido desde caché:', cachePath);
-  }
+    const args = ['-f', formatSpec, '--add-metadata', '-o', '-', targetUrl];
+    const proc = spawn(YTDLP_BIN, withCookies(args));
 
-  let size = 0;
-  try { size = fs.statSync(filePath).size; } catch (e) {}
-  if (!size) return res.status(502).json({ error: 'El archivo generado está vacío' });
-
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length');
-  res.setHeader('Content-Type', format === 'mp4' ? 'video/mp4' : 'audio/mpeg');
-  res.setHeader('Content-Length', size);
-  // El nombre debe ir SIN codificar en "filename" (si no, Android genera
-  // nombres rotos del tipo ".mp3"); el nombre con acentos va en filename*.
-  const asciiName = filename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
-  res.setHeader('Content-Disposition',
-    `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
-
-  const cleanup = () => { if (!isCached) { try { fs.unlinkSync(filePath); } catch (e) {} } };
-  const stream = fs.createReadStream(filePath);
-  stream.on('error', (e) => {
-    console.error('[Download] stream error:', e.message);
-    cleanup();
-    if (!res.headersSent) res.status(500).end();
-  });
-  stream.on('close', cleanup);
-  res.on('close', () => { try { stream.destroy(); } catch (e) {} cleanup(); });
-  stream.pipe(res);
-});
-
-// ---------------------------------------------------------------------------
-// VÍDEOS: información, subtítulos y stream de respaldo
-// ---------------------------------------------------------------------------
-const VIDEO_INFO_CACHE = new Map();
-const VIDEO_INFO_TTL = 15 * 60 * 1000;
-const VIDEO_SUBS_CACHE = new Map();
-const VIDEO_SUBS_TTL = 60 * 60 * 1000;
-
-/** Ejecuta un binario y devuelve stdout completo (no sólo la 1ª línea). */
-function runCaptureFull(bin, args, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(bin, args);
-    let out = '';
-    let err = '';
-    let done = false;
-    const timer = setTimeout(() => {
-      if (done) return;
-      done = true;
-      try { proc.kill('SIGKILL'); } catch (e) {}
-      reject(new Error('timeout'));
-    }, timeoutMs || 60000);
-
-    proc.stdout.on('data', (d) => { out += d.toString(); });
-    proc.stderr.on('data', (d) => { err += d.toString(); });
-    proc.on('error', (e) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      reject(e);
+    proc.stdout.pipe(res);
+    proc.stderr.on('data', () => {});
+    proc.on('error', err => {
+      console.error('[Download] yt-dlp error:', err);
+      if (!res.headersSent) res.status(500).send('Error procesando descarga');
     });
-    proc.on('close', (code) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      if (code === 0 && out.trim()) return resolve(out);
-      const lines = err.trim().split('\n').filter(Boolean);
-      reject(new Error(lines.slice(-2).join(' | ') || ('código ' + code)));
-    });
-  });
-}
-
-/** Traduce errores feos de yt-dlp a mensajes entendibles. */
-function friendlyVideoError(msg) {
-  const s = String(msg || '');
-  if (/429|too many requests/i.test(s)) {
-    return 'YouTube limitó las peticiones (HTTP 429). Espera unos minutos y vuelve a intentarlo.';
+    res.on('close', () => proc.kill());
   }
-  if (/sign in to confirm|not a bot|cookies/i.test(s)) {
-    return 'YouTube pidió verificación para este vídeo. Prueba a reproducirlo online o espera un rato.';
-  }
-  if (/timeout/i.test(s)) {
-    return 'YouTube tardó demasiado en responder. Inténtalo de nuevo.';
-  }
-  if (/private|unavailable|not available/i.test(s)) {
-    return 'Este vídeo no está disponible o es privado.';
-  }
-  return s || 'No se pudo procesar el vídeo';
-}
-
-async function ytdlpVideoInfo(targetUrl) {
-  const cached = VIDEO_INFO_CACHE.get(targetUrl);
-  if (cached && cached.exp > Date.now()) return cached.data;
-
-  const baseArgs = [
-    '--no-playlist', '--no-warnings', '--no-check-certificates',
-    '--skip-download', '--dump-single-json'
-  ];
-
-  // Los clientes se prueban EN PARALELO: antes, si el primero tardaba 40 s,
-  // el modal del vídeo se quedaba sin calidades aunque el segundo hubiera
-  // respondido en 3 s.
-  const errors = [];
-  const result = await new Promise((resolve) => {
-    let pending = 0;
-    let settled = false;
-
-    const launch = (client) => {
-      pending++;
-      const args = withCookies(baseArgs.slice());
-      if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
-      args.push(targetUrl);
-      runCaptureFull(YTDLP_BIN, args, 45000).then((raw) => {
-        if (settled) return;
-        let info = null;
-        try { info = JSON.parse(raw); } catch (e) { info = null; }
-        if (!info || !info.title) {
-          errors.push((client || 'default') + ': respuesta inválida');
-        } else {
-          settled = true;
-          VIDEO_INFO_CACHE.set(targetUrl, { data: info, exp: Date.now() + VIDEO_INFO_TTL });
-          if (VIDEO_INFO_CACHE.size > 120) VIDEO_INFO_CACHE.clear();
-          resolve(info);
-          return;
-        }
-        pending--;
-        if (pending === 0) resolve(null);
-      }).catch((e) => {
-        if (settled) return;
-        errors.push((client || 'default') + ': ' + e.message);
-        console.warn('[VideoInfo] client=' + (client || 'default') + ' falló: ' + e.message);
-        pending--;
-        if (pending === 0) resolve(null);
-      });
-    };
-
-    YT_RESOLVE_CLIENTS.forEach(launch);
-  });
-
-  if (result) return result;
-  throw new Error(errors.join(' | ') || 'No se pudo obtener la información del vídeo');
-}
-
-function pickNumber(...values) {
-  for (const v of values) {
-    if (typeof v === 'number' && isFinite(v) && v > 0) return v;
-  }
-  return 0;
-}
-
-/**
- * GET /api/video/info?url=
- * Metadatos + calidades disponibles + tamaño estimado + subtítulos.
- */
-app.get('/api/video/info', async (req, res) => {
-  const targetUrl = normalizeYtdlpTarget(req.query.url);
-  if (!targetUrl) return res.status(400).json({ error: 'Falta el parámetro url' });
-
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  try {
-    const info = await ytdlpVideoInfo(targetUrl);
-
-    const formats = Array.isArray(info.formats) ? info.formats : [];
-    const videoFormats = formats.filter((f) => f && f.vcodec && f.vcodec !== 'none');
-    const audioFormats = formats.filter((f) => f && f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none'));
-
-    // Mejor audio disponible (para estimar el peso del MP4 final)
-    let bestAudioSize = 0;
-    for (const a of audioFormats) {
-      const sz = pickNumber(a.filesize, a.filesize_approx);
-      if (sz > bestAudioSize) bestAudioSize = sz;
-    }
-
-    const byHeight = new Map();
-    for (const f of videoFormats) {
-      const h = pickNumber(f.height);
-      if (!h) continue;
-      const size = pickNumber(f.filesize, f.filesize_approx);
-      const prev = byHeight.get(h);
-      const progressive = f.acodec && f.acodec !== 'none';
-      const candidate = {
-        height: h,
-        label: h + 'p' + (f.fps && f.fps >= 50 ? Math.round(f.fps) : ''),
-        ext: f.ext || 'mp4',
-        size: size + (progressive ? 0 : bestAudioSize),
-        fps: pickNumber(f.fps),
-        progressive: !!progressive
-      };
-      if (!prev || (candidate.progressive && !prev.progressive) || candidate.size > prev.size) {
-        byHeight.set(h, candidate);
-      }
-    }
-
-    const qualities = Array.from(byHeight.values())
-      .sort((a, b) => b.height - a.height)
-      .slice(0, 8)
-      .map((q) => ({
-        height: q.height,
-        label: q.label,
-        ext: q.ext,
-        size: q.size,
-        fps: q.fps,
-        progressive: q.progressive
-      }));
-
-    const subs = Object.keys(info.subtitles || {});
-    const autoSubs = Object.keys(info.automatic_captions || {});
-    const duration = pickNumber(info.duration);
-
-    // Tamaño estimado global: mejor pista progresiva o vídeo+audio.
-    let estimatedSize = 0;
-    const progressive = videoFormats.filter((f) => f.acodec && f.acodec !== 'none');
-    for (const f of progressive) {
-      const sz = pickNumber(f.filesize, f.filesize_approx);
-      if (sz > estimatedSize) estimatedSize = sz;
-    }
-    if (!estimatedSize && qualities.length) estimatedSize = qualities[0].size;
-
-    const data = {
-      id: info.id || extractYouTubeId(targetUrl) || '',
-      title: info.title || 'Vídeo de YouTube',
-      author: info.uploader || info.channel || 'YouTube',
-      duration: duration,
-      durationText: duration ? formatDuration(duration) : '',
-      thumbnail: info.thumbnail || (info.id ? `https://i.ytimg.com/vi/${info.id}/hqdefault.jpg` : ''),
-      viewCount: pickNumber(info.view_count),
-      uploadDate: info.upload_date || '',
-      description: String(info.description || '').slice(0, 600),
-      isLive: !!info.is_live,
-      liveStatus: info.live_status || '',
-      webpageUrl: info.webpage_url || targetUrl,
-      qualities: qualities,
-      estimatedSize: estimatedSize,
-      audioSize: bestAudioSize,
-      streamMode: 'split',
-      subtitles: subs,
-      autoSubtitles: autoSubs,
-      hasSubtitles: subs.length > 0 || autoSubs.length > 0
-    };
-
-    res.json(data);
-  } catch (err) {
-    console.warn('[VideoInfo] error:', err.message);
-    res.status(502).json({ error: friendlyVideoError(err.message), detail: err.message });
-  }
-});
-
-function formatDuration(totalSeconds) {
-  const s = Math.max(0, Math.round(Number(totalSeconds) || 0));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-  return `${m}:${String(sec).padStart(2, '0')}`;
-}
-
-/** Convierte SRT a WebVTT (formato que entiende <track>). */
-function srtToVtt(input) {
-  let text = String(input || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  // Quita numeración de cue y deja los timestamps con punto decimal.
-  const blocks = text.split('\n\n');
-  const out = ['WEBVTT', ''];
-  for (const block of blocks) {
-    const lines = block.split('\n').filter((l) => l.trim() !== '');
-    if (!lines.length) continue;
-    let i = 0;
-    if (/^\d+$/.test(lines[0].trim())) i = 1;
-    if (!lines[i] || lines[i].indexOf('-->') === -1) continue;
-    const timing = lines[i]
-      .replace(/,/g, '.')
-      .replace(/\s+/g, ' ')
-      .trim();
-    out.push(timing);
-    out.push(lines.slice(i + 1).join('\n'));
-    out.push('');
-  }
-  return out.join('\n');
-}
-
-/**
- * GET /api/video/subtitles?url=&lang=es&auto=1
- * Devuelve un archivo WebVTT listo para el reproductor.
- */
-app.get('/api/video/subtitles', async (req, res) => {
-  const targetUrl = normalizeYtdlpTarget(req.query.url);
-  const lang = String(req.query.lang || 'es').replace(/[^a-zA-Z-]/g, '').slice(0, 10) || 'es';
-  const wantAuto = String(req.query.auto || '') === '1';
-  if (!targetUrl) return res.status(400).json({ error: 'Falta el parámetro url' });
-
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  const cacheKey = targetUrl + '|' + lang + '|' + (wantAuto ? 'auto' : 'manual');
-  const cached = VIDEO_SUBS_CACHE.get(cacheKey);
-  if (cached && cached.exp > Date.now()) {
-    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    return res.send(cached.vtt);
-  }
-
-  const tmpDir = path.join(os.tmpdir(), 'sonora-subs');
-  try { fs.mkdirSync(tmpDir, { recursive: true }); } catch (e) {}
-  const stamp = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-  const template = path.join(tmpDir, 'sub_' + stamp + '.%(ext)s');
-
-  const attempts = [];
-  if (wantAuto) {
-    attempts.push(['--write-auto-subs', '--sub-langs', lang + '.*,' + lang]);
-  }
-  attempts.push(['--write-subs', '--sub-langs', lang + '.*,' + lang]);
-
-  let lastError = '';
-  for (const extra of attempts) {
-    const args = withCookies([
-      '--no-playlist', '--no-warnings', '--no-check-certificates',
-      '--skip-download', '--sub-format', 'vtt/srt/best',
-      ...extra, '-o', template, targetUrl
-    ]);
-    try {
-      await runOnce(YTDLP_BIN, args);
-      const files = (() => {
-        try {
-          return fs.readdirSync(tmpDir)
-            .filter((f) => f.indexOf('sub_' + stamp) === 0)
-            .map((f) => path.join(tmpDir, f));
-        } catch (e) { return []; }
-      })();
-      if (!files.length) { lastError = 'sin archivos de subtítulos'; continue; }
-
-      let vtt = fs.readFileSync(files[0], 'utf8');
-      if (path.extname(files[0]).toLowerCase() === '.srt' || vtt.indexOf('WEBVTT') !== 0) {
-        vtt = srtToVtt(vtt);
-      }
-      files.forEach((f) => { try { fs.unlinkSync(f); } catch (e) {} });
-
-      VIDEO_SUBS_CACHE.set(cacheKey, { vtt: vtt, exp: Date.now() + VIDEO_SUBS_TTL });
-      if (VIDEO_SUBS_CACHE.size > 80) VIDEO_SUBS_CACHE.clear();
-
-      res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-      res.setHeader('Cache-Control', 'public, max-age=3600');
-      return res.send(vtt);
-    } catch (e) {
-      lastError = e.message;
-      console.warn('[Subtitles] intento falló (' + (wantAuto ? 'auto' : 'manual') + '): ' + lastError);
-    }
-  }
-
-  res.status(404).json({
-    error: friendlyVideoError(lastError),
-    found: false,
-    detail: lastError
-  });
-});
-
-/**
- * GET /api/video/stream?url=&quality=720p&mode=video|audio
- * Proxy del stream de YouTube con Range (permite seek).
- *
- * mode=video / mode=audio sirven las pistas DASH por separado: es el camino
- * que funciona hoy (los MP4 progresivos devuelven 403). El reproductor pide
- * las dos y las sincroniza.
- * Sin mode se intenta el MP4 progresivo (compatibilidad).
- */
-app.get('/api/video/stream', async (req, res) => {
-  const targetUrl = normalizeYtdlpTarget(req.query.url);
-  const quality = String(req.query.quality || '720p').toLowerCase();
-  const mode = String(req.query.mode || '').toLowerCase();
-  if (!targetUrl) return res.status(400).json({ error: 'Falta el parámetro url' });
-
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
-
-  const height = parseInt(quality, 10) || 720;
-  const isAudio = mode === 'audio';
-  const isDash = isAudio || mode === 'video';
-  const mime = isAudio ? 'audio/mp4' : 'video/mp4';
-
-  if (isDash) {
-    const kind = isAudio ? 'audio' : 'video';
-    const cacheKey = (isAudio ? 'a|' : 'v|') + height + '|' + targetUrl;
-    const serve = async (attempt) => {
-      let resolved;
-      try {
-        resolved = await resolveDashStream(targetUrl, kind, height);
-      } catch (err) {
-        console.warn('[VideoStream] ' + kind + ' falló: ' + err.message);
-        if (!res.headersSent) {
-          res.status(502).json({
-            error: 'No se pudo preparar el ' + (isAudio ? 'audio' : 'vídeo') + ' de YouTube',
-            detail: err.message
-          });
-        }
-        return;
-      }
-      proxyAudioStream(resolved.url, req, res, (status, ct) => {
-        invalidateStreamCache(cacheKey);
-        console.warn('[VideoStream] CDN rechazó ' + kind + ' (' + status + '); reintentando…');
-        if (attempt === 0) {
-          setTimeout(() => { serve(1); }, 350);
-        } else if (!res.headersSent) {
-          res.status(502).json({
-            error: 'El CDN de YouTube rechazó el ' + (isAudio ? 'audio' : 'vídeo'),
-            detail: 'HTTP ' + (status || '?') + ' ' + (ct || 'sin content-type')
-          });
-        }
-      }, mime);
-    };
-    return serve(0);
-  }
-
-  const cacheKey = 'video|' + targetUrl + '|' + height;
-  const cached = getResolvedUrl(cacheKey);
-  if (cached) {
-    const probe = await probeMediaUrl(cached, 7000);
-    if (probe.ok) {
-      return proxyAudioStream(cached, req, res, (status, ct) => {
-        if (!res.headersSent) {
-          res.status(502).json({
-            error: 'El CDN de YouTube rechazó el vídeo',
-            detail: 'HTTP ' + (status || '?') + ' ' + (ct || 'sin content-type')
-          });
-        }
-      }, 'video/mp4');
-    }
-    RESOLVED_URL_CACHE.delete(cacheKey);
-  }
-
-  // Sólo formatos progresivos (vídeo+audio en un único archivo) para poder
-  // servirlos con un proxy simple.
-  const formatSpec = [
-    `best[height<=${height}][ext=mp4][acodec!=none][vcodec!=none]`,
-    `best[height<=${height}][acodec!=none][vcodec!=none]`,
-    'best[ext=mp4][acodec!=none][vcodec!=none]',
-    'best[acodec!=none][vcodec!=none]'
-  ].join('/');
-
-  let lastError = '';
-  for (const client of YT_RESOLVE_CLIENTS) {
-    const args = withCookies([
-      '--no-playlist', '--no-warnings', '--quiet', '--no-check-certificates',
-      '-f', formatSpec, '--get-url'
-    ]);
-    if (client) args.push('--extractor-args', 'youtube:player_client=' + client);
-    args.push(targetUrl);
-    try {
-      const direct = await runCapture(YTDLP_BIN, args, 60000);
-      if (direct) {
-        const probe = await probeMediaUrl(direct, 8000);
-        if (!probe.ok) {
-          lastError = 'CDN ' + probe.status + ' ' + probe.contentType;
-          continue;
-        }
-        setResolvedUrl(cacheKey, direct);
-        return proxyAudioStream(direct, req, res, (status, ct) => {
-          if (!res.headersSent) {
-            res.status(502).json({
-              error: 'El CDN de YouTube rechazó el vídeo',
-              detail: 'HTTP ' + (status || '?') + ' ' + (ct || 'sin content-type')
-            });
-          }
-        }, 'video/mp4');
-      }
-    } catch (e) {
-      lastError = e.message;
-      console.warn('[VideoStream] client=' + (client || 'default') + ' falló: ' + lastError);
-    }
-  }
-
-  res.status(502).json({
-    error: friendlyVideoError(lastError) || 'No hay formato progresivo disponible',
-    hint: 'Usa mode=video y mode=audio para el reproductor dividido.',
-    detail: lastError
-  });
 });
 
 /**
@@ -2544,84 +2139,26 @@ app.get('/api/recommendations', async (req, res) => {
   try {
     const artist = (req.query.artist || '').trim();
     const title = (req.query.title || '').trim();
-    const genre = (req.query.genre || '').trim();
-    const exclude = (req.query.exclude || '')
-      .split('|')
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean);
-
-    // 1) Varias búsquedas en paralelo: canciones del mismo artista, parecidas
-    //    y del mismo género. Así la recomendación tiene que ver con lo que
-    //    se está escuchando (antes sólo se pedía "<artista> top songs").
-    const queries = [];
-    if (artist) queries.push(`${artist} songs`);
-    if (artist && title) queries.push(`${artist} ${title} similar songs`);
-    if (artist) queries.push(`artists similar to ${artist}`);
-    if (genre) queries.push(`${genre} songs playlist`);
-    if (!queries.length && title) queries.push(`${title} related songs`);
-    if (!queries.length) queries.push('music hits');
+    const query = artist ? `${artist} top songs` : (title ? `${title} related songs` : 'rock pop hits');
 
     const yts = require('yt-search');
-    const results = await Promise.allSettled(
-      queries.slice(0, 4).map((q) => yts(q))
-    );
-
-    const seen = new Set();
-    const pool = [];
-    results.forEach((r) => {
-      if (!r || r.status !== 'fulfilled' || !r.value || !r.value.videos) return;
-      r.value.videos.forEach((v) => {
-        if (!v || !v.videoId || seen.has(v.videoId)) return;
-        seen.add(v.videoId);
-        pool.push(v);
-      });
-    });
-
-    // 2) Puntuamos para quedarnos con canciones parecidas y descartar
-    //    recopilaciones ("1 hour mix", "best of", "top 100"...).
-    const JUNK = /(full album|\bplaylist\b|\bmix\b|compilation|recopilaci|\d+\s*hours?|1 hour|2 hour|3 hour|top \d+|best of|non-?stop|megamix|mashup|live stream|radio 24)/i;
-    const artistLower = artist.toLowerCase();
-
-    const scored = pool.map((v) => {
-      const t = (v.title || '').toLowerCase();
-      const a = v.author && v.author.name ? v.author.name.toLowerCase() : '';
-      const secs = v.seconds || 0;
-      let score = 0;
-
-      if (artistLower && (a.includes(artistLower) || t.includes(artistLower))) score += 60;
-      if (genre && t.includes(genre.toLowerCase())) score += 14;
-      if (/topic$/i.test(a)) score += 12;                    // canal de audio oficial
-      if (/(official|audio|lyric|letra)/i.test(v.title || '')) score += 8;
-
-      if (secs >= 75 && secs <= 600) score += 25;            // duración de canción
-      else if (secs > 1200) score -= 90;                     // 20 min+: colección
-      else if (secs > 900) score -= 50;
-      else if (secs > 0) score += 5;
-
-      if (JUNK.test(v.title || '')) score -= 120;
-      if (exclude.some((x) => x && t.includes(x))) score -= 200;
-
-      return { v, score };
-    });
-
-    scored.sort((a, b) => b.score - a.score);
-
-    const items = scored
-      .filter((s) => s.score > -40)
-      .slice(0, 12)
-      .map(({ v }) => ({
-        id: 'yt_' + v.videoId,
-        videoId: v.videoId,
-        title: v.title,
-        artist: v.author ? v.author.name : (artist || 'Música recomendada'),
-        duration: v.seconds || 210,
-        durationText: v.timestamp || '',
-        thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-        artworkUrl: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-        platform: 'youtube',
-        url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`
-      }));
-
+    const r = await yts(query);
+    const items = [];
+    if (r && r.videos && r.videos.length > 0) {
+      for (const v of r.videos.slice(0, 8)) {
+        items.push({
+          id: 'yt_' + v.videoId,
+          videoId: v.videoId,
+          title: v.title,
+          artist: v.author ? v.author.name : (artist || 'Música recomendada'),
+          duration: v.seconds || 210,
+          durationText: v.timestamp || '3:30',
+          thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+          platform: 'youtube',
+          url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`
+        });
+      }
+    }
     res.json(items);
   } catch (err) {
     console.warn('[Recommendations] error:', err.message);
@@ -2630,109 +2167,167 @@ app.get('/api/recommendations', async (req, res) => {
 });
 
 /**
- * Collaborative Playlists Sync (In-memory + DB shared store)
+ * Collaborative Playlists Sync
+ * Persistente en SQLite: antes sólo vivía en memoria y las playlists
+ * desaparecían cada vez que el servidor se reiniciaba o hibernaba.
  */
-// ---------------------------------------------------------------------------
-// Collaborative Playlists (persistentes en disco para que el código sobreviva
-// a reinicios y despliegues de Render)
-// ---------------------------------------------------------------------------
-const collaborativeFile = path.join(dataDir, 'sonora-collaborative.json');
 const collaborativeStore = new Map();
 
-function loadCollaborativeStore() {
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS collab_playlists (
+      code TEXT PRIMARY KEY,
+      name TEXT,
+      description TEXT,
+      tracks TEXT NOT NULL,
+      created_at TEXT,
+      updated_at TEXT
+    );
+  `);
+} catch (err) {
+  console.warn('[Collab] No se pudo crear la tabla persistente:', err.message);
+}
+
+function collabNormalizeCode(code) {
+  return String(code || '').toUpperCase().trim();
+}
+
+function collabGet(code) {
+  const key = collabNormalizeCode(code);
+  if (!key) return null;
+  if (collaborativeStore.has(key)) return collaborativeStore.get(key);
+
   try {
-    if (fs.existsSync(collaborativeFile)) {
-      const raw = JSON.parse(fs.readFileSync(collaborativeFile, 'utf8'));
-      Object.keys(raw || {}).forEach((code) => {
-        if (raw[code] && raw[code].code) collaborativeStore.set(code, raw[code]);
-      });
-      console.log(`[Collab] ${collaborativeStore.size} playlists colaborativas cargadas`);
-    }
+    const row = db.prepare('SELECT * FROM collab_playlists WHERE code = ?').get(key);
+    if (!row) return null;
+    const pl = {
+      code: row.code,
+      name: row.name || 'Playlist Colaborativa',
+      description: row.description || '',
+      tracks: JSON.parse(row.tracks || '[]'),
+      createdAt: row.created_at || null,
+      updatedAt: row.updated_at || null
+    };
+    collaborativeStore.set(key, pl);
+    return pl;
   } catch (err) {
-    console.error('[Collab] No se pudo cargar el almacén colaborativo:', err.message);
+    return null;
   }
 }
 
-function saveCollaborativeStore() {
+function collabSave(pl) {
+  const key = collabNormalizeCode(pl.code);
+  if (!key) return null;
+  pl.code = key;
+  collaborativeStore.set(key, pl);
   try {
-    const obj = {};
-    collaborativeStore.forEach((pl, code) => { obj[code] = pl; });
-    fs.writeFileSync(collaborativeFile, JSON.stringify(obj, null, 2));
+    db.prepare(`
+      INSERT INTO collab_playlists (code, name, description, tracks, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(code) DO UPDATE SET
+        name = excluded.name,
+        description = excluded.description,
+        tracks = excluded.tracks,
+        updated_at = excluded.updated_at
+    `).run(
+      key,
+      pl.name || 'Playlist Colaborativa',
+      pl.description || '',
+      JSON.stringify(pl.tracks || []),
+      pl.createdAt || new Date().toISOString(),
+      pl.updatedAt || new Date().toISOString()
+    );
   } catch (err) {
-    console.error('[Collab] No se pudo guardar el almacén colaborativo:', err.message);
+    console.warn('[Collab] No se pudo guardar:', err.message);
   }
+  return pl;
 }
-
-loadCollaborativeStore();
 
 app.get('/api/playlists/collaborative/:code', (req, res) => {
-  const code = (req.params.code || '').toUpperCase().trim();
-  const pl = collaborativeStore.get(code);
+  const pl = collabGet(req.params.code);
   if (!pl) return res.status(404).json({ error: 'Playlist no encontrada con este código' });
   res.json(pl);
 });
 
 app.post('/api/playlists/collaborative/:code', (req, res) => {
-  const code = (req.params.code || '').toUpperCase().trim();
-  if (!code) return res.status(400).json({ error: 'Código requerido' });
+  const code = collabNormalizeCode(req.params.code);
+  if (!code) return res.status(400).json({ error: 'Código inválido' });
+
   const name = req.body.name || 'Playlist Colaborativa';
   const description = req.body.description || '';
   const tracks = Array.isArray(req.body.tracks) ? req.body.tracks : [];
-  let pl = collaborativeStore.get(code);
+
+  let pl = collabGet(code);
   if (!pl) {
-    pl = { code, name, description, tracks, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    pl = {
+      code,
+      name,
+      description,
+      tracks,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
   } else {
     pl.name = name;
     pl.description = description;
-    // Reemplaza siempre la lista completa (así se reflejan también los borrados)
+    // La lista enviada es la versión completa y manda sobre la guardada.
     pl.tracks = tracks;
     pl.updatedAt = new Date().toISOString();
   }
-  collaborativeStore.set(code, pl);
-  saveCollaborativeStore();
+
+  collabSave(pl);
   res.json({ success: true, playlist: pl });
 });
 
-app.delete('/api/playlists/collaborative/:code', (req, res) => {
-  const code = (req.params.code || '').toUpperCase().trim();
-  const existed = collaborativeStore.delete(code);
-  saveCollaborativeStore();
-  res.json({ success: true, deleted: existed });
-});
-
 app.post('/api/playlists/collaborative/:code/tracks', (req, res) => {
-  const code = (req.params.code || '').toUpperCase().trim();
+  const code = collabNormalizeCode(req.params.code);
   const track = req.body;
   if (!track || !track.title) return res.status(400).json({ error: 'Track inválido' });
 
-  let pl = collaborativeStore.get(code);
+  let pl = collabGet(code);
   if (!pl) {
-    pl = { code: code, name: req.body.playlistName || 'Playlist Colaborativa', tracks: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    pl = {
+      code,
+      name: req.body.playlistName || 'Playlist Colaborativa',
+      description: '',
+      tracks: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
   }
-  if (!Array.isArray(pl.tracks)) pl.tracks = [];
 
-  // Avoid duplicates
   if (!pl.tracks.some(t => String(t.id) === String(track.id) || t.title === track.title)) {
     pl.tracks.push(track);
-    pl.updatedAt = new Date().toISOString();
   }
+  pl.updatedAt = new Date().toISOString();
+  collabSave(pl);
 
-  collaborativeStore.set(code, pl);
-  saveCollaborativeStore();
   res.json({ success: true, count: pl.tracks.length, playlist: pl });
 });
 
 app.delete('/api/playlists/collaborative/:code/tracks/:trackId', (req, res) => {
-  const code = (req.params.code || '').toUpperCase().trim();
+  const code = collabNormalizeCode(req.params.code);
   const trackId = req.params.trackId;
-  const pl = collaborativeStore.get(code);
+
+  const pl = collabGet(code);
   if (!pl) return res.status(404).json({ error: 'Playlist no encontrada' });
-  const before = (pl.tracks || []).length;
-  pl.tracks = (pl.tracks || []).filter(t => String(t.id) !== String(trackId));
+
+  const before = pl.tracks.length;
+  pl.tracks = pl.tracks.filter(t => String(t.id) !== String(trackId));
+  const removed = before - pl.tracks.length;
   pl.updatedAt = new Date().toISOString();
-  collaborativeStore.set(code, pl);
-  saveCollaborativeStore();
-  res.json({ success: true, removed: before - pl.tracks.length, playlist: pl });
+  collabSave(pl);
+
+  res.json({ success: true, removed, playlist: pl });
+});
+
+app.delete('/api/playlists/collaborative/:code', (req, res) => {
+  const code = collabNormalizeCode(req.params.code);
+  collaborativeStore.delete(code);
+  try {
+    db.prepare('DELETE FROM collab_playlists WHERE code = ?').run(code);
+  } catch (err) {}
+  res.json({ success: true, deleted: true });
 });
 
 /**
@@ -3286,6 +2881,214 @@ app.get('/api/moods', (req, res) => {
 });
 
 /**
+ * POST /api/download/youtube
+ * Download YouTube video, convert to MP3, save to server, return download URL
+ * Body: { url, title, artist }
+ */
+app.post('/api/download/youtube', async (req, res) => {
+  try {
+    const { url, title = 'Cancion', artist = 'Sonora' } = req.body;
+
+    if (!url) {
+      return res.status(400).json({ success: false, error: 'URL de YouTube requerida' });
+    }
+
+    const safeTitle = title.replace(/[/\\?%*:|"<>]/g, '_').trim();
+    const safeArtist = artist.replace(/[/\\?%*:|"<>]/g, '_').trim();
+    const filename = `${safeArtist} - ${safeTitle}.mp3`;
+    const outputPath = path.join(musicDir, filename);
+
+    console.log(`[Download] Starting YouTube download: ${url}`);
+    console.log(`[Download] Output: ${outputPath}`);
+
+    // yt-dlp args: download best audio, convert to MP3 320k, add metadata
+    const args = [
+      '--no-playlist',
+      '--no-progress',
+      '--quiet',
+      '--no-warnings',
+      '-x', '--audio-format', 'mp3', '--audio-quality', '320k',
+      '--add-metadata', '--embed-thumbnail',
+      '--metadata-from-title', '%(artist)s - %(title)s',
+      '-o', outputPath,
+      url
+    ];
+
+    const proc = spawn(YTDLP_BIN, withCookies(args));
+
+    let stderrOutput = '';
+    proc.stderr.on('data', (data) => {
+      stderrOutput += data.toString();
+    });
+
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        console.error(`[Download] yt-dlp exited with code ${code}: ${stderrOutput}`);
+        return res.status(500).json({
+          success: false,
+          error: 'Error descargando de YouTube',
+          details: stderrOutput.slice(-500)
+        });
+      }
+
+      // Verify file exists
+      if (!fs.existsSync(outputPath)) {
+        console.error('[Download] Output file not found after conversion');
+        return res.status(500).json({
+          success: false,
+          error: 'El archivo descargado no se encontró'
+        });
+      }
+
+      const stat = fs.statSync(outputPath);
+      const fileSize = stat.size;
+
+      // Build public download URL
+      const protocol = req.protocol;
+      const host = req.get('host');
+      const downloadUrl = `${protocol}://${host}/api/download/file/${encodeURIComponent(filename)}`;
+
+      console.log(`[Download] Complete: ${filename} (${fileSize} bytes)`);
+
+      res.json({
+        success: true,
+        downloadUrl: downloadUrl,
+        title: title,
+        artist: artist,
+        filename: filename,
+        size: fileSize,
+        message: 'Descarga completada exitosamente'
+      });
+    });
+
+    proc.on('error', (err) => {
+      console.error('[Download] yt-dlp spawn error:', err.message);
+      res.status(500).json({ success: false, error: 'Error iniciando descarga', details: err.message });
+    });
+
+  } catch (err) {
+    console.error('[Download] Fatal error:', err);
+    res.status(500).json({ success: false, error: 'Error interno del servidor', details: err.message });
+  }
+});
+
+/**
+ * GET /api/download/file/:filename
+ * Serve downloaded MP3 file from server music directory
+ */
+app.get('/api/download/file/:filename', (req, res) => {
+  try {
+    const filename = decodeURIComponent(req.params.filename);
+    const filePath = path.join(musicDir, filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Archivo no encontrado' });
+    }
+
+    const stat = fs.statSync(filePath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+      if (start >= fileSize || end >= fileSize || start > end) {
+        res.status(416).set({ 'Content-Range': `bytes */${fileSize}` }).send('Requested Range Not Satisfiable');
+        return;
+      }
+
+      const chunkSize = (end - start) + 1;
+      const fileStream = fs.createReadStream(filePath, { start, end });
+      const headers = {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunkSize,
+        'Content-Type': 'audio/mpeg',
+        'Access-Control-Allow-Origin': '*'
+      };
+
+      res.writeHead(206, headers);
+      fileStream.pipe(res);
+    } else {
+      const headers = {
+        'Content-Length': fileSize,
+        'Accept-Ranges': 'bytes',
+        'Content-Type': 'audio/mpeg',
+        'Access-Control-Allow-Origin': '*',
+        'Content-Disposition': `attachment; filename="${filename}"`
+      };
+
+      res.writeHead(200, headers);
+      fs.createReadStream(filePath).pipe(res);
+    }
+  } catch (err) {
+    console.error('[Download File] Error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Error sirviendo archivo', details: err.message });
+    }
+  }
+});
+
+/**
+ * GET /api/downloads
+ * List all downloaded MP3 files from server music directory
+ */
+app.get('/api/downloads', (req, res) => {
+  try {
+    if (!fs.existsSync(musicDir)) {
+      return res.json([]);
+    }
+
+    const files = fs.readdirSync(musicDir).filter(f => f.endsWith('.mp3'));
+    const downloads = files.map(f => {
+      const fullPath = path.join(musicDir, f);
+      const stat = fs.statSync(fullPath);
+      const parts = f.replace('.mp3', '').split(' - ');
+      const artist = parts[0] || 'Desconocido';
+      const title = parts.slice(1).join(' - ') || f;
+
+      return {
+        id: f,
+        filename: f,
+        title: title,
+        artist: artist,
+        size: stat.size,
+        createdAt: stat.birthtime || stat.mtime,
+        url: `${req.protocol}://${req.get('host')}/api/download/file/${encodeURIComponent(f)}`
+      };
+    });
+
+    res.json(downloads);
+  } catch (err) {
+    console.error('[Downloads List] Error:', err);
+    res.status(500).json({ error: 'Error listando descargas', details: err.message });
+  }
+});
+
+/**
+ * DELETE /api/downloads/:filename
+ * Delete a downloaded file from server
+ */
+app.delete('/api/downloads/:filename', (req, res) => {
+  try {
+    const filename = decodeURIComponent(req.params.filename);
+    const filePath = path.join(musicDir, filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Archivo no encontrado' });
+    }
+
+    fs.unlinkSync(filePath);
+    res.json({ success: true, message: 'Archivo eliminado' });
+  } catch (err) {
+    console.error('[Delete Download] Error:', err);
+    res.status(500).json({ error: 'Error eliminando archivo', details: err.message });
+  }
+});
+
+/**
  * GET /api/stream/:id
  * Stream audio file for track ID with HTTP 206 Byte-Range seeking support
  */
@@ -3324,16 +3127,16 @@ app.get('/api/stream/:id', (req, res) => {
       res.setHeader('Content-Type', 'audio/mpeg');
       res.setHeader('Accept-Ranges', 'bytes');
 
-      const ytdlpArgs = withCookies([
+      const ytdlpArgs = [
         '--no-playlist',
         '--no-progress',
         '--quiet',
         '--no-warnings',
         '-f', 'bestaudio/best',
-        '-o', '-'
-      ]);
-      ytdlpArgs.push(`ytsearch1:${query}`);
-      const proc = spawn(YTDLP_BIN, ytdlpArgs);
+        '-o', '-',
+        `ytsearch1:${query}`
+      ];
+      const proc = spawn(YTDLP_BIN, withCookies(ytdlpArgs));
 
       if (FFMPEG_BIN && fs.existsSync(FFMPEG_BIN)) {
         const ffmpegArgs = ['-i', 'pipe:0', '-vn', '-f', 'mp3', '-acodec', 'libmp3lame', '-b:a', '192k', 'pipe:1'];
@@ -3635,8 +3438,8 @@ process.on('unhandledRejection', (reason, promise) => {
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('----------------------------------------------------');
-  console.log('🎵 Sonora Music Server v7.10.0');
-  console.log(`📡 Mode: ${isRender ? 'Render' : 'Local'}`);
+  console.log('🎵 Sonora Music Server v7.17.0');
+  console.log(`📡 Mode: ${isNorthflank ? 'Northflank' : (isRender ? 'Render' : 'Local')}`);
   console.log(`🌐 Port: ${PORT}`);
   console.log(`📁 Music directory: ${musicDir}`);
   console.log(`💾 Database: ${dbPath}`);

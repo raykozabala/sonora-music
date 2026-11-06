@@ -8,7 +8,7 @@
   var Sonora = window.Sonora = window.Sonora || {};
 
   var DB_NAME = 'SonoraMusic';
-  var DB_VERSION = 5;
+  var DB_VERSION = 6;
   var _db = null;
 
   /* ── helpers ── */
@@ -19,10 +19,11 @@
       req.onerror = function () { reject(req.error); };
       req.onupgradeneeded = function (e) {
         var db = e.target.result;
-        var stores = ['tracks', 'albums', 'artists', 'playlists', 'mixes', 'history', 'downloads', 'settings', 'videos', 'videoFiles'];
+        var stores = ['tracks', 'albums', 'artists', 'playlists', 'mixes', 'history', 'downloads', 'settings', 'videos', 'videoFiles', 'lyrics'];
         stores.forEach(function (name) {
           if (!db.objectStoreNames.contains(name)) {
-            var s = db.createObjectStore(name, { keyPath: name === 'history' ? 'id' : (name === 'settings' ? 'key' : 'id'), autoIncrement: name === 'history' });
+            var keyPath = (name === 'history') ? 'id' : ((name === 'settings' || name === 'lyrics') ? 'key' : 'id');
+            var s = db.createObjectStore(name, { keyPath: keyPath, autoIncrement: name === 'history' });
             if (name === 'tracks') {
               s.createIndex('genre', 'genre', { unique: false });
               s.createIndex('artistId', 'artistId', { unique: false });
@@ -283,8 +284,10 @@
         store.put({ key: 'fontSize', value: 'medium' });
         store.put({ key: 'language', value: 'es' });
         store.put({ key: 'serverMode', value: 'off' });
-        store.put({ key: 'serverLocalUrl', value: 'http://192.168.1.132:3000' });
+        store.put({ key: 'serverLocalUrl', value: 'http://MacBook-Air-de-Rayko.local:3000' });
         store.put({ key: 'serverRenderUrl', value: 'https://sonora-music-b1ee.onrender.com' });
+        store.put({ key: 'serverNorthflankUrl', value: '' });
+        store.put({ key: 'serverNorthflankToken', value: '' });
         store.put({ key: 'crossfade', value: 0 });
         store.put({ key: 'playbackSpeed', value: 1.0 });
         store.put({ key: 'audioQuality', value: 'normal' });
@@ -327,6 +330,17 @@
   /* ── Public API ── */
   Sonora.DB = {
     init: function () {
+      // Solicitar almacenamiento persistente en el navegador para evitar que Safari o Chrome borren las canciones guardadas
+      try {
+        if (typeof navigator !== 'undefined' && navigator.storage && typeof navigator.storage.persist === 'function') {
+          navigator.storage.persist().then(function (persisted) {
+            if (persisted) {
+              console.log('[Sonora DB] Almacenamiento persistente activado: las canciones no se borrarán automáticamente.');
+            }
+          }).catch(function () {});
+        }
+      } catch (e) {}
+
       return openDB().then(function () {
         return seedIfEmpty().then(function() {
           return migrateToV72();
@@ -644,12 +658,44 @@
           return all.map(function (d) { return d.trackId; });
         });
       },
-      delete: function (trackId) {
-        return deleteFromStore('downloads', 'dl_' + trackId).then(function () {
-          var numeric = Number(trackId);
-          if (isNaN(numeric)) return;
-          return getByIdFromStore('tracks', numeric).then(function (track) {
-            if (track) { track.isDownloaded = 0; return putToStore('tracks', track); }
+      /**
+       * Registros completos de descarga. Es lo que debe usar Ajustes para
+       * poder borrar también descargas cuyo track ya no esté en la biblioteca.
+       */
+      getRecords: function () {
+        return getAllFromStore('downloads').then(function (all) {
+          return (all || []).map(function (d) {
+            return {
+              id: d.id,
+              trackId: d.trackId,
+              size: (d.blob && d.blob.size) || d.size || 0,
+              savedAt: d.savedAt || ''
+            };
+          });
+        });
+      },
+      delete: function (trackIdOrRecordId) {
+        var raw = String(trackIdOrRecordId == null ? '' : trackIdOrRecordId);
+        var recordId = raw.indexOf('dl_') === 0 ? raw : ('dl_' + raw);
+        var trackId = recordId.slice(3);
+        return deleteFromStore('downloads', recordId).then(function () {
+          // Compatibilidad con registros antiguos guardados sin el prefijo.
+          if (raw !== recordId) return deleteFromStore('downloads', raw).catch(function () {});
+        }).then(function () {
+          // El flag isDownloaded puede estar en pistas numéricas o externas (yt_...).
+          return getAllFromStore('tracks').then(function (tracks) {
+            var txn = _db.transaction('tracks', 'readwrite');
+            var store = txn.objectStore('tracks');
+            (tracks || []).forEach(function (t) {
+              if (String(t.id) === String(trackId) || String(t.id) === raw) {
+                t.isDownloaded = 0;
+                store.put(t);
+              }
+            });
+            return new Promise(function (resolve) {
+              txn.oncomplete = resolve;
+              txn.onerror = resolve;
+            });
           });
         });
       },
@@ -673,6 +719,39 @@
           };
           txn.onerror = function () { reject(txn.error); };
         });
+      },
+      /**
+       * Alias que usa la pantalla de Ajustes. Antes se llamaba clear() y no
+       * existía, así que el botón "Borrar todas las descargas" no hacía nada
+       * cuando no había lista de pistas.
+       */
+      clear: function () {
+        return this.clearAll();
+      }
+    },
+
+    /* ── Caché de letras (LRC + metadatos de coincidencia) ── */
+    lyrics: {
+      get: function (key) {
+        return getByIdFromStore('lyrics', key).catch(function () { return null; });
+      },
+      set: function (record) {
+        if (!record || !record.key) return Promise.resolve();
+        return putToStore('lyrics', record).catch(function () {});
+      },
+      delete: function (key) {
+        return deleteFromStore('lyrics', key).catch(function () {});
+      },
+      clear: function () {
+        return new Promise(function (resolve) {
+          var txn = _db.transaction('lyrics', 'readwrite');
+          txn.objectStore('lyrics').clear();
+          txn.oncomplete = resolve;
+          txn.onerror = resolve;
+        });
+      },
+      getAll: function () {
+        return getAllFromStore('lyrics').catch(function () { return []; });
       }
     },
 
@@ -705,14 +784,85 @@
       }
     },
 
+    /**
+     * Exporta metadatos y preferencias a un objeto JSON serializable.
+     * No incluye blobs de audio/video (downloads/videoFiles): un respaldo
+     * razonable no debe pesar cientos de MB ni intentar serializar Blobs.
+     */
+    exportData: function () {
+      var names = ['tracks', 'albums', 'artists', 'playlists', 'mixes', 'history', 'settings', 'videos', 'lyrics'];
+      return Promise.all(names.map(function (name) {
+        return getAllFromStore(name).catch(function () { return []; });
+      })).then(function (results) {
+        var data = {};
+        names.forEach(function (name, i) { data[name] = results[i] || []; });
+        return {
+          format: 'sonora-backup',
+          backupVersion: 1,
+          app: 'Sonora Music',
+          createdAt: new Date().toISOString(),
+          data: data
+        };
+      });
+    },
+
+    /**
+     * Restaura un respaldo creado por exportData().
+     * options.replace = true borra cada almacén antes de importar; si no,
+     * combina por id/clave (los registros existentes se actualizan).
+     */
+    importData: function (payload, options) {
+      var data = payload && payload.data ? payload.data : payload;
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        return Promise.reject(new Error('El archivo no es una copia de seguridad válida'));
+      }
+
+      var names = ['tracks', 'albums', 'artists', 'playlists', 'mixes', 'history', 'settings', 'videos', 'lyrics'];
+      var replace = !!(options && options.replace);
+
+      return new Promise(function (resolve, reject) {
+        var txn;
+        try {
+          txn = _db.transaction(names, 'readwrite');
+        } catch (e) {
+          reject(e);
+          return;
+        }
+
+        txn.oncomplete = function () { resolve({ imported: true, replaced: replace }); };
+        txn.onerror = function () { reject(txn.error || new Error('Error importando la copia')); };
+        txn.onabort = function () { reject(txn.error || new Error('Importación cancelada')); };
+
+        names.forEach(function (name) {
+          var store = txn.objectStore(name);
+          if (replace) {
+            try { store.clear(); } catch (e) {}
+          }
+          var items = Array.isArray(data[name]) ? data[name] : [];
+          items.forEach(function (item) {
+            if (!item || typeof item !== 'object') return;
+            if ((name === 'settings' || name === 'lyrics') && item.key !== undefined) {
+              store.put(item);
+            } else if (item.id !== undefined) {
+              store.put(item);
+            }
+          });
+        });
+      });
+    },
+
     // Reset everything
     reset: function () {
       return new Promise(function (resolve) {
-        _db.close();
-        _db = null;
+        try {
+          if (_db) { _db.close(); _db = null; }
+        } catch (e) {}
         var req = indexedDB.deleteDatabase(DB_NAME);
-        req.onsuccess = function () { resolve(); };
-        req.onerror = function () { resolve(); };
+        req.onsuccess = function () { resolve(true); };
+        req.onerror = function () { resolve(false); };
+        // Si otra pestaña/WebView mantiene la base abierta, no dejamos la app
+        // colgada: se resolverá igualmente y la recarga limpiará el resto.
+        req.onblocked = function () { resolve(false); };
       });
     }
   };

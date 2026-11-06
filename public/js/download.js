@@ -165,13 +165,13 @@
   // Servidores a probar, en orden: el activo, luego local y Render.
   function getCandidateServers() {
     var list = [];
+    var media = (Sonora.API && Sonora.API.getMediaBase) ? Sonora.API.getMediaBase() : null;
     var active = (Sonora.API && Sonora.API.getActiveUrl) ? Sonora.API.getActiveUrl() : null;
     var local = (Sonora.API && Sonora.API.getLocalUrl) ? Sonora.API.getLocalUrl() : null;
     var render = (Sonora.API && Sonora.API.getRenderUrl) ? Sonora.API.getRenderUrl() : null;
-    [active, local, render].forEach(function (u) {
+    [media, active, local, render].forEach(function (u) {
       if (u && list.indexOf(u) === -1) list.push(u);
     });
-    if (!list.length) list.push('http://192.168.1.132:3000');
     return list;
   }
 
@@ -198,53 +198,112 @@
     return name + '.' + format;
   }
 
+  function triggerBlobDownload(blob, filename) {
+    try {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        try {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } catch (e) {}
+      }, 1500);
+      return true;
+    } catch (e) {
+      console.warn('[Download] triggerBlobDownload error:', e);
+      return false;
+    }
+  }
+
   /**
-   * Escribe en la carpeta Descargas del teléfono un blob que YA tenemos.
-   * Es la vía fiable: no depende de que el servidor responda rápido, funciona
-   * con los datos ya bajados y el archivo aparece al instante.
+   * Escribe en la carpeta Descargas del dispositivo un blob que YA tenemos.
+   * Funciona de manera limpia en Android (bridge nativo), macOS (Tauri Command sin navegación),
+   * y en la Web (Blob URL Same-Origin que NUNCA reemplaza la ventana con el reproductor nativo).
    */
   function saveBlobToDevice(blob, filename, mime, taskId) {
     return new Promise(function (resolve) {
+      // 1) En Android nativo: usar el bridge hacia la carpeta Descargas
       var native = window.SonoraNative;
-      if (!native || typeof native.startSaveToDownloads !== 'function') return resolve(false);
+      if (native && typeof native.startSaveToDownloads === 'function') {
+        var started = '';
+        try { started = native.startSaveToDownloads(filename, mime); } catch (e) { started = ''; }
+        if (started) {
+          var CHUNK = 192 * 1024;
+          var offset = 0;
 
-      var started = '';
-      try { started = native.startSaveToDownloads(filename, mime); } catch (e) { started = ''; }
-      if (!started) return resolve(false);
+          function fail() {
+            try { native.abortSaveToDownloads(); } catch (e) {}
+            resolve(false);
+          }
 
-      var CHUNK = 192 * 1024;
-      var offset = 0;
-
-      function fail() {
-        try { native.abortSaveToDownloads(); } catch (e) {}
-        resolve(false);
+          function pump() {
+            if (offset >= blob.size) {
+              try { return resolve(!!native.finishSaveToDownloads() || true); } catch (e) { return resolve(false); }
+            }
+            var slice = blob.slice(offset, Math.min(offset + CHUNK, blob.size));
+            var reader = new FileReader();
+            reader.onload = function () {
+              var b64 = String(reader.result || '').split(',')[1] || '';
+              var ok = false;
+              try { ok = native.appendSaveChunk(b64); } catch (e) { ok = false; }
+              if (!ok) return fail();
+              offset += CHUNK;
+              var t = _activeDownloads[taskId];
+              if (t) {
+                t.phase = 'saving';
+                t.speed = 'Guardando en el teléfono…';
+                t.progress = Math.min(99, Math.round((offset / blob.size) * 100));
+                updateBadge();
+              }
+              setTimeout(pump, 0);
+            };
+            reader.onerror = fail;
+            reader.readAsDataURL(slice);
+          }
+          pump();
+          return;
+        }
       }
 
-      function pump() {
-        if (offset >= blob.size) {
-          try { return resolve(!!native.finishSaveToDownloads() || true); } catch (e) { return resolve(false); }
-        }
-        var slice = blob.slice(offset, Math.min(offset + CHUNK, blob.size));
-        var reader = new FileReader();
-        reader.onload = function () {
-          var b64 = String(reader.result || '').split(',')[1] || '';
-          var ok = false;
-          try { ok = native.appendSaveChunk(b64); } catch (e) { ok = false; }
-          if (!ok) return fail();
-          offset += CHUNK;
+      // 2) En macOS / App de Escritorio (Tauri): guardar directamente en ~/Downloads
+      if (window.__TAURI__ || window.__TAURI_INTERNALS__) {
+        try {
           var t = _activeDownloads[taskId];
           if (t) {
             t.phase = 'saving';
-            t.speed = 'Guardando en el teléfono…';
-            t.progress = Math.min(99, Math.round((offset / blob.size) * 100));
+            t.speed = 'Guardando en Descargas…';
             updateBadge();
           }
-          setTimeout(pump, 0);
-        };
-        reader.onerror = fail;
-        reader.readAsDataURL(slice);
+          var readerT = new FileReader();
+          readerT.onload = async function () {
+            var b64 = String(readerT.result || '').split(',')[1] || '';
+            try {
+              var invoke = (window.__TAURI__.core && window.__TAURI__.core.invoke) || window.__TAURI__.invoke;
+              if (typeof invoke === 'function') {
+                await invoke('save_downloaded_file', { filename: filename, base64Data: b64 });
+                return resolve(true);
+              }
+            } catch (err) {
+              console.warn('[Download] Tauri save_downloaded_file error, usando blob:', err);
+            }
+            resolve(triggerBlobDownload(blob, filename));
+          };
+          readerT.onerror = function () { resolve(false); };
+          readerT.readAsDataURL(blob);
+          return;
+        } catch (e) {
+          console.warn('[Download] Tauri save exception:', e);
+        }
       }
-      pump();
+
+      // 3) En la Web: descarga limpia mediante Blob Same-Origin (NO navega ni abre el reproductor nativo)
+      var okWeb = triggerBlobDownload(blob, filename);
+      resolve(okWeb);
     });
   }
 
@@ -265,9 +324,10 @@
   /**
    * Descarga un blob reportando progreso REAL (bytes y Content-Length).
    */
-  function fetchBlobWithProgress(url, onProgress) {
+  function fetchBlobWithProgress(url, onProgress, onXhr) {
     return new Promise(function (resolve, reject) {
       var xhr = new XMLHttpRequest();
+      if (typeof onXhr === 'function') onXhr(xhr);
       xhr.open('GET', url, true);
       xhr.responseType = 'blob';
       xhr.timeout = 600000; // 10 min
@@ -348,9 +408,50 @@
     safeFileName: safeFileName,
 
     /**
+     * Returns array of all active download tasks (for library UI integration).
+     */
+    getActiveDownloads: function () {
+      return Object.values(_activeDownloads);
+    },
+
+    /**
+     * Cancel a download task by ID (removes from active, no retry).
+     */
+    cancelDownload: function (taskId) {
+      var t = _activeDownloads[taskId];
+      if (t) {
+        if (t.xhr) {
+          try { t.xhr.abort(); } catch (e) {}
+        }
+        delete _activeDownloads[taskId];
+        updateBadge();
+        if (Sonora.Store) {
+          Sonora.Store.emit('downloadsChanged', { active: Object.values(_activeDownloads), completed: _completedHistory });
+          Sonora.Store.emit('toast', { message: 'Descarga cancelada: ' + (t.title || ''), type: 'info' });
+        }
+        return true;
+      }
+      return false;
+    },
+
+    retryDownload: function (taskId) {
+      var t = _activeDownloads[taskId];
+      if (t && t.track) {
+        var tr = t.track;
+        var fmt = t.format;
+        var q = t.quality;
+        var m = t.mode;
+        delete _activeDownloads[taskId];
+        updateBadge();
+        return Sonora.Download.startDownload(tr, fmt, q, m);
+      }
+      return false;
+    },
+
+    /**
      * Descarga real de una canción:
      *  - Copia offline dentro de la app (IndexedDB) para reproducir sin internet
-     *  - Archivo real en el teléfono vía el gestor de descargas de Android
+     *  - Archivo real en el teléfono vía el gestor de descargas de Android o carpeta Descargas
      * Muestra progreso REAL: bytes, velocidad y tiempo restante.
      */
     startDownload: async function (track, format, quality, mode) {
@@ -376,6 +477,7 @@
       _activeDownloads[taskId] = {
         id: taskId,
         trackId: track.id,
+        track: track,
         title: title,
         artist: artist,
         format: format,
@@ -387,7 +489,8 @@
         eta: '--',
         startTime: Date.now(),
         bytes: 0,
-        total: 0
+        total: 0,
+        xhr: null
       };
       updateBadge();
 
@@ -413,6 +516,9 @@
           t.eta = bps > 0 ? Math.max(0, Math.round((progress.total - progress.loaded) / bps)) + 's' : '--';
         }
         updateBadge();
+        if (Sonora.Store) {
+          Sonora.Store.emit('activeDownloadProgress', { taskId: taskId, item: t });
+        }
       }
 
       var blob = null;
@@ -420,162 +526,128 @@
       var lastError = null;
       var savedToDevice = false;
 
-      // 1) Copia offline dentro de la app (blob en IndexedDB)
-      if (mode === 'sonora' || mode === 'both') {
-        for (var i = 0; i < servers.length; i++) {
-          try {
-            blob = await fetchBlobWithProgress(
-              buildDownloadUrl(servers[i], targetUrl, format, quality, title, artist),
-              updateTask
-            );
-            usedServer = servers[i];
-            break;
-          } catch (err) {
-            lastError = err;
-            console.warn('[Download] servidor ' + servers[i] + ' falló:', err.message);
-          }
-        }
-        if (!blob) {
-          delete _activeDownloads[taskId];
-          updateBadge();
-          if (Sonora.Store) {
-            Sonora.Store.emit('toast', {
-              message: '✗ No se pudo descargar "' + title + '": ' +
-                (lastError ? lastError.message : 'sin conexión con el servidor'),
-              type: 'error'
-            });
-          }
-          return;
-        }
-      }
-
-      // 2) Archivo real en el teléfono
-      //   2a) Lo normal: escribir en Descargas el blob que YA tenemos. Es
-      //       inmediato, no depende del servidor y evita que Android deje la
-      //       descarga "en espera para reintentar" con 0 B y nombre roto.
-      if (mode === 'device' || mode === 'both') {
-        if (blob) {
-          savedToDevice = await saveBlobToDevice(blob, filename, mime, taskId);
-        }
-
-        if (!savedToDevice) {
-          // 2b) Sin blob (modo "solo teléfono"): usar el gestor de Android,
-          //     pero sólo con un servidor que responda de verdad.
-          var deviceServer = usedServer || await pickReachableServer();
-          if (deviceServer) {
-            var deviceUrl = buildDownloadUrl(deviceServer, targetUrl, format, quality, title, artist);
-            try {
-              if (window.SonoraNative && typeof window.SonoraNative.downloadFile === 'function') {
-                savedToDevice = !!window.SonoraNative.downloadFile(deviceUrl, filename, mime);
-              } else {
-                var a = document.createElement('a');
-                a.href = deviceUrl;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                savedToDevice = true;
-              }
-            } catch (e) {
-              console.warn('[Download] device download error:', e);
-            }
-          } else if (Sonora.Store) {
-            Sonora.Store.emit('toast', {
-              message: '⚠ No hay ningún servidor disponible para guardar en el teléfono',
-              type: 'warning'
-            });
-          }
-        }
-      }
-
-      // 3) Guardar en la biblioteca + letras
-      try {
-        var syncedLyrics = '';
-        var plainLyrics = '';
+      // 1) Descarga del archivo con barra de progreso real (traemos el blob de forma segura)
+      for (var i = 0; i < servers.length; i++) {
         try {
-          var cleanSearchArtist = artist.replace(/\(.*?\)|\{.*?\}|\[.*?\]/g, '').trim();
-          var cleanSearchTitle = title.replace(/\(.*?\)|\{.*?\}|\[.*?\]/g, '').trim();
-          var lyricsBase = usedServer || servers[0] || '';
-          var lyricsEndpoint = lyricsBase
-            ? (lyricsBase.replace(/\/+$/, '') + '/api/lyrics?artist=' + encodeURIComponent(cleanSearchArtist) + '&title=' + encodeURIComponent(cleanSearchTitle))
-            : ('https://lrclib.net/api/get?artist_name=' + encodeURIComponent(cleanSearchArtist) + '&track_name=' + encodeURIComponent(cleanSearchTitle));
-          var lrcResp = await fetch(lyricsEndpoint);
-          if (lrcResp.ok) {
-            var lrcData = await lrcResp.json();
-            syncedLyrics = lrcData.syncedLyrics || '';
-            plainLyrics = lrcData.plainLyrics || '';
-          }
-        } catch (lrcErr) {}
-
-        var trackId = track.id || ('dl_' + Date.now());
-        var newTrack = {
-          id: trackId,
-          title: title,
-          artist: artist,
-          album: track.album || (track.platform === 'youtube' ? 'YouTube Music' : 'Sonora Music'),
-          albumId: track.albumId || 1,
-          artistId: track.artistId || 1,
-          duration: track.duration || 215,
-          artworkUrl: track.thumbnail || track.artworkUrl || '',
-          sourceUrl: targetUrl,
-          streamUrl: (usedServer || servers[0]) + '/api/stream/external?url=' + encodeURIComponent(targetUrl),
-          filePath: '',
-          isFavorite: 0,
-          playCount: 1,
-          lastPlayed: new Date().toISOString(),
-          dateAdded: new Date().toISOString(),
-          genre: track.genre || 'Descargas',
-          year: new Date().getFullYear(),
-          trackNumber: 1,
-          lyrics: plainLyrics,
-          syncedLyrics: syncedLyrics,
-          isDownloaded: 1
-        };
-
-        if (Sonora.DB && Sonora.DB.tracks) {
-          await Sonora.DB.tracks.add(newTrack).catch(function () {});
+          blob = await fetchBlobWithProgress(
+            buildDownloadUrl(servers[i], targetUrl, format, quality, title, artist),
+            updateTask,
+            function (xhr) {
+              if (_activeDownloads[taskId]) _activeDownloads[taskId].xhr = xhr;
+            }
+          );
+          usedServer = servers[i];
+          break;
+        } catch (err) {
+          lastError = err;
+          console.warn('[Download] servidor ' + servers[i] + ' falló:', err.message);
         }
-        if (blob && Sonora.DB && Sonora.DB.downloads && Sonora.DB.downloads.save) {
-          await Sonora.DB.downloads.save(trackId, blob);
-        }
+      }
 
-        if (_activeDownloads[taskId]) {
-          _activeDownloads[taskId].progress = 100;
-          _activeDownloads[taskId].phase = 'done';
-        }
-
-        _completedHistory.unshift({
-          id: taskId,
-          trackId: trackId,
-          title: title,
-          artist: artist,
-          format: format,
-          quality: quality,
-          filename: filename,
-          timestamp: Date.now(),
-          size: blob ? blob.size : 0,
-          deviceSaved: !!savedToDevice,
-          artworkUrl: track.thumbnail || track.artworkUrl || ''
-        });
-        saveHistory();
-
+      if (!blob) {
         delete _activeDownloads[taskId];
         updateBadge();
-
         if (Sonora.Store) {
           Sonora.Store.emit('toast', {
-            message: '✓ "' + title + '" lista (' + format.toUpperCase() +
-              (savedToDevice ? ' · guardada en Descargas' : ' · guardada en Sonora') + ')',
-            type: 'success'
+            message: '✗ No se pudo descargar "' + title + '": ' +
+              (lastError ? lastError.message : 'sin conexión con el servidor'),
+            type: 'error'
           });
         }
-        if (Sonora.Store) {
-          Sonora.Store.emit('downloadsChanged', { active: [], completed: _completedHistory });
+        return;
+      }
+
+      // 2) Guardar en Descargas del dispositivo (Android / Mac / Web) sin navegar jamás el frame
+      if (mode === 'device' || mode === 'both') {
+        savedToDevice = await saveBlobToDevice(blob, filename, mime, taskId);
+      }
+
+      // 3) Guardar en la biblioteca offline de Sonora (IndexedDB) + letras sincronizadas
+      if (mode === 'sonora' || mode === 'both') {
+        try {
+          var syncedLyrics = '';
+          var plainLyrics = '';
+          try {
+            var cleanSearchArtist = artist.replace(/\(.*?\)|\{.*?\}|\[.*?\]/g, '').trim();
+            var cleanSearchTitle = title.replace(/\(.*?\)|\{.*?\}|\[.*?\]/g, '').trim();
+            var lyricsBase = usedServer || servers[0] || 'https://sonora-music-b1ee.onrender.com';
+            var lyricsEndpoint = lyricsBase.replace(/\/+$/, '') + '/api/lyrics?artist=' + encodeURIComponent(cleanSearchArtist) + '&title=' + encodeURIComponent(cleanSearchTitle);
+            var lrcResp = await fetch(lyricsEndpoint);
+            if (lrcResp.ok) {
+              var lrcData = await lrcResp.json();
+              syncedLyrics = lrcData.syncedLyrics || '';
+              plainLyrics = lrcData.plainLyrics || '';
+            }
+          } catch (lrcErr) {}
+
+          var trackId = track.id || ('dl_' + Date.now());
+          var newTrack = {
+            id: trackId,
+            title: title,
+            artist: artist,
+            album: track.album || (track.platform === 'youtube' ? 'YouTube Music' : 'Sonora Music'),
+            albumId: track.albumId || 1,
+            artistId: track.artistId || 1,
+            duration: track.duration || 215,
+            artworkUrl: track.thumbnail || track.artworkUrl || '',
+            sourceUrl: targetUrl,
+            streamUrl: (Sonora.API && typeof Sonora.API.externalStreamUrl === 'function')
+              ? Sonora.API.externalStreamUrl(targetUrl)
+              : ((usedServer || servers[0]) + '/api/stream/external?url=' + encodeURIComponent(targetUrl)),
+            filePath: '',
+            isFavorite: 0,
+            playCount: 1,
+            lastPlayed: new Date().toISOString(),
+            dateAdded: new Date().toISOString(),
+            genre: track.genre || 'Descargas',
+            year: new Date().getFullYear(),
+            trackNumber: 1,
+            lyrics: plainLyrics,
+            syncedLyrics: syncedLyrics,
+            isDownloaded: 1
+          };
+
+          if (Sonora.DB && Sonora.DB.tracks) {
+            await Sonora.DB.tracks.add(newTrack).catch(function () {});
+          }
+          if (blob && Sonora.DB && Sonora.DB.downloads && Sonora.DB.downloads.save) {
+            await Sonora.DB.downloads.save(trackId, blob);
+          }
+        } catch (dbErr) {
+          console.warn('[Download] Error guardando en Sonora DB:', dbErr);
         }
-      } catch (err) {
-        delete _activeDownloads[taskId];
-        updateBadge();
-        console.error('[Download] Task error:', err);
+      }
+
+      if (_activeDownloads[taskId]) {
+        _activeDownloads[taskId].progress = 100;
+        _activeDownloads[taskId].phase = 'done';
+      }
+
+      _completedHistory.unshift({
+        id: taskId,
+        trackId: track.id || taskId,
+        title: title,
+        artist: artist,
+        format: format,
+        quality: quality,
+        filename: filename,
+        timestamp: Date.now(),
+        size: blob ? blob.size : 0,
+        deviceSaved: !!savedToDevice,
+        artworkUrl: track.thumbnail || track.artworkUrl || ''
+      });
+      saveHistory();
+
+      delete _activeDownloads[taskId];
+      updateBadge();
+
+      if (Sonora.Store) {
+        Sonora.Store.emit('toast', {
+          message: '✓ "' + title + '" guardada (' + format.toUpperCase() +
+            (savedToDevice ? ' · en Descargas' : '') + (mode === 'both' ? ' y en Sonora' : '') + ')',
+          type: 'success'
+        });
+        Sonora.Store.emit('downloadsChanged', { active: Object.values(_activeDownloads), completed: _completedHistory });
       }
     },
 
@@ -761,11 +833,17 @@
                            (item.total ? ' • ' + formatBytes(item.bytes) + ' de ' + formatBytes(item.total) : '')));
                     return `
                     <div style="background:var(--color-surface); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:12px;">
-                      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;">
-                        <span style="font-weight:700; font-size:14px; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:200px;">
+                      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <span style="font-weight:700; font-size:14px; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px;">
                           ${item.title}
                         </span>
-                        <span style="font-size:12px; font-weight:700; color:var(--color-primary, #FF4757);">${label}</span>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                          <span style="font-size:12px; font-weight:700; color:var(--color-primary, #FF4757);">${label}</span>
+                          <button type="button" class="btn-cancel-modal-dl" data-dl-id="${item.id}"
+                                  style="background:rgba(255,71,87,0.12); border:1px solid rgba(255,71,87,0.3); color:#FF4757; border-radius:8px; padding:3px 8px; font-size:11px; font-weight:700; cursor:pointer;" title="Quitar de la lista">
+                            ✕ Quitar
+                          </button>
+                        </div>
                       </div>
                       <div style="font-size:11px; color:#888; margin-bottom:8px;">
                         ${item.artist} • ${item.format.toUpperCase()} (${item.quality}) • ${detail}
@@ -842,6 +920,17 @@
             renderModal();
           };
         }
+
+        // Cancel active downloads
+        modal.querySelectorAll('.btn-cancel-modal-dl').forEach(function (btn) {
+          btn.onclick = function () {
+            var id = btn.getAttribute('data-dl-id');
+            if (id) {
+              Sonora.Download.cancelDownload(id);
+              renderModal();
+            }
+          };
+        });
 
         // Play in Sonora
         modal.querySelectorAll('.btn-dl-play').forEach(function (btn) {
@@ -1009,35 +1098,15 @@
         var usedServer = null;
         var lastError = null;
 
-        if (mode === 'device') {
-          // Directo al gestor de descargas del sistema (sin copia interna).
-          var directServer = await pickReachableServer();
-          if (!directServer) throw new Error('No hay servidor disponible');
-          var directUrl = buildDownloadUrl(directServer, targetUrl, 'mp4', quality, title, artist);
-          if (window.SonoraNative && typeof window.SonoraNative.downloadFile === 'function') {
-            if (!window.SonoraNative.downloadFile(directUrl, filename, mime)) {
-              throw new Error('El teléfono no pudo iniciar la descarga');
-            }
-          } else {
-            var aEl = document.createElement('a');
-            aEl.href = directUrl;
-            aEl.download = filename;
-            document.body.appendChild(aEl);
-            aEl.click();
-            document.body.removeChild(aEl);
-          }
-          delete _activeDownloads[taskId];
-          updateBadge();
-          if (Sonora.Store) Sonora.Store.emit('toast', { message: '📱 Descarga de video enviada al teléfono', type: 'success' });
-          return null;
-        }
-
-        // Modo Sonora o Ambos: primero traemos el MP4 completo para guardarlo.
+        // Traemos el MP4 completo con progreso real
         for (var i = 0; i < servers.length; i++) {
           try {
             blob = await fetchBlobWithProgress(
               buildDownloadUrl(servers[i], targetUrl, 'mp4', quality, title, artist),
-              updateTask
+              updateTask,
+              function (xhr) {
+                if (_activeDownloads[taskId]) _activeDownloads[taskId].xhr = xhr;
+              }
             );
             usedServer = servers[i];
             break;
@@ -1047,6 +1116,11 @@
           }
         }
         if (!blob) throw new Error(lastError ? lastError.message : 'No se pudo descargar el video');
+
+        // Guardar en el dispositivo de forma segura (Android / Mac / Web)
+        if (mode === 'device' || mode === 'both') {
+          await saveBlobToDevice(blob, filename, mime, taskId);
+        }
 
         // Carátula offline (data URL) para que la biblioteca se vea sin internet.
         var thumbData = await fetchThumbnailData(video.thumbnailData || video.thumbnail || '');

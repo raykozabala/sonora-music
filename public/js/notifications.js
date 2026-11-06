@@ -12,6 +12,12 @@
 
   function getContainer() {
     if (!_container) _container = document.getElementById('toast-container');
+    if (_container && !_container.getAttribute('aria-live')) {
+      // Los toasts se anuncian a lectores de pantalla sin robar el foco.
+      _container.setAttribute('role', 'status');
+      _container.setAttribute('aria-live', 'polite');
+      _container.setAttribute('aria-atomic', 'false');
+    }
     return _container;
   }
 
@@ -19,14 +25,30 @@
     var toast = document.createElement('div');
     toast.className = 'toast toast--' + (type || 'info');
     var icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
-    toast.innerHTML =
-      '<span class="toast__icon">' + (icons[type] || icons.info) + '</span>' +
-      '<span class="toast__message">' + message + '</span>' +
-      '<button class="toast__close btn--icon" aria-label="Cerrar">✕</button>';
 
-    toast.querySelector('.toast__close').addEventListener('click', function () {
+    var iconEl = document.createElement('span');
+    iconEl.className = 'toast__icon';
+    iconEl.setAttribute('aria-hidden', 'true');
+    iconEl.textContent = icons[type] || icons.info;
+
+    // textContent (nunca innerHTML): los títulos de YouTube/SoundCloud son
+    // externos y antes podían inyectar HTML/scripts en la app.
+    var msgEl = document.createElement('span');
+    msgEl.className = 'toast__message';
+    msgEl.textContent = message == null ? '' : String(message);
+
+    var closeEl = document.createElement('button');
+    closeEl.type = 'button';
+    closeEl.className = 'toast__close btn--icon';
+    closeEl.setAttribute('aria-label', 'Cerrar notificación');
+    closeEl.textContent = '✕';
+    closeEl.addEventListener('click', function () {
       removeToast(toast);
     });
+
+    toast.appendChild(iconEl);
+    toast.appendChild(msgEl);
+    toast.appendChild(closeEl);
 
     return toast;
   }
@@ -87,16 +109,38 @@
     },
 
     /**
+     * Comprueba la preferencia guardada para una categoría de aviso.
+     * Las claves se escriben también en localStorage para poder leerlas
+     * de forma síncrona desde este módulo.
+     */
+    isEnabled: function (category) {
+      if (!category) return true;
+      var key = category === 'updates' ? 'notify_updates'
+        : (category === 'new_tracks' ? 'notify_new_tracks' : null);
+      if (!key) return true;
+      try {
+        var raw = localStorage.getItem('sonora_' + key);
+        if (raw !== null) return JSON.parse(raw) !== false;
+      } catch (e) {}
+      return true;
+    },
+
+    /**
      * Show a browser push notification
+     * options.category: 'updates' | 'new_tracks' (se respeta Ajustes)
      */
     push: function (title, options) {
       if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      options = options || {};
+      if (!Sonora.Notifications.isEnabled(options.category)) return;
       try {
+        var pushOpts = Object.assign({}, options);
+        delete pushOpts.category;
         var notif = new Notification(title, Object.assign({
-          icon: '/icons/icon-192.png',
-          badge: '/icons/icon-72.png',
+          icon: new URL('icons/icon-192.png', window.location.href).href,
+          badge: new URL('icons/icon-72.png', window.location.href).href,
           vibrate: [200, 100, 200]
-        }, options || {}));
+        }, pushOpts));
         notif.onclick = function () { window.focus(); notif.close(); };
       } catch (e) { console.warn('[Notifications] Push error:', e); }
     },
@@ -105,7 +149,8 @@
      * Initialize — listen for toast events from Store
      */
     init: function () {
-      _container = document.getElementById('toast-container');
+      _container = null;
+      getContainer();
       Sonora.Store.on('toast', function (data) {
         if (!data) return;
         if (typeof data === 'string') {

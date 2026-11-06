@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Sonora Music">
-  <meta name="description" content="Sonora Music v4 Ultimate — Tu reproductor de música profesional">
+  <meta name="description" content="Sonora Music — Tu reproductor de música profesional">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="format-detection" content="telephone=no">
 
@@ -24,6 +24,8 @@
   <link rel="stylesheet" href="./css/video-player.css">
   <link rel="stylesheet" href="./css/animations.css">
   <link rel="stylesheet" href="./css/responsive.css">
+  <link rel="stylesheet" href="./css/desktop-spotify.css">
+  <link rel="stylesheet" href="./css/enhancements.css">
 
   <!-- Preconnect -->
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
@@ -65,7 +67,7 @@
   <div id="splash-screen">
     <img class="splash-note" src="./icons/icon-192.png" style="border-radius:20px; box-shadow:0 8px 30px rgba(0,0,0,0.4);" alt="Logo">
     <div class="splash-title">Sonora Music</div>
-    <div class="splash-subtitle">v7.11.0</div>
+    <div class="splash-subtitle">v7.17.0</div>
     <div class="splash-loader"></div>
   </div>
 
@@ -128,6 +130,7 @@
         <div class="mini-player__progress-fill" id="mini-progress-fill"></div>
       </div>
       <div class="mini-player__content" id="mini-player-content">
+        <!-- Mobile Layout -->
         <div class="mini-player__artwork">
           <img id="mini-artwork" src="" alt="" loading="lazy">
         </div>
@@ -144,6 +147,95 @@
           <button class="btn--icon" id="mini-next-btn" aria-label="Siguiente">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
               <path d="M6 18l8.5-6L6 6v12zm2 0V6l6.5 6L8 18zm8-12v12h2V6h-2z"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Desktop Spotify Bottom Bar: Left (Artwork + Title + Like) -->
+        <div class="desktop-player-left">
+          <img id="desktop-art" class="desktop-player-art" src="" alt="Album cover" />
+          <div class="desktop-player-meta">
+            <span id="desktop-title" class="desktop-player-title">—</span>
+            <span id="desktop-artist" class="desktop-player-artist">—</span>
+          </div>
+          <button id="desktop-like-btn" class="desktop-player-like" aria-label="Me gusta" title="Guardar en favoritos">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Desktop Spotify Bottom Bar: Center (Controls + Scrubbable Timeline) -->
+        <div class="desktop-player-center">
+          <div class="desktop-ctrls-row">
+            <button id="desktop-shuffle-btn" class="desktop-ctrl-btn" aria-label="Aleatorio" title="Aleatorio">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
+                <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
+                <line x1="4" y1="4" x2="9" y2="9"/>
+              </svg>
+            </button>
+            <button id="desktop-prev-btn" class="desktop-ctrl-btn" aria-label="Anterior" title="Anterior">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+              </svg>
+            </button>
+            <button id="desktop-play-btn" class="desktop-btn-play" aria-label="Reproducir" title="Reproducir/Pausar">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path id="desktop-play-icon" d="M8 5v14l11-7z"/>
+              </svg>
+            </button>
+            <button id="desktop-next-btn" class="desktop-ctrl-btn" aria-label="Siguiente" title="Siguiente">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6 18l8.5-6L6 6v12zm2 0V6l6.5 6L8 18zm8-12v12h2V6h-2z"/>
+              </svg>
+            </button>
+            <button id="desktop-repeat-btn" class="desktop-ctrl-btn" aria-label="Repetir" title="Repetir">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+                <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+              </svg>
+            </button>
+          </div>
+          <div class="desktop-timeline-row">
+            <span id="desktop-time-current" class="desktop-time-tag">0:00</span>
+            <div id="desktop-timeline-track" class="desktop-timeline-track" title="Buscar posición">
+              <div id="desktop-timeline-fill" class="desktop-timeline-fill"></div>
+            </div>
+            <span id="desktop-time-duration" class="desktop-time-tag">0:00</span>
+          </div>
+        </div>
+
+        <!-- Desktop Spotify Bottom Bar: Right (Lyrics, PiP, Queue, Volume, Fullscreen) -->
+        <div class="desktop-player-right">
+          <button id="desktop-lyrics-btn" class="desktop-action-btn" aria-label="Letra" title="Ver letra en pantalla completa">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 6h16M4 10h12M4 14h16M4 18h8"/>
+            </svg>
+          </button>
+          <button id="desktop-pip-btn" class="desktop-action-btn" aria-label="Mini-reproductor flotante" title="Mini-reproductor flotante (PiP)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+              <rect x="12" y="9" width="8" height="6" rx="1" fill="currentColor" opacity="0.3"/>
+            </svg>
+          </button>
+          <button id="desktop-queue-btn" class="desktop-action-btn" aria-label="Cola" title="Cola de reproducción">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+              <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+            </svg>
+          </button>
+          <div class="desktop-vol-box">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+            </svg>
+            <input id="desktop-vol-slider" class="desktop-vol-slider" type="range" min="0" max="100" value="80" aria-label="Volumen"/>
+          </div>
+          <button id="desktop-fullscreen-btn" class="desktop-action-btn" aria-label="Pantalla Completa" title="Pantalla completa total (F)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+              <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
             </svg>
           </button>
         </div>
@@ -174,6 +266,7 @@
         </div>
       </div>
 
+      <div class="player__right-column">
       <div class="player__info">
         <h2 id="player-title" class="player__title">—</h2>
         <p id="player-artist" class="player__artist">—</p>
@@ -224,13 +317,16 @@
         <button id="player-lyrics" class="btn--icon" aria-label="Letra">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 10h12M4 14h16M4 18h8"/></svg>
         </button>
-        <button id="player-visualizer-toggle" class="btn--icon" aria-label="Visualizador">
+        <button id="player-visualizer-toggle" class="btn--icon" aria-label="Visualizador" title="Visualizador">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <rect x="2" y="10" width="3" height="10" rx="1.5"/>
             <rect x="7" y="6" width="3" height="14" rx="1.5"/>
             <rect x="12" y="3" width="3" height="17" rx="1.5"/>
             <rect x="17" y="8" width="3" height="12" rx="1.5"/>
           </svg>
+        </button>
+        <button id="player-speed" class="player__speed-btn" aria-label="Velocidad de reproducción" title="Velocidad de reproducción">
+          <span id="player-speed-label">1×</span>
         </button>
         <button id="player-sleep" class="btn--icon" aria-label="Temporizador">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -241,12 +337,6 @@
         <button id="player-download" class="btn--icon" aria-label="Descargar">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </button>
-        <button id="player-lark" class="btn--icon" aria-label="Abrir en Lark Player" title="Abrir en Lark Player">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-        </button>
-        <button id="player-share" class="btn--icon" aria-label="Compartir">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-        </button>
       </div>
 
       <div class="player__volume">
@@ -254,49 +344,72 @@
         <input type="range" id="player-volume" min="0" max="100" value="80" class="volume-slider" aria-label="Volumen">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
       </div>
+      </div><!-- /player__right-column -->
     </div>
 
-    <!-- ═══════════════ BOTTOM NAVIGATION ═══════════════ -->
+    <!-- ═══════════════ BOTTOM NAVIGATION & DESKTOP SIDEBAR ═══════════════ -->
     <nav id="bottom-nav">
-      <button data-page="home" class="nav-item active" aria-label="Inicio">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-          <polyline points="9 22 9 12 15 12 15 22"/>
-        </svg>
-        <span data-i18n="nav.home">Inicio</span>
-      </button>
-      <button data-page="search" class="nav-item" aria-label="Buscar">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"/>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-        <span data-i18n="nav.search">Buscar</span>
-      </button>
-      <button data-page="library" class="nav-item" aria-label="Biblioteca">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-        </svg>
-        <span data-i18n="nav.library">Biblioteca</span>
-      </button>
-      <button data-page="playlists" class="nav-item" aria-label="Listas">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="8" y1="6" x2="21" y2="6"/>
-          <line x1="8" y1="12" x2="21" y2="12"/>
-          <line x1="8" y1="18" x2="21" y2="18"/>
-          <line x1="3" y1="6" x2="3.01" y2="6"/>
-          <line x1="3" y1="12" x2="3.01" y2="12"/>
-          <line x1="3" y1="18" x2="3.01" y2="18"/>
-        </svg>
-        <span data-i18n="nav.playlists">Listas</span>
-      </button>
-      <button data-page="discover" class="nav-item" aria-label="Descubrir">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"/>
-          <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>
-        </svg>
-        <span data-i18n="nav.discover">Descubrir</span>
-      </button>
+      <div class="sidebar-main-nav">
+        <button data-page="home" class="nav-item active" aria-label="Inicio">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+          <span data-i18n="nav.home">Inicio</span>
+        </button>
+        <button data-page="search" class="nav-item" aria-label="Buscar">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <span data-i18n="nav.search">Buscar</span>
+        </button>
+        <button data-page="library" class="nav-item" aria-label="Biblioteca">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+          </svg>
+          <span data-i18n="nav.library">Biblioteca</span>
+        </button>
+        <button data-page="playlists" class="nav-item" aria-label="Listas">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="8" y1="6" x2="21" y2="6"/>
+            <line x1="8" y1="12" x2="21" y2="12"/>
+            <line x1="8" y1="18" x2="21" y2="18"/>
+            <line x1="3" y1="6" x2="3.01" y2="6"/>
+            <line x1="3" y1="12" x2="3.01" y2="12"/>
+            <line x1="3" y1="18" x2="3.01" y2="18"/>
+          </svg>
+          <span data-i18n="nav.playlists">Listas</span>
+        </button>
+        <button data-page="discover" class="nav-item" aria-label="Descubrir">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>
+          </svg>
+          <span data-i18n="nav.discover">Descubrir</span>
+        </button>
+      </div>
+
+      <!-- Quick Section for Desktop (Spotify style) -->
+      <div class="sidebar-quick-section">
+        <div class="sidebar-quick-header">
+          <span class="sidebar-quick-title">Tu Colección</span>
+          <button id="sidebar-add-playlist-btn" class="sidebar-quick-add" title="Crear nueva lista" aria-label="Crear lista">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        </div>
+        <div id="sidebar-fav-item" class="sidebar-pinned-item" title="Canciones que te gustan">
+          <div class="sidebar-playlist-thumb thumb--heart">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+          </div>
+          <div class="sidebar-playlist-meta">
+            <span class="sidebar-playlist-name">Tus me gusta</span>
+            <span class="sidebar-playlist-info" id="sidebar-fav-count">Favoritos</span>
+          </div>
+        </div>
+        <div id="sidebar-playlists-scroll" class="sidebar-playlists-scroll"></div>
+      </div>
     </nav>
 
     <!-- ═══════════════ OVERLAYS & PANELS ═══════════════ -->
@@ -362,6 +475,245 @@
       </div>
     </div>
 
+    <!-- Playback Sheet: velocidad + visualizador -->
+    <div id="playback-sheet" class="modal hidden">
+      <div class="modal__backdrop"></div>
+      <div class="modal__content playback-sheet__content">
+        <div class="playback-sheet__header">
+          <h3>Reproducción</h3>
+          <button class="btn--icon" id="playback-sheet-close" aria-label="Cerrar">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <div class="playback-sheet__section">
+          <span class="playback-sheet__label">Velocidad</span>
+          <div class="playback-sheet__chips" id="playback-speed-chips">
+            <button class="playback-chip" data-speed="0.5">0.5×</button>
+            <button class="playback-chip" data-speed="0.75">0.75×</button>
+            <button class="playback-chip active" data-speed="1">1×</button>
+            <button class="playback-chip" data-speed="1.25">1.25×</button>
+            <button class="playback-chip" data-speed="1.5">1.5×</button>
+            <button class="playback-chip" data-speed="2">2×</button>
+          </div>
+        </div>
+
+        <div class="playback-sheet__section">
+          <span class="playback-sheet__label">Visualizador</span>
+          <div class="playback-sheet__chips" id="playback-viz-chips">
+            <button class="playback-chip" data-viz="none">Apagado</button>
+            <button class="playback-chip active" data-viz="wave">Onda</button>
+            <button class="playback-chip" data-viz="circular">Círculo</button>
+            <button class="playback-chip" data-viz="particle">Partículas</button>
+            <button class="playback-chip" data-viz="bar">Barras</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ SPOTIFY FULLSCREEN OVERLAY ═══════════════ -->
+    <div id="fullscreen-overlay" class="fullscreen-overlay hidden">
+      <div id="fs-bg-ambient" class="fs-bg-ambient"></div>
+
+      <!-- Top Header -->
+      <div class="fs-header">
+        <div class="fs-header-left">
+          <button id="fs-close-top-btn" class="fs-icon-btn" aria-label="Cerrar pantalla completa" title="Cerrar (Esc)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <span class="fs-playing-from">Reproduciendo de tu biblioteca</span>
+        </div>
+        <div class="fs-header-center">
+          <button id="fs-mode-toggle-btn" class="fs-toggle-pill" aria-label="Cambiar entre modo Música y Video">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="23 7 16 12 23 17 23 7"/>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+            </svg>
+            <span id="fs-mode-toggle-label">Modo Video</span>
+          </button>
+        </div>
+        <div class="fs-header-right">
+          <button id="fs-exit-btn" class="fs-icon-btn" aria-label="Salir de pantalla completa" title="Salir (F)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+              <line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Main Showcase (Left: Media / Right: Synced Lyrics) -->
+      <div class="fs-showcase">
+        <div class="fs-media-col">
+          <div class="fs-artwork-card">
+            <img id="fs-artwork-img" src="" alt="Cover" />
+            <div id="fs-video-container" class="fs-video-container hidden"></div>
+          </div>
+          <div class="fs-meta-box">
+            <h2 id="fs-track-title" class="fs-track-title">—</h2>
+            <p id="fs-track-artist" class="fs-track-artist">—</p>
+          </div>
+        </div>
+
+        <div class="fs-lyrics-col">
+          <div class="fs-lyrics-scroller" id="fs-lyrics-scroller">
+            <div class="fs-lyrics-lines" id="fs-lyrics-lines">
+              <div class="fs-lyric-item active">Cargando letra...</div>
+            </div>
+          </div>
+          <button id="fs-lyrics-sync" class="fs-lyrics-sync-btn hidden" aria-label="Volver a la letra que suena" title="Volver a la letra que suena">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+            Sincronizar
+          </button>
+          <div class="fs-lyrics-footer">Letra sincronizada en vivo · LRCLIB</div>
+        </div>
+      </div>
+
+      <!-- Bottom Controls Bar -->
+      <div class="fs-controls-bar">
+        <div class="fs-progress-wrap">
+          <span id="fs-time-current" class="fs-time">0:00</span>
+          <div id="fs-progress-track" class="fs-progress-track">
+            <div id="fs-progress-fill" class="fs-progress-fill"></div>
+          </div>
+          <span id="fs-time-duration" class="fs-time">0:00</span>
+        </div>
+
+        <div class="fs-controls-row">
+          <div class="fs-controls-left">
+            <button id="fs-fav-btn" class="fs-btn-sub" aria-label="Me gusta" title="Añadir a favoritos">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+              </svg>
+            </button>
+          </div>
+
+          <div class="fs-controls-center">
+            <button id="fs-shuffle-btn" class="fs-btn-sub" aria-label="Aleatorio" title="Aleatorio">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
+                <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
+                <line x1="4" y1="4" x2="9" y2="9"/>
+              </svg>
+            </button>
+            <button id="fs-prev-btn" class="fs-btn-main" aria-label="Anterior" title="Anterior">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+              </svg>
+            </button>
+            <button id="fs-play-btn" class="fs-btn-play" aria-label="Reproducir" title="Reproducir/Pausar">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                <path id="fs-play-icon" d="M8 5v14l11-7z"/>
+              </svg>
+            </button>
+            <button id="fs-next-btn" class="fs-btn-main" aria-label="Siguiente" title="Siguiente">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6 18l8.5-6L6 6v12zm2 0V6l6.5 6L8 18zm8-12v12h2V6h-2z"/>
+              </svg>
+            </button>
+            <button id="fs-repeat-btn" class="fs-btn-sub" aria-label="Repetir" title="Repetir">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+                <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+              </svg>
+            </button>
+          </div>
+
+          <div class="fs-controls-right">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+            </svg>
+            <input id="fs-volume-slider" class="fs-vol-range" type="range" min="0" max="100" value="80" aria-label="Volumen"/>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ FLOATING PIP WIDGET ═══════════════ -->
+    <div id="floating-pip-widget" class="pip-widget hidden mode-bar">
+      <!-- MODE 1: Disc -->
+      <div id="pip-disc-view" class="pip-disc-view" title="Click para pausar/reanudar (Frenado de vinilo) · Arrastra para mover">
+        <div id="pip-vinyl" class="pip-vinyl spinning">
+          <img id="pip-vinyl-img" class="pip-vinyl-cover" src="" alt="Vinyl cover" />
+          <div class="pip-vinyl-hole"></div>
+        </div>
+        <button id="pip-disc-expand-btn" class="pip-disc-expand-btn" title="Expandir a barra" aria-label="Expandir">⤢</button>
+      </div>
+
+      <!-- MODE 2: Vertical Card with Lyrics -->
+      <div class="pip-vertical-view">
+        <div id="pip-drag-bar-vert" class="pip-drag-bar" title="Arrastrar widget">
+          <span class="pip-dot-drag">⠿⠿</span>
+          <span class="pip-bar-title">Sonora Mini</span>
+          <div class="pip-window-btns">
+            <button class="pip-mode-btn" data-pip-mode="disc" title="Modo Disco Vinilo">💿</button>
+            <button class="pip-mode-btn" data-pip-mode="bar" title="Modo Barra">▬</button>
+            <button id="pip-close-btn-vert" class="pip-close-btn" title="Cerrar widget">✕</button>
+          </div>
+        </div>
+        <div class="pip-vert-art-wrap">
+          <img id="pip-vert-artwork" class="pip-vert-artwork" src="" alt="" />
+          <div class="pip-vert-info">
+            <span id="pip-vert-title" class="pip-vert-title">—</span>
+            <span id="pip-vert-artist" class="pip-vert-artist">—</span>
+          </div>
+        </div>
+        <div class="pip-vert-lyrics">
+          <div class="pip-lyric-line" id="pip-vert-lyric">Sonora Music</div>
+          <div class="pip-lyric-line next" id="pip-vert-lyric-next">Tu reproductor pro</div>
+        </div>
+        <div class="pip-vert-progress">
+          <div id="pip-vert-progress-fill" class="pip-progress-fill"></div>
+        </div>
+        <div class="pip-vert-controls">
+          <button id="pip-vert-prev" class="desktop-ctrl-btn" aria-label="Anterior">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+          </button>
+          <button id="pip-vert-play" class="desktop-btn-play" style="width:32px;height:32px;" aria-label="Reproducir">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path id="pip-vert-play-icon" d="M8 5v14l11-7z"/></svg>
+          </button>
+          <button id="pip-vert-next" class="desktop-ctrl-btn" aria-label="Siguiente">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zm2 0V6l6.5 6L8 18zm8-12v12h2V6h-2z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- MODE 3: Horizontal Dock Bar -->
+      <div class="pip-bar-view">
+        <span id="pip-drag-bar-horiz" class="pip-bar-drag" title="Arrastrar widget">⠿</span>
+        <div class="pip-bar-artwork-wrap">
+          <img id="pip-bar-artwork" class="pip-bar-artwork" src="" alt="" />
+        </div>
+        <div class="pip-bar-info">
+          <span id="pip-bar-title" class="pip-bar-title-text">—</span>
+          <span id="pip-bar-artist" class="pip-bar-artist-text">—</span>
+        </div>
+        <div class="pip-bar-controls">
+          <button id="pip-bar-prev" class="desktop-ctrl-btn" aria-label="Anterior">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+          </button>
+          <button id="pip-bar-play" class="desktop-btn-play" style="width:28px;height:28px;" aria-label="Reproducir">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path id="pip-bar-play-icon" d="M8 5v14l11-7z"/></svg>
+          </button>
+          <button id="pip-bar-next" class="desktop-ctrl-btn" aria-label="Siguiente">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zm2 0V6l6.5 6L8 18zm8-12v12h2V6h-2z"/></svg>
+          </button>
+        </div>
+        <div class="pip-bar-actions">
+          <button class="pip-mode-btn" data-pip-mode="disc" title="Modo Disco">💿</button>
+          <button class="pip-mode-btn" data-pip-mode="vertical" title="Modo Vertical">▮</button>
+          <button id="pip-close-btn-bar" class="pip-close-btn" title="Cerrar widget">✕</button>
+        </div>
+        <div class="pip-bar-progress">
+          <div id="pip-bar-progress-fill" class="pip-progress-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Format / Download Modal Container (Root Level) -->
+    <div id="format-modal-container"></div>
+
     <!-- Toast Container -->
     <div id="toast-container"></div>
 
@@ -386,6 +738,9 @@
   <script src="./js/playlists.js"></script>
   <script src="./js/profile.js"></script>
   <script src="./js/settings.js"></script>
+  <script src="./js/updater.js"></script>
+  <script src="./js/lyrics.js"></script>
+  <script src="./js/desktop-spotify.js"></script>
   <script src="./js/app.js"></script>
 </body>
 </html>

@@ -1,25 +1,35 @@
 /**
  * Sonora Music — API Client
- * Dual-server connection (Local PC + Render)
+ * Triple-server connection (Local PC + Render + Northflank)
  */
 (function () {
   'use strict';
 
   var Sonora = window.Sonora = window.Sonora || {};
 
-  var _mode = 'local'; // 'local' | 'render' | 'off' (Default to Local PC server on same Wi-Fi)
-  var _localUrl = 'http://192.168.1.132:3000';
+  var _mode = 'device'; // 'device' | 'local' | 'render' | 'northflank' | 'off'
+  var _localUrl = '';
   var _renderUrl = 'https://sonora-music-b1ee.onrender.com';
-  // Render (plan gratuito) hiberna: la primera petición puede tardar ~50 s.
-  // Con 6 s la app se daba por "desconectada" teniendo el servidor bien.
-  var _timeout = 20000;
+  var _northflankUrl = '';
+  var _northflankToken = '';
+  var _timeout = 15000;
 
-  // Si la app se está viendo servida por el propio servidor (navegador en la PC
-  // o en el celular vía http://IP:3000), usamos ese mismo origen como servidor
-  // local. Así funciona sin configurar nada, aunque la IP de la red cambie.
+  function isLocalHostname(hostname) {
+    if (!hostname) return false;
+    return hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname.endsWith('.local') ||
+      /^192\.168\./.test(hostname) ||
+      /^10\./.test(hostname) ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname);
+  }
+
+  // Si la app se está sirviendo desde un servidor local (ej. http://192.168.x.x:3000 o .local),
+  // usamos ese mismo origen como servidor local sin romper si se abre desde la nube.
   try {
     if (typeof window !== 'undefined' && window.location &&
-        (window.location.protocol === 'http:' || window.location.protocol === 'https:')) {
+        (window.location.protocol === 'http:' || window.location.protocol === 'https:') &&
+        isLocalHostname(window.location.hostname)) {
       _localUrl = window.location.origin;
     }
   } catch (e) { /* entorno sin window (WebView file://) */ }
@@ -27,18 +37,46 @@
   function getBaseUrl() {
     if (_mode === 'local') return _localUrl;
     if (_mode === 'render') return _renderUrl;
-    return _localUrl;
+    if (_mode === 'northflank') return _northflankUrl;
+    // 'device' y 'off' no tienen servidor: todo funciona con datos locales.
+    return '';
+  }
+
+  /**
+   * Servidor para playlists colaborativas.
+   * Las playlists colaborativas necesitan un servidor compartido, así que en
+   * Modo Dispositivo (APK, web local) usamos la nube de Sonora como respaldo.
+   * Antes esto devolvía '' y por eso "unirse por código" nunca funcionaba en
+   * el teléfono.
+   */
+  function getCollabBase() {
+    var base = getBaseUrl();
+    if (base) return base;
+    return _renderUrl;
+  }
+
+  function getTimeoutForMode(mode) {
+    if (mode === 'local') return 5000;
+    if (mode === 'northflank') return 10000;
+    return 20000; // Render puede hibernar
   }
 
   function fetchWithTimeout(url, options, timeout) {
     return new Promise(function (resolve, reject) {
       var controller = new AbortController();
+      var t = timeout || getTimeoutForMode(_mode) || _timeout;
       var timer = setTimeout(function () {
         controller.abort();
         reject(new Error('Request timeout'));
-      }, timeout || _timeout);
+      }, t);
 
       var fetchOpts = Object.assign({}, options || {}, { signal: controller.signal });
+      if (_mode === 'northflank' && _northflankToken) {
+        fetchOpts.headers = Object.assign({}, fetchOpts.headers || {});
+        if (!fetchOpts.headers['Authorization']) {
+          fetchOpts.headers['Authorization'] = 'Bearer ' + _northflankToken;
+        }
+      }
 
       fetch(url, fetchOpts)
         .then(function (resp) { clearTimeout(timer); resolve(resp); })
@@ -46,13 +84,47 @@
     });
   }
 
+  function saveSettingPersistent(key, val) {
+    if (Sonora.DB && Sonora.DB.settings && typeof Sonora.DB.settings.set === 'function') {
+      try { Sonora.DB.settings.set(key, val); } catch (e) {}
+    }
+    try {
+      localStorage.setItem('sonora_' + key, JSON.stringify(val));
+    } catch (e) {}
+  }
+
+  function updateStatusDotUI(mode) {
+    var dot = document.getElementById('server-dot');
+    if (dot) {
+      dot.className = 'server-dot ' + (
+        mode === 'device' ? 'server-dot--device' : (
+          mode === 'local' ? 'connected-local' : (
+            mode === 'northflank' ? 'connected-northflank' : (
+              mode === 'render' ? 'connected-render' : 'disconnected'
+            )
+          )
+        )
+      );
+      if (mode === 'device') dot.title = 'Modo Dispositivo · solo música local';
+      else if (mode === 'local') dot.title = 'Servidor local';
+      else if (mode === 'render') dot.title = 'Servidor en la nube';
+      else if (mode === 'northflank') dot.title = 'Servidor Northflank';
+      else dot.title = 'Sin conexión con el servidor';
+    }
+  }
+
   Sonora.API = {
     /**
      * Set connection mode
      */
     setMode: function (mode) {
-      _mode = mode || 'off';
+      // El modelo nuevo no tiene "sin conexión": si no hay servidor,
+      // la app vive en Modo Dispositivo con la música local.
+      _mode = (!mode || mode === 'off') ? 'device' : mode;
       Sonora.Store.set('serverMode', _mode);
+      saveSettingPersistent('serverMode', _mode);
+      saveSettingPersistent('server_mode', _mode);
+      updateStatusDotUI(_mode);
       console.log('[API] Mode set to:', _mode);
     },
 
@@ -67,16 +139,20 @@
      * Set local server URL
      */
     setLocalUrl: function (url) {
-      _localUrl = url;
+      _localUrl = (url || '').trim();
       Sonora.Store.set('serverLocalUrl', _localUrl);
+      saveSettingPersistent('serverLocalUrl', _localUrl);
+      saveSettingPersistent('server_local_url', _localUrl);
     },
 
     /**
      * Set Render server URL
      */
     setRenderUrl: function (url) {
-      _renderUrl = url;
+      _renderUrl = (url || '').trim();
       Sonora.Store.set('serverRenderUrl', _renderUrl);
+      saveSettingPersistent('serverRenderUrl', _renderUrl);
+      saveSettingPersistent('server_render_url', _renderUrl);
     },
 
     /**
@@ -90,6 +166,36 @@
     getRenderUrl: function () { return _renderUrl; },
 
     /**
+     * Set Northflank server URL
+     */
+    setNorthflankUrl: function (url) {
+      _northflankUrl = (url || '').trim();
+      Sonora.Store.set('serverNorthflankUrl', _northflankUrl);
+      saveSettingPersistent('serverNorthflankUrl', _northflankUrl);
+      saveSettingPersistent('server_northflank_url', _northflankUrl);
+    },
+
+    /**
+     * Get Northflank server URL
+     */
+    getNorthflankUrl: function () { return _northflankUrl; },
+
+    /**
+     * Set Northflank API token
+     */
+    setNorthflankToken: function (token) {
+      _northflankToken = (token || '').trim();
+      Sonora.Store.set('serverNorthflankToken', _northflankToken);
+      saveSettingPersistent('serverNorthflankToken', _northflankToken);
+      saveSettingPersistent('server_northflank_token', _northflankToken);
+    },
+
+    /**
+     * Get Northflank API token
+     */
+    getNorthflankToken: function () { return _northflankToken; },
+
+    /**
      * Get currently active server URL
      */
     getActiveUrl: function () {
@@ -97,15 +203,65 @@
     },
 
     /**
+     * URL de la nube de Sonora (Render).
+     * Se usa como respaldo para búsquedas, carátulas, videos y letras cuando
+     * el usuario está en Modo Dispositivo (APK/Mac) y no hay servidor local.
+     */
+    getRenderBase: function () {
+      return String(_renderUrl || '').trim().replace(/\/+$/, '');
+    },
+
+    /**
+     * Servidor de medios con respaldo real.
+     * getActiveUrl() devuelve '' en Modo Dispositivo; si usáramos eso, las
+     * URLs quedaban relativas ("/api/...") y fallaban en file:// (Android) y
+     * tauri:// (macOS). Aquí siempre preferimos un servidor absoluto.
+     */
+    getMediaBase: function () {
+      var base = getBaseUrl();
+      if (base) return String(base).trim().replace(/\/+$/, '');
+      var render = Sonora.API.getRenderBase();
+      if (render) return render;
+      try {
+        if (window.location && (window.location.protocol === 'http:' || window.location.protocol === 'https:')) {
+          return String(window.location.origin).replace(/\/+$/, '');
+        }
+      } catch (e) {}
+      return '';
+    },
+
+    /**
+     * Construye una URL absoluta de streaming externo.
+     * Añade la calidad de audio configurada (96/160/320 kbps).
+     */
+    externalStreamUrl: function (targetUrl, quality) {
+      var base = Sonora.API.getMediaBase();
+      if (!base || !targetUrl) return '';
+      var q = quality;
+      if (!q) {
+        try { q = JSON.parse(localStorage.getItem('sonora_audio_quality')); } catch (e) {}
+      }
+      var bitrate = q === 'low' ? '96k' : (q === 'high' ? '320k' : '160k');
+      return base + '/api/stream/external?url=' + encodeURIComponent(targetUrl) +
+        '&quality=' + encodeURIComponent(bitrate);
+    },
+
+    /**
+     * URL del servidor compartido para playlists colaborativas.
+     * Siempre devuelve algo (usa la nube de Sonora en Modo Dispositivo).
+     */
+    getCollabBase: function () {
+      return getCollabBase();
+    },
+
+    /**
      * Get related music recommendations for continuous autoplay
      */
-    /**
-     * Recomendaciones de música similar. Se envían artista, título y género
-     * para que el servidor busque cosas parecidas de verdad, y una lista de
-     * títulos ya escuchados para no repetir.
-     */
     getRecommendations: function (artist, title, genre, excludeTitles) {
-      var base = this.getActiveUrl();
+      // En Modo Dispositivo no hay servidor activo: usamos la nube de Sonora
+      // para que Inicio/Discover sigan teniendo recomendaciones reales.
+      var base = this.getMediaBase();
+      if (!base) return Promise.resolve([]);
       var url = base + '/api/recommendations'
         + '?artist=' + encodeURIComponent(artist || '')
         + '&title=' + encodeURIComponent(title || '')
@@ -118,8 +274,6 @@
         })
         .then(function (list) {
           if (!Array.isArray(list)) return [];
-          // Normalizamos al formato de canción que usa la app (la miniatura
-          // de YouTube pasa a ser la carátula y se deja una URL de stream).
           return list.map(function (x) {
             if (!x) return null;
             var url2 = x.url || x.sourceUrl || '';
@@ -132,9 +286,7 @@
               duration: x.duration || 0,
               artworkUrl: x.artworkUrl || x.thumbnail || x.image || '',
               sourceUrl: url2,
-              streamUrl: url2
-                ? (base.replace(/\/+$/, '') + '/api/stream/external?url=' + encodeURIComponent(url2))
-                : (x.streamUrl || ''),
+              streamUrl: url2 ? Sonora.API.externalStreamUrl(url2) : (x.streamUrl || ''),
               platform: x.platform || 'youtube',
               isRecommendation: 1
             };
@@ -147,7 +299,8 @@
      * Collaborative Playlists API
      */
     getCollaborativePlaylist: function (code) {
-      var base = this.getActiveUrl();
+      var base = getCollabBase();
+      if (!base) return Promise.reject(new Error('No server configured'));
       return fetchWithTimeout(base + '/api/playlists/collaborative/' + encodeURIComponent(code), {}, 8000)
         .then(function (res) {
           if (!res.ok) throw new Error('Playlist no encontrada');
@@ -156,7 +309,8 @@
     },
 
     addTrackToCollaborative: function (code, track, playlistName) {
-      var base = this.getActiveUrl();
+      var base = getCollabBase();
+      if (!base) return Promise.reject(new Error('No server configured'));
       return fetchWithTimeout(base + '/api/playlists/collaborative/' + encodeURIComponent(code) + '/tracks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -167,9 +321,9 @@
       });
     },
 
-    /** Crear/actualizar una playlist colaborativa completa en el servidor */
     saveCollaborativePlaylist: function (code, data) {
-      var base = this.getActiveUrl();
+      var base = getCollabBase();
+      if (!base) return Promise.reject(new Error('No server configured'));
       return fetchWithTimeout(base + '/api/playlists/collaborative/' + encodeURIComponent(code), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -180,24 +334,27 @@
       });
     },
 
-    /** Eliminar una playlist colaborativa del servidor */
     deleteCollaborativePlaylist: function (code) {
-      var base = this.getActiveUrl();
+      var base = getCollabBase();
+      if (!base) return Promise.reject(new Error('No server configured'));
       return fetchWithTimeout(base + '/api/playlists/collaborative/' + encodeURIComponent(code), {
         method: 'DELETE'
       }, 8000).then(function (res) {
-        if (!res.ok) throw new Error('Error al eliminar');
+        // 404 = ya no existe en el servidor: el resultado deseado se cumplió.
+        if (res.status === 404) return { deleted: true, alreadyGone: true };
+        if (!res.ok) throw new Error('Error al eliminar (HTTP ' + res.status + ')');
         return res.json();
       });
     },
 
-    /** Quitar una canción concreta de una playlist colaborativa */
     removeTrackFromCollaborative: function (code, trackId) {
-      var base = this.getActiveUrl();
+      var base = getCollabBase();
+      if (!base) return Promise.reject(new Error('No server configured'));
       return fetchWithTimeout(base + '/api/playlists/collaborative/' + encodeURIComponent(code) + '/tracks/' + encodeURIComponent(trackId), {
         method: 'DELETE'
       }, 8000).then(function (res) {
-        if (!res.ok) throw new Error('Error al quitar la canción');
+        if (res.status === 404) return { removed: true, alreadyGone: true };
+        if (!res.ok) throw new Error('Error al quitar la canción (HTTP ' + res.status + ')');
         return res.json();
       });
     },
@@ -290,7 +447,7 @@
       var base = getBaseUrl();
       if (!base) return Promise.reject(new Error('No server configured'));
       var url = base + '/api/stream/' + trackId;
-      return fetchWithTimeout(url, {}, 60000) // 60s timeout for downloads
+      return fetchWithTimeout(url, {}, 60000)
         .then(function (resp) {
           if (!resp.ok) throw new Error('HTTP ' + resp.status);
           return resp.blob();
@@ -299,14 +456,29 @@
 
     /**
      * Test connection to a specific server mode
-     * Returns { ok: boolean, latency: number, server: string }
+     * Returns { ok: boolean, latency: number, server: string, data?: object, error?: string }
      */
     testConnection: function (mode, timeout) {
-      var url = mode === 'local' ? _localUrl : _renderUrl;
+      // Modo Dispositivo: no hay red que probar; siempre está disponible.
+      if (mode === 'device') {
+        return Promise.resolve({ ok: true, latency: 0, server: 'device', local: true });
+      }
+      var url = mode === 'local' ? _localUrl : (mode === 'northflank' ? _northflankUrl : _renderUrl);
       var start = Date.now();
-      var t = timeout || 8000;
+      var defaultTimeout = mode === 'local' ? 5000 : (mode === 'northflank' ? 9000 : 25000);
+      var t = timeout || defaultTimeout;
 
-      return fetchWithTimeout(url + '/api/health', {}, t)
+      if (!url || typeof url !== 'string' || !url.trim()) {
+        return Promise.resolve({ ok: false, latency: 0, server: mode, error: 'URL no configurada' });
+      }
+      url = url.trim().replace(/\/+$/, '');
+
+      var opts = {};
+      if (mode === 'northflank' && _northflankToken) {
+        opts.headers = { 'Authorization': 'Bearer ' + _northflankToken };
+      }
+
+      return fetchWithTimeout(url + '/api/health', opts, t)
         .then(function (resp) {
           var latency = Date.now() - start;
           if (resp.ok) {
@@ -316,61 +488,57 @@
               return { ok: true, latency: latency, server: mode, data: { status: 'ok' } };
             });
           }
-          // Fallback to pinging root URL (especially for Render servers)
-          return fetchWithTimeout(url + '/', {}, t).then(function (r2) {
-            if (r2.ok) {
-              return { ok: true, latency: Date.now() - start, server: mode, data: { status: 'ok', server: 'render' } };
-            }
-            return { ok: false, latency: latency, server: mode, error: 'HTTP ' + resp.status };
-          });
+          return { ok: false, latency: latency, server: mode, error: 'HTTP ' + resp.status };
         })
         .catch(function (err) {
-          // Retry on root URL before failing
-          return fetchWithTimeout(url + '/', {}, 8000)
-            .then(function (r2) {
-              if (r2.ok) {
-                return { ok: true, latency: Date.now() - start, server: mode, data: { status: 'ok', server: 'render' } };
-              }
-              return { ok: false, latency: Date.now() - start, server: mode, error: err.message };
-            })
-            .catch(function () {
-              return { ok: false, latency: Date.now() - start, server: mode, error: err.message };
-            });
+          return { ok: false, latency: Date.now() - start, server: mode, error: err.message };
         });
     },
 
     /**
      * Auto-detect available server
-     * Tries local first, then render, then offline
+     * Tries local first (with retry), then northflank (if configured), then render (if responding)
      */
     autoDetect: function () {
-      return Sonora.API.testConnection('local', 6000).then(function (localResult) {
+      return Sonora.API.testConnection('local', 4500).then(function (localResult) {
         if (localResult.ok) {
           Sonora.API.setMode('local');
           return { mode: 'local', result: localResult };
         }
-        // La nube puede estar despertando: damos dos oportunidades con margen
-        // amplio antes de darnos por vencidos.
-        return Sonora.API.testConnection('render', 25000).then(function (r1) {
-          if (r1.ok) {
-            Sonora.API.setMode('render');
-            return { mode: 'render', result: r1 };
+        // Segundo intento a local por si la red Wi-Fi tuvo un hipo puntual
+        return Sonora.API.testConnection('local', 3000).then(function (localRetry) {
+          if (localRetry.ok) {
+            Sonora.API.setMode('local');
+            return { mode: 'local', result: localRetry };
           }
-          return Sonora.API.testConnection('render', 30000).then(function (r2) {
-            if (r2.ok || _renderUrl) {
-              // Aunque el sondeo falle, si hay URL de nube la dejamos activa:
-              // la propia búsqueda/canción la despertará. Antes se ponía "off"
-              // y la app quedaba desconectada teniendo servidor.
-              Sonora.API.setMode('render');
-              return { mode: 'render', result: r2 };
+
+          // Solo probar Northflank si tiene URL configurada
+          var checkNorthflank = (_northflankUrl && _northflankUrl.trim())
+            ? Sonora.API.testConnection('northflank', 8000)
+            : Promise.resolve({ ok: false });
+
+          return checkNorthflank.then(function (nfResult) {
+            if (nfResult.ok) {
+              Sonora.API.setMode('northflank');
+              return { mode: 'northflank', result: nfResult };
             }
-            Sonora.API.setMode('off');
-            return { mode: 'off', result: null };
+
+            // Render puede estar dormido, probar con timeout generoso
+            return Sonora.API.testConnection('render', 20000).then(function (r1) {
+              if (r1.ok) {
+                Sonora.API.setMode('render');
+                return { mode: 'render', result: r1 };
+              }
+              // Si no responde ningún servidor, seguimos en Modo Dispositivo:
+              // la app conserva música local, playlists, favoritos e historial.
+              Sonora.API.setMode('device');
+              return { mode: 'device', result: null };
+            });
           });
         });
       }).catch(function () {
-        Sonora.API.setMode(_renderUrl ? 'render' : 'off');
-        return { mode: _renderUrl ? 'render' : 'off', result: null };
+        Sonora.API.setMode('device');
+        return { mode: 'device', result: null };
       });
     },
 
@@ -378,7 +546,8 @@
      * Sync local data with server
      */
     syncWithServer: function () {
-      if (_mode === 'off') return Promise.resolve();
+      // En Modo Dispositivo (o sin servidor) no hay nada que sincronizar.
+      if (_mode === 'device' || _mode === 'off') return Promise.resolve();
 
       return Sonora.API.get('/tracks').then(function (serverTracks) {
         if (!serverTracks || !serverTracks.length) return;
@@ -395,36 +564,71 @@
       return Promise.all([
         Sonora.DB.settings.get('serverMode'),
         Sonora.DB.settings.get('serverLocalUrl'),
-        Sonora.DB.settings.get('serverRenderUrl')
+        Sonora.DB.settings.get('serverRenderUrl'),
+        Sonora.DB.settings.get('serverNorthflankUrl'),
+        Sonora.DB.settings.get('serverNorthflankToken')
       ]).then(function (values) {
-        if (values[0]) _mode = values[0];
-        // El origen propio (si la app la sirve el servidor) tiene prioridad.
+        var savedMode = values[0];
+        if (savedMode) _mode = savedMode;
+
+        // El origen propio tiene prioridad si es un host local / IP privada
         var selfOrigin = null;
         try {
-          if (window.location && (window.location.protocol === 'http:' || window.location.protocol === 'https:')) {
+          if (typeof window !== 'undefined' && window.location &&
+              (window.location.protocol === 'http:' || window.location.protocol === 'https:') &&
+              isLocalHostname(window.location.hostname)) {
             selfOrigin = window.location.origin;
           }
         } catch (e) {}
+
         if (values[1]) _localUrl = values[1];
         if (selfOrigin) _localUrl = selfOrigin;
         if (values[2]) _renderUrl = values[2];
+        if (values[3] !== null && values[3] !== undefined) _northflankUrl = values[3];
+        if (values[4] !== null && values[4] !== undefined) _northflankToken = values[4];
 
-        // Auto-detect server: try local PC first, then render
-        return Sonora.API.autoDetect().then(function (det) {
-          console.log('[API] Auto-detected server mode:', det.mode, 'URL:', getBaseUrl());
-          Sonora.Store.set('serverMode', _mode);
-          Sonora.Store.set('serverLocalUrl', _localUrl);
-          Sonora.Store.set('serverRenderUrl', _renderUrl);
-          Sonora.Store.set('activeServerUrl', getBaseUrl());
+        Sonora.Store.set('serverMode', _mode);
+        Sonora.Store.set('serverLocalUrl', _localUrl);
+        Sonora.Store.set('serverRenderUrl', _renderUrl);
+        Sonora.Store.set('serverNorthflankUrl', _northflankUrl);
+        Sonora.Store.set('serverNorthflankToken', _northflankToken);
+        Sonora.Store.set('activeServerUrl', getBaseUrl());
+        updateStatusDotUI(_mode);
 
-          var dot = document.getElementById('server-dot');
-          if (dot) {
-            dot.className = 'server-dot ' + (_mode === 'local' ? 'connected-local' : (_mode === 'render' ? 'connected-render' : 'disconnected'));
-          }
-        });
+        // Modo Dispositivo explícito: no se toca la red ni se cambia solo.
+        if (_mode === 'device') {
+          console.log('[API] Device mode: no server probing');
+          return { mode: 'device', result: null };
+        }
+
+        // Si el usuario tenía un modo activo guardado ('local', 'northflank', 'render'),
+        // probamos ese primero para respetar su configuración manual
+        if (savedMode && savedMode !== 'off') {
+          return Sonora.API.testConnection(savedMode, savedMode === 'render' ? 20000 : 6000).then(function (testRes) {
+            if (testRes.ok) {
+              console.log('[API] Kept user saved mode:', savedMode);
+              _mode = savedMode;
+              Sonora.Store.set('serverMode', _mode);
+              Sonora.Store.set('activeServerUrl', getBaseUrl());
+              updateStatusDotUI(_mode);
+              return { mode: _mode, result: testRes };
+            }
+            // Si el servidor guardado no responde, ejecutamos auto-detección
+            console.log('[API] Saved server mode unreachable, auto-detecting...');
+            return Sonora.API.autoDetect();
+          });
+        }
+
+        // Sin modo guardado: arrancamos en Modo Dispositivo. El usuario puede
+        // elegir Local/Render/Northflank desde Ajustes cuando quiera.
+        return { mode: _mode, result: null };
+      }).then(function () {
+        Sonora.Store.set('serverMode', _mode);
+        Sonora.Store.set('activeServerUrl', getBaseUrl());
+        updateStatusDotUI(_mode);
       }).catch(function (err) {
-        console.warn('[API] Init fallback to local:', err);
-        Sonora.API.setMode('local');
+        console.warn('[API] Init error:', err);
+        Sonora.API.setMode('device');
       });
     }
   };

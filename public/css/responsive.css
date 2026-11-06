@@ -303,6 +303,8 @@ button,
       "artwork  content";
     gap: 24px 48px;
     padding: 32px 64px 40px 64px;
+    width: min(92vw, 1080px);
+    min-width: 720px;
     max-width: 1100px;
     max-height: 760px;
     height: 85vh;
@@ -331,18 +333,15 @@ button,
   }
 
   .player__right-column {
+    grid-area: content;
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 16px;
-  }
-
-  #full-player .player__info,
-  #full-player .player__progress,
-  #full-player .player__controls,
-  #full-player .player__extras,
-  #full-player .player__volume {
-    grid-column: 2;
+    gap: 14px;
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 4px;
   }
 }
 
@@ -381,7 +380,7 @@ button,
    Mobile Landscape Mode
    ========================================================================== */
 
-@media (max-height: 520px) and (orientation: landscape) {
+@media (max-height: 520px) and (orientation: landscape) and (max-width: 1023px) {
   :root {
     --header-height: 48px;
     --mini-player-height: 52px;
@@ -390,8 +389,23 @@ button,
 
   #full-player {
     flex-direction: row;
+    align-items: stretch;
     padding: 12px 24px;
     gap: 20px;
+    overflow: hidden;
+  }
+
+  /* La columna derecha se convierte en el panel de controles. */
+  .player__right-column {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    gap: 2px;
+    padding-right: 4px;
+    overflow-y: auto;
   }
 
   .player__header {
@@ -402,7 +416,7 @@ button,
   }
 
   .player__artwork-container {
-    flex: 0 0 35%;
+    flex: 0 0 32%;
     margin-top: 36px;
   }
 
@@ -416,6 +430,18 @@ button,
   .player__extras,
   .player__volume {
     margin-bottom: 6px;
+  }
+
+  .player__extras {
+    justify-content: space-between;
+    gap: 2px;
+  }
+
+  .player__extras .btn--icon {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
   }
 
   #player-title {
@@ -432,6 +458,82 @@ button,
   .btn--lg {
     width: 40px;
     height: 40px;
+  }
+
+  .player__speed-btn {
+    min-width: 40px;
+    height: 32px;
+    padding: 0 8px;
+    font-size: 11.5px;
+  }
+
+  /* En horizontal el volumen del sistema basta; liberamos altura. */
+  .player__volume {
+    display: none;
+  }
+
+  /* Mini player y header compactos, sin solaparse con la nav. */
+  #mini-player {
+    height: var(--mini-player-height);
+  }
+
+  .mini-player__artwork {
+    width: 40px;
+    height: 40px;
+  }
+
+  .mini-player__controls .btn--icon {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  #app-header {
+    min-height: var(--header-height);
+    padding-top: 2px;
+  }
+
+  .header-title {
+    font-size: 1.05rem;
+  }
+
+  /* Inicio y biblioteca: menos altura, mismas tarjetas. */
+  .page-home {
+    gap: 16px;
+  }
+
+  .section__header {
+    margin-bottom: 8px;
+    padding: 0 12px;
+  }
+
+  .section__title {
+    font-size: 1.05rem;
+  }
+
+  .section__scroll {
+    gap: 10px;
+    padding: 2px 12px;
+    scroll-padding: 0 12px;
+  }
+
+  .card {
+    width: 126px;
+    padding: 8px;
+  }
+
+  .card--mix {
+    width: 190px;
+  }
+
+  .library-tabs {
+    padding: 2px 12px;
+    gap: 6px;
+  }
+
+  .page-library {
+    gap: 10px;
   }
 }
 

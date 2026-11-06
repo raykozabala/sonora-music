@@ -2048,6 +2048,13 @@ body.light .skeleton {
   box-shadow: 0 0 9px rgba(34, 197, 94, 0.85);
 }
 
+/* 🚀 Servidor Northflank conectado */
+.server-dot.connected-northflank,
+.server-dot.server-dot--northflank {
+  background: #a29bfe;
+  box-shadow: 0 0 9px rgba(162, 155, 254, 0.9);
+}
+
 /* 🟠 Conectado pero muy lento (> 1 s) */
 .server-dot.server-dot--slow {
   background: #FB8C00;
@@ -2059,6 +2066,12 @@ body.light .skeleton {
 .server-dot.server-dot--offline {
   background: #ef4444;
   box-shadow: 0 0 9px rgba(239, 68, 68, 0.7);
+}
+
+/* 📱 Modo Dispositivo (sin servidor, música local) */
+.server-dot.server-dot--device {
+  background: var(--color-primary);
+  box-shadow: 0 0 9px rgba(var(--color-primary-rgb), 0.85);
 }
 
 /* ── Etiquetas de origen de la música ──

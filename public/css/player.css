@@ -13,7 +13,7 @@
   bottom: calc(var(--bottom-nav-height, 64px) + env(safe-area-inset-bottom, 0px) + 8px);
   left: 10px;
   right: 10px;
-  height: 62px;
+  height: var(--mini-player-height, 62px);
   background-color: var(--color-surface-glass, rgba(22, 24, 38, 0.94));
   /* Tinte dinámico con el color de la portada (antes --artwork-color se
      calculaba pero ninguna regla lo usaba: por eso se veía gris). */
@@ -180,6 +180,13 @@ body.light .player__bg-blur {
 .player__volume {
   position: relative;
   z-index: 1;
+}
+
+/* Wrapper de la columna derecha (info, progreso, controles, extras y volumen).
+   En móvil se disuelve para conservar el layout vertical de siempre. */
+.player__right-column {
+  display: contents;
+  min-width: 0;
 }
 
 /* Header */
@@ -417,6 +424,40 @@ body.light .player__progress-bar {
 .player__extras .btn--icon.active {
   color: var(--color-primary);
   filter: drop-shadow(0 0 6px rgba(var(--color-primary-rgb), 0.5));
+}
+
+/* Píldora de velocidad (1×) dentro de la fila de extras */
+.player__speed-btn {
+  min-width: 46px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-divider);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+body.light .player__speed-btn {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.player__speed-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.player__speed-btn.active {
+  color: var(--color-primary);
+  border-color: rgba(var(--color-primary-rgb), 0.45);
+  background: rgba(var(--color-primary-rgb), 0.12);
 }
 
 /* Volume Control Slider */
@@ -741,6 +782,25 @@ body.light .lyrics-line.active {
   text-shadow: none;
 }
 
+/* Sincronización por palabra (LRC enriquecido con <mm:ss.xx>). */
+.lyr-word {
+  transition: color 0.12s linear, text-shadow 0.12s linear;
+}
+.lyrics-line.active .lyr-word {
+  color: rgba(255, 255, 255, 0.42);
+}
+.lyrics-line.active .lyr-word.sung {
+  color: #ffffff;
+  text-shadow: 0 0 22px rgba(var(--artwork-rgb, 255, 71, 87), 0.65);
+}
+body.light .lyrics-line.active .lyr-word {
+  color: rgba(0, 0, 0, 0.35);
+}
+body.light .lyrics-line.active .lyr-word.sung {
+  color: var(--color-primary);
+  text-shadow: none;
+}
+
 /* ── Letra sincronizada: contenedor, resaltado y botón "Sincronizar" ── */
 .lyrics-container {
   display: flex;
@@ -924,4 +984,79 @@ body.light .queue-panel__close {
 
 body.light .lyrics-panel__artist {
   color: var(--color-text-secondary);
+}
+
+/* ==========================================================================
+   Playback Sheet (velocidad + visualizador)
+   ========================================================================== */
+
+.playback-sheet__content {
+  width: calc(100% - 32px);
+  max-width: 440px;
+  padding: 20px;
+  border-radius: var(--radius-xl);
+}
+
+.playback-sheet__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.playback-sheet__header h3 {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 800;
+  color: var(--color-text-primary);
+}
+
+.playback-sheet__section {
+  margin-bottom: 16px;
+}
+
+.playback-sheet__section:last-child {
+  margin-bottom: 0;
+}
+
+.playback-sheet__label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.playback-sheet__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.playback-chip {
+  flex: 1 1 auto;
+  min-width: 64px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-divider);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+  font-size: 0.78125rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.playback-chip:hover {
+  border-color: var(--color-primary);
+}
+
+.playback-chip.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-on-primary);
 }
