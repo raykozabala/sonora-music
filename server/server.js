@@ -773,7 +773,7 @@ function withCookies(args) {
 }
 
 /** Clientes de YouTube a probar, del más compatible al más específico. */
-const YT_CLIENT_FALLBACKS = [null, 'tv_embedded', 'android_vr'];
+const YT_CLIENT_FALLBACKS = [null, 'tv_embedded', 'android_vr', 'tv', 'ios', 'mweb'];
 const YT_FALLBACK_ERROR = /sign in to confirm|not a bot|requested format|no video formats|unable to extract|player response|403|410/i;
 
 (function logJsRuntimeStatus() {
@@ -831,30 +831,52 @@ app.get('/api/system', (req, res) => {
 app.get('/api/ytdiag', async (req, res) => {
   const id = String(req.query.id || 'kXYiU_JCYtU').replace(/[^A-Za-z0-9_-]/g, '');
   const videoUrl = 'https://www.youtube.com/watch?v=' + id;
-  const clients = ['default', 'android_vr', 'tv_embedded', 'mweb', 'web_safari'];
-  const results = {};
-  // Se prueba con cookies (si existen) y sin ellas: así se distingue un
-  // bloqueo por IP de unas cookies caducadas.
+  const wanted = String(req.query.clients || 'default,tv_embedded,android_vr,tv,ios')
+    .split(',').map(function (c) { return c.trim(); }).filter(Boolean);
+
+  // 1) ¿Qué devuelve YouTube a esta IP? Distingue bloqueo de red de fallo del extractor.
+  let http = null;
+  try {
+    const resp = await fetch(videoUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8'
+      },
+      redirect: 'follow'
+    });
+    const html = await resp.text();
+    http = {
+      status: resp.status,
+      finalUrl: resp.url,
+      bytes: html.length,
+      playerResponse: html.indexOf('ytInitialPlayerResponse') !== -1,
+      botCheck: /Sign in to confirm|not a bot|captcha/i.test(html),
+      consent: /consent\.youtube\.com|Before you continue/i.test(html)
+    };
+  } catch (e) {
+    http = { error: e.message };
+  }
+
+  // 2) Probar cada player client en paralelo (con y sin cookies).
   const modes = COOKIES_PATH ? ['cookies', 'nocookies'] : ['nocookies'];
-  for (const mode of modes) {
+  const results = {};
+  await Promise.all(modes.map(async (mode) => {
     results[mode] = {};
-    for (const client of clients) {
+    await Promise.all(wanted.map(async (client) => {
       const args = ['--no-playlist', '--no-warnings', '--quiet', '-f', 'bestaudio[ext=m4a]/bestaudio/best', '--get-url'];
       if (client !== 'default') args.push('--extractor-args', 'youtube:player_client=' + client);
       args.push(videoUrl);
       try {
-        const { stdout } = await runYtDlp(args, 45000, mode === 'nocookies');
-        const direct = stdout.trim().split(/\r?\n/)[0] || '';
-        results[mode][client] = {
-          ok: !!direct,
-          host: (direct.match(/^https?:\/\/([^/]+)/) || [])[1] || null
-        };
+        const out = await runYtDlp(args, 40000, mode === 'nocookies');
+        const direct = out.stdout.trim().split(/\r?\n/)[0] || '';
+        results[mode][client] = { ok: !!direct, host: (direct.match(/^https?:\/\/([^/]+)/) || [])[1] || null };
       } catch (e) {
-        results[mode][client] = { ok: false, error: String(e.message).slice(0, 160) };
+        results[mode][client] = { ok: false, error: String(e.message).slice(0, 200) };
       }
-    }
-  }
-  res.json({ id: id, mode: SERVER_MODE, proxy: !!process.env.YTDLP_PROXY, results: results });
+    }));
+  }));
+
+  res.json({ id: id, mode: SERVER_MODE, proxy: !!process.env.YTDLP_PROXY, http: http, results: results });
 });
 
 /**
