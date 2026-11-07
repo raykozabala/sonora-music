@@ -10,11 +10,15 @@
   var DB_NAME = 'SonoraMusic';
   var DB_VERSION = 6;
   var _db = null;
+  var _openPromise = null;
 
   /* ── helpers ── */
   function openDB() {
-    return new Promise(function (resolve, reject) {
-      if (_db) { resolve(_db); return; }
+    if (_db) return Promise.resolve(_db);
+    // Una sola apertura compartida: si boot() y el sidebar piden la base de
+    // datos a la vez, no se abren dos conexiones distintas.
+    if (_openPromise) return _openPromise;
+    _openPromise = new Promise(function (resolve, reject) {
       var req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onerror = function () { reject(req.error); };
       req.onupgradeneeded = function (e) {
@@ -53,6 +57,9 @@
       };
       req.onsuccess = function () { _db = req.result; resolve(_db); };
     });
+    // Si la apertura falla, permitir reintentarla más adelante.
+    _openPromise.catch(function () { _openPromise = null; });
+    return _openPromise;
   }
 
   function tx(store, mode) {
