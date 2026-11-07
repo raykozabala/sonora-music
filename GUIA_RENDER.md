@@ -262,3 +262,28 @@ Si Render te pide tarjeta y prefieres otra opción:
 | `Read-only file system` en cookies.py | Ya resuelto: el servidor copia las cookies a `/tmp` antes de usarlas   |
 | YouTube no descarga                  | El Docker ya instala `yt-dlp` + `ffmpeg` + `deno`; si usas otro runtime, instálalos |
 | "No se pudo descargar" fuera de casa  | Revisa `/api/system` → `cookies.valid` y `deno.available` deben ser `true` |
+| `HTTP 429` de `google.com/sorry`      | YouTube bloquea la IP de Render (no es un fallo del código). Ver abajo |
+
+---
+
+## YouTube bloquea la IP de Render (HTTP 429)
+
+Render usa IPs de datacenter y YouTube responde con `429` desde
+`google.com/sorry`. Las cookies **no** lo evitan. Para comprobarlo:
+`/api/ytdiag?id=VIDEO_ID&instances=1`.
+
+En ese caso, en **Modo Dispositivo**:
+
+- La **búsqueda** sí funciona (usa otro endpoint de YouTube).
+- El **vídeo** usa el iframe de YouTube en el navegador del usuario.
+- El **audio directo** no funciona; el reproductor muestra un aviso y ofrece
+  cambiar al servidor local.
+
+Soluciones reales:
+
+1. **Servidor en casa + Cloudflare Tunnel** (recomendado y gratis): usa tu IP
+   doméstica, que YouTube sí acepta → ver `GUIA_SERVIDOR_LOCAL.md`.
+2. **Proxy residencial** para Render: define `YTDLP_PROXY` con la URL del proxy
+   en las variables de entorno del servicio. El servidor ya lo usa.
+3. Dejarlo así: la app sigue sirviendo para buscar y ver vídeo; el audio en la
+   nube queda deshabilitado.
