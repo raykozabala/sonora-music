@@ -8,7 +8,7 @@
 
   var Sonora = window.Sonora = window.Sonora || {};
 
-  var CURRENT_VERSION = '7.17.0';
+  var CURRENT_VERSION = '7.17.1';
   var GITHUB_REPO = 'raykozabala/sonora-music-server';
   var _lastCheckTime = 0;
   var _updateInfo = null;

@@ -88,6 +88,15 @@
       var container = $('#sidebar-playlists-scroll');
       if (!container) return;
 
+      // El sidebar se inicializa al cargar el DOM, antes de que boot() termine
+      // de abrir IndexedDB. Esperamos a que esté lista en vez de fallar con
+      // "Cannot read properties of null (reading 'transaction')".
+      if (Sonora.DB && typeof Sonora.DB.whenReady === 'function') {
+        try { await Sonora.DB.whenReady(); } catch (e) { return; }
+      } else if (!Sonora.DB || !Sonora.DB.playlists) {
+        return;
+      }
+
       this.updateFavCount();
 
       try {

@@ -57,6 +57,86 @@ button,
 }
 
 /* ==========================================================================
+   Bottom Navigation — Phones & Tablets (up to 1023px)
+   Los 5 botones viven dentro de .sidebar-main-nav, que en escritorio es una
+   columna vertical. En móvil/tablet debe ser UNA fila de 5 botones iguales.
+   Sin esta regla los botones se apilaban en vertical dentro de la barra y solo
+   se veían 3 (Inicio / Buscar / Biblioteca) recortados.
+   ========================================================================== */
+
+@media (max-width: 1023px) {
+  #bottom-nav {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: stretch;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  .sidebar-main-nav {
+    display: flex;
+    flex-direction: row;
+    flex: 1 1 auto;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 0;
+  }
+
+  .sidebar-main-nav .nav-item {
+    flex: 1 1 0;
+    width: 0;              /* reparto exactamente igual entre los 5 */
+    min-width: 44px;       /* objetivo táctil mínimo */
+    max-width: none;
+    height: 100%;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 2px;
+    border-radius: 0;
+    overflow: hidden;
+  }
+
+  .sidebar-main-nav .nav-item svg {
+    width: 21px;
+    height: 21px;
+    flex: 0 0 auto;
+  }
+
+  .sidebar-main-nav .nav-item span {
+    display: block;
+    max-width: 100%;
+    font-size: 0.68rem;
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* El bloque de playlists del sidebar solo existe en escritorio. */
+  .sidebar-main-nav .sidebar-quick-section,
+  #bottom-nav .sidebar-quick-section {
+    display: none !important;
+  }
+}
+
+/* Pantallas muy estrechas (iPhone SE, Galaxy A, etc.) */
+@media (max-width: 359px) {
+  .sidebar-main-nav .nav-item span {
+    font-size: 0.62rem;
+  }
+
+  .sidebar-main-nav .nav-item svg {
+    width: 19px;
+    height: 19px;
+  }
+}
+
+/* ==========================================================================
    Small Tablets / Large Mobiles (min-width: 480px)
    ========================================================================== */
 

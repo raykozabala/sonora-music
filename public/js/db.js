@@ -350,6 +350,20 @@
       });
     },
 
+    /** ¿Está IndexedDB abierta y lista para usarse? */
+    isReady: function () { return !!_db; },
+
+    /**
+     * Devuelve una promesa que resuelve cuando la base de datos está abierta.
+     * Permite que módulos que arrancan antes que boot() (por ejemplo el
+     * sidebar de escritorio) esperen en vez de fallar con
+     * "Cannot read properties of null (reading 'transaction')".
+     */
+    whenReady: function () {
+      if (_db) return Promise.resolve(_db);
+      return openDB();
+    },
+
     tracks: {
       getAll: function () { return getAllFromStore('tracks').catch(function () { return []; }); },
       getById: function (id) { return getByIdFromStore('tracks', id).catch(function () { return null; }); },

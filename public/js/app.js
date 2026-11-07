@@ -1512,7 +1512,7 @@
      MAIN INITIALIZATION
      ══════════════════════════════════════════════ */
   function boot() {
-    console.log('🎵 Sonora Music v7.17.0 — Booting...');
+    console.log('🎵 Sonora Music v7.17.1 — Booting...');
 
     var splashScreen = $('#splash-screen');
 
@@ -1614,7 +1614,7 @@
         // Step 11: Register Service Worker
         registerSW();
 
-        console.log('🎵 Sonora Music v7.17.0 — Ready!');
+        console.log('🎵 Sonora Music v7.17.1 — Ready!');
       })
       .catch(function (err) {
         console.error('[App] Boot error:', err);
