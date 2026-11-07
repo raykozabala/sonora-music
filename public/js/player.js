@@ -250,7 +250,14 @@
         // Antes de rendirse, probar con el otro servidor (local <-> nube)
         if (retryWithOtherServer()) return;
         if (_consecutiveErrors === 1) {
-          showToast('No se pudo reproducir el audio. Comprueba la conexión', 'warning');
+          var activeMode = (Sonora.API && typeof Sonora.API.getMode === 'function') ? Sonora.API.getMode() : '';
+          if (activeMode === 'render') {
+            // YouTube bloquea la IP de Render (HTTP 429), así que el audio
+            // directo desde la nube no está disponible ahora mismo.
+            showToast('La nube no puede acceder a YouTube ahora mismo. Usa tu servidor local para reproducir.', 'warning');
+          } else {
+            showToast('No se pudo reproducir el audio. Comprueba la conexión', 'warning');
+          }
         }
       }
     });
