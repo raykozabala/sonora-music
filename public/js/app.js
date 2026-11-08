@@ -1512,7 +1512,7 @@
      MAIN INITIALIZATION
      ══════════════════════════════════════════════ */
   function boot() {
-    console.log('🎵 Sonora Music v7.17.1 — Booting...');
+    console.log('🎵 Sonora Music v7.17.2 — Booting...');
 
     var splashScreen = $('#splash-screen');
 
@@ -1532,7 +1532,10 @@
         // sabe si debe mostrar Modo Dispositivo, Local, Render o Northflank.
         if (Sonora.DB && Sonora.DB.settings) {
           inits.push(Sonora.DB.settings.get('serverMode').then(function (m) {
-            if (m && Sonora.API && Sonora.API.setMode) Sonora.API.setMode(m);
+            // 'off' es el valor heredado del primer arranque: no lo convirtamos
+            // en 'device' antes de que API.init pueda autodetectar el servidor
+            // local desde el que se está sirviendo la app.
+            if (m && m !== 'off' && Sonora.API && Sonora.API.setMode) Sonora.API.setMode(m);
           }).catch(function () {}));
         }
 
@@ -1611,10 +1614,20 @@
         // Step 10: Create fallback icons
         createFallbackIcons();
 
+        // Step 10b: Sincronizar playlists colaborativas en segundo plano.
+        // Si el servidor perdió los datos (reinicio/hibernación), la copia
+        // local se vuelve a publicar con el mismo código.
+        setTimeout(function () {
+          try {
+            var P = Sonora.Pages && Sonora.Pages.Playlists;
+            if (P && typeof P.syncAllCollab === 'function') P.syncAllCollab();
+          } catch (e) {}
+        }, 2500);
+
         // Step 11: Register Service Worker
         registerSW();
 
-        console.log('🎵 Sonora Music v7.17.1 — Ready!');
+        console.log('🎵 Sonora Music v7.17.2 — Ready!');
       })
       .catch(function (err) {
         console.error('[App] Boot error:', err);

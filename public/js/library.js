@@ -2851,7 +2851,14 @@
               await Sonora.DB.playlists.update(pl);
             }
             if (pl.code && Sonora.API && typeof Sonora.API.removeTrackFromCollaborative === 'function') {
-              Sonora.API.removeTrackFromCollaborative(pl.code, track.id).catch(function () {});
+              var collabKey = track.videoId || track.sourceUrl || track.id;
+              try {
+                await Sonora.API.removeTrackFromCollaborative(pl.code, collabKey);
+              } catch (e) {
+                // Sin conexión: se reintenta en la próxima sincronización.
+                pl.pendingCollabOps = (pl.pendingCollabOps || []).concat([{ op: 'remove', key: collabKey }]);
+                await Sonora.DB.playlists.update(pl);
+              }
             }
           }
         } catch (e) {
@@ -2887,70 +2894,147 @@
     }
   }
 
-  async function handleAddToPlaylist(track) {    let playlists = [];
+  async function handleAddToPlaylist(track) {
+    if (!track) return;
+    let playlists = [];
     try {
       if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.getAll === 'function') {
         playlists = (await Sonora.DB.playlists.getAll()) || [];
       }
     } catch (e) {}
+    // Las listas inteligentes (Favoritos, Recientes) no se pueden editar.
+    playlists = playlists.filter(p => p && !p.isSmart);
 
-    const playlistName = prompt(
-      playlists.length > 0
-        ? `Añadir a playlist existente (${playlists.map(p => p.name).join(', ')}) o escribe un nombre nuevo:`
-        : 'Nombre de la nueva playlist:'
-    );
-
-    if (!playlistName || !playlistName.trim()) return;
-
-    try {
-      const cleanName = playlistName.trim();
-      let targetPl = playlists.find(p => p.name.toLowerCase() === cleanName.toLowerCase());
-
-      if (!targetPl) {
-        // Create new playlist
-        const newPl = {
-          name: cleanName,
-          description: 'Creada desde tu biblioteca',
-          trackIds: [track.id],
-          createdAt: new Date().toISOString()
-        };
-        if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.create === 'function') {
-          targetPl = await Sonora.DB.playlists.create(newPl);
-        }
-      } else {
-        // Add to existing playlist
+    const addTo = async (pl) => {
+      if (!pl) return;
+      if (pl.code && track.isDeviceTrack) {
+        showToast('Las canciones del teléfono no se pueden compartir en una playlist colaborativa', 'warning');
+        return;
+      }
+      try {
         if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.addTrack === 'function') {
-          await Sonora.DB.playlists.addTrack(targetPl.id, track.id);
+          await Sonora.DB.playlists.addTrack(pl.id, track.id);
         } else {
-          targetPl.trackIds = targetPl.trackIds || [];
-          if (!targetPl.trackIds.includes(track.id)) {
-            targetPl.trackIds.push(track.id);
-            if (Sonora.DB.playlists.update) await Sonora.DB.playlists.update(targetPl);
+          pl.trackIds = pl.trackIds || [];
+          if (!pl.trackIds.some(id => String(id) === String(track.id))) {
+            pl.trackIds.push(track.id);
+            if (Sonora.DB.playlists.update) await Sonora.DB.playlists.update(pl);
           }
         }
+
+        // Si es colaborativa, la canción debe llegar a los demás miembros.
+        if (pl.code && Sonora.API && typeof Sonora.API.addTrackToCollaborative === 'function') {
+          try {
+            await Sonora.API.addTrackToCollaborative(pl.code, track, pl.name);
+          } catch (e) {
+            // Sin conexión: queda en cola y se sube en la próxima sincronización.
+            pl.pendingCollabOps = (pl.pendingCollabOps || []).concat([{ op: 'add', track: track }]);
+            await Sonora.DB.playlists.update(pl);
+            showToast('Añadida en tu dispositivo; se sincronizará al recuperar la conexión', 'warning');
+            return;
+          }
+        }
+        showToast('Añadida a "' + (pl.name || 'la playlist') + '"');
+      } catch (e) {
+        console.error('[Library] Add to playlist error:', e);
+        showToast('No se pudo añadir a la playlist');
       }
-      showToast(`Añadida a playlist "${cleanName}"`);
-    } catch (e) {
-      console.error('[Library] Add to playlist error:', e);
-      showToast('No se pudo añadir a la playlist');
+    };
+
+    const createAndAdd = () => {
+      const create = (name) => {
+        const cleanName = String(name || '').trim();
+        if (!cleanName) return;
+        (async () => {
+          try {
+            let created = null;
+            const newPl = {
+              name: cleanName,
+              description: 'Creada desde tu biblioteca',
+              trackIds: [track.id],
+              userCreated: 1,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            };
+            if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.create === 'function') {
+              created = await Sonora.DB.playlists.create(newPl);
+            }
+            showToast('Añadida a "' + cleanName + '"');
+            if (created && Sonora.Store) Sonora.Store.emit('playlistsChanged');
+          } catch (e) {
+            showToast('No se pudo crear la playlist', 'error');
+          }
+        })();
+      };
+
+      if (Sonora.UI && typeof Sonora.UI.openInputDialog === 'function') {
+        Sonora.UI.openInputDialog({
+          title: 'Nueva playlist',
+          placeholder: 'Nombre de la playlist',
+          confirmLabel: 'Crear',
+          onConfirm: create
+        });
+      } else {
+        create(window.prompt('Nombre de la nueva playlist:'));
+      }
+    };
+
+    if (Sonora.UI && typeof Sonora.UI.openActionSheet === 'function') {
+      const actions = playlists.map(pl => ({
+        icon: pl.code ? '👥' : '🎵',
+        label: pl.name + (pl.code ? ' · Colaborativa' : ''),
+        onSelect: () => addTo(pl)
+      }));
+      actions.push({ icon: '➕', label: 'Nueva playlist…', onSelect: createAndAdd });
+      Sonora.UI.openActionSheet({
+        title: 'Añadir a playlist',
+        subtitle: track.title || '',
+        actions: actions
+      });
+      return;
+    }
+
+    // Respaldo antiguo (sin hoja de acciones): elegir por nombre.
+    const playlistName = window.prompt(
+      playlists.length > 0
+        ? `Escribe el nombre de una playlist (${playlists.map(p => p.name).join(', ')}) o uno nuevo:`
+        : 'Nombre de la nueva playlist:'
+    );
+    if (!playlistName || !playlistName.trim()) return;
+    const cleanName = playlistName.trim();
+    const targetPl = playlists.find(p => p.name.toLowerCase() === cleanName.toLowerCase());
+    if (targetPl) {
+      await addTo(targetPl);
+    } else {
+      createAndAdd();
     }
   }
 
   function handleShareTrack(track) {
-    const shareData = {
-      title: track.title,
-      text: `Escucha "${track.title}" de ${track.artist || 'Sonora Music'}`,
-      url: window.location.href
-    };
+    if (!track) return;
+    var text = '🎧 Escucha "' + (track.title || 'esta canción') + '" de ' +
+      (track.artist || 'Sonora Music') + ' en Sonora Music.';
+    var url = '';
+    try { url = window.location.href; } catch (e) {}
+    var full = text + (url ? ' ' + url : '');
 
-    if (navigator.share) {
-      navigator.share(shareData).catch(() => {});
-    } else if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(`${shareData.text} - ${shareData.url}`);
-      showToast('Enlace copiado al portapapeles');
-    } else {
-      showToast('Información de canción lista para compartir');
+    if (Sonora.Share && typeof Sonora.Share.shareText === 'function') {
+      Sonora.Share.shareText(track.title || 'Sonora Music', full);
+      return;
     }
+    if (navigator.share) {
+      navigator.share({ title: track.title || 'Sonora Music', text: text, url: url }).catch(() => {});
+      return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(full).then(function () {
+        showToast('Enlace copiado al portapapeles');
+      }).catch(function () {
+        showToast('No se pudo compartir en este dispositivo', 'error');
+      });
+      return;
+    }
+    showToast('No se pudo compartir en este dispositivo', 'error');
   }
 
 })();

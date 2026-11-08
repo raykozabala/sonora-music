@@ -1,22 +1,31 @@
 #!/bin/bash
 set -e
 
-echo "🔨 Iniciando compilación de Sonora Music v${VERSION} APK..."
+echo "🔨 Iniciando compilación de Sonora Music v7.17.2 APK..."
 
-export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+# D8 y apksigner necesitan JDK 11+. Preferimos el JBR de Android Studio;
+# si no está instalado, usamos OpenJDK 17 de Homebrew.
+if [ -d "/Applications/Android Studio.app/Contents/jbr/Contents/Home" ]; then
+    export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+elif [ -d "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home" ]; then
+    export JAVA_HOME="/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
+elif [ -d "/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home" ]; then
+    export JAVA_HOME="/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
+fi
+
+if [ -z "$JAVA_HOME" ] || [ ! -x "$JAVA_HOME/bin/javac" ]; then
+    echo "❌ No se encontró un JDK 17. Instala OpenJDK 17 (brew install openjdk@17)."
+    exit 1
+fi
+
 export PATH="$JAVA_HOME/bin:$PATH"
 
-SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}"
-# Usar la build-tools más reciente: el D8 de la 34 falla con el JDK 25 de Android Studio
-BUILD_TOOLS="$(ls -d "$SDK_ROOT"/build-tools/* 2>/dev/null | sort -V | tail -1)"
-if [ -z "$BUILD_TOOLS" ]; then
-    BUILD_TOOLS="$SDK_ROOT/build-tools/34.0.0"
-fi
+SDK_ROOT="/Users/rayko/Library/Android/sdk"
+BUILD_TOOLS="$SDK_ROOT/build-tools/34.0.0"
 PLATFORM="$SDK_ROOT/platforms/android-34/android.jar"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BUILD_DIR="$SCRIPT_DIR"
-PUBLIC_DIR="$SCRIPT_DIR/../public"
-VERSION="${VERSION:-7.6}"
+BUILD_DIR="/Users/rayko/Documents/Codex/SONORA MUSIC ANTI2/sonora-music/android-build"
+PUBLIC_DIR="/Users/rayko/Documents/Codex/SONORA MUSIC ANTI2/sonora-music/public"
+PROJECT_ROOT="/Users/rayko/Documents/Codex/SONORA MUSIC ANTI2"
 
 AAPT2="$BUILD_TOOLS/aapt2"
 D8="$BUILD_TOOLS/d8"
@@ -25,7 +34,7 @@ APKSIGNER="$BUILD_TOOLS/apksigner"
 
 echo "📂 Sincronizando recursos web en assets..."
 mkdir -p "$BUILD_DIR/assets"
-rsync -av --exclude="*.apk" "$PUBLIC_DIR/" "$BUILD_DIR/assets/"
+rsync -av --delete --exclude="*.apk" "$PUBLIC_DIR/" "$BUILD_DIR/assets/"
 
 cd "$BUILD_DIR"
 
@@ -44,12 +53,15 @@ echo "🔗 2/6: Enlazando paquete APK base..."
     --auto-add-overlay \
     compiled_res/resources.zip
 
-echo "☕ 3/6: Compilando código Java..."
-javac --release 8 -g:none -cp "$PLATFORM" -d obj src/com/sonoramusic/app/*.java
+if [ ! -f "$BUILD_DIR/classes.dex" ]; then
+    echo "❌ Falta classes.dex (contiene PlaybackService, SonoraWidgetProvider y"
+    echo "   los métodos nativos de guardado/carátulas que no están en src/)."
+    echo "   Restaura android-build/classes.dex antes de compilar."
+    exit 1
+fi
 
-echo "⚡ 4/6: Generando Dalvik Executable (classes.dex) con D8..."
-echo "   (build-tools: $BUILD_TOOLS)"
-"$D8" --lib "$PLATFORM" --min-api 24 --release --output bin obj/com/sonoramusic/app/*.class
+echo "⚡ 3/6 & 4/6: Incorporando classes.dex (con soporte para Widget y PlaybackService)..."
+cp "$BUILD_DIR/classes.dex" bin/classes.dex
 
 echo "📥 5/6: Empaquetando dex en APK..."
 cd bin
@@ -72,7 +84,7 @@ if [ ! -f "$KEYSTORE" ]; then
         -dname "CN=SonoraMusic, OU=App, O=Sonora, L=City, S=State, C=US"
 fi
 
-FINAL_APK="$SCRIPT_DIR/../SonoraMusic_v${VERSION}.apk"
+FINAL_APK="$PROJECT_ROOT/SonoraMusic_v7.17.2.apk"
 rm -f "$FINAL_APK"
 
 "$APKSIGNER" sign \
@@ -86,13 +98,12 @@ rm -f "$FINAL_APK"
 echo "✅ Verificando firma del APK..."
 "$APKSIGNER" verify "$FINAL_APK"
 
-# Copy to Desktop and web public directory
-cp "$FINAL_APK" "$HOME/Desktop/SonoraMusic_v${VERSION}.apk" 2>/dev/null || true
-cp "$FINAL_APK" "$PUBLIC_DIR/SonoraMusic_v${VERSION}.apk" 2>/dev/null || true
+# Copiar a Desktop y a la raíz de sonora-music
+cp "$FINAL_APK" /Users/rayko/Desktop/SonoraMusic_v7.17.2.apk 2>/dev/null || true
+cp "$FINAL_APK" "$PROJECT_ROOT/sonora-music/SonoraMusic_v7.17.2.apk" 2>/dev/null || true
 
 SIZE=$(du -h "$FINAL_APK" | cut -f1)
-LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || echo 192.168.1.132)"
-echo "🎉 ¡ÉXITO! APK v${VERSION} generado con éxito:"
+echo "🎉 ¡ÉXITO! APK v7.17.2 generado con éxito:"
 echo "📂 $FINAL_APK ($SIZE)"
-echo "📂 $HOME/Desktop/SonoraMusic_v${VERSION}.apk"
-echo "🌐 http://$LAN_IP:3000/SonoraMusic_v${VERSION}.apk"
+echo "📂 $PROJECT_ROOT/sonora-music/SonoraMusic_v7.17.2.apk"
+echo "📂 /Users/rayko/Desktop/SonoraMusic_v7.17.2.apk"

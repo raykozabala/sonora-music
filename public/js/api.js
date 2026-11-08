@@ -569,7 +569,17 @@
         Sonora.DB.settings.get('serverNorthflankToken')
       ]).then(function (values) {
         var savedMode = values[0];
-        if (savedMode) _mode = savedMode;
+        // Si la app se está sirviendo desde un servidor local y el usuario
+        // nunca eligió un modo (o quedó el "off" heredado), usamos ese mismo
+        // servidor: así el audio y las playlists colaborativas funcionan sin
+        // tener que configurar nada a mano.
+        var autoLocal = (!savedMode || savedMode === 'off');
+        if (!autoLocal) {
+          _mode = savedMode;
+        } else {
+          _mode = 'local';
+          savedMode = null;
+        }
 
         // El origen propio tiene prioridad si es un host local / IP privada
         var selfOrigin = null;
@@ -582,7 +592,12 @@
         } catch (e) {}
 
         if (values[1]) _localUrl = values[1];
-        if (selfOrigin) _localUrl = selfOrigin;
+        if (selfOrigin) {
+          _localUrl = selfOrigin;
+        } else if (autoLocal) {
+          // Abierta desde la nube/APK sin configuración: Modo Dispositivo.
+          _mode = 'device';
+        }
         if (values[2]) _renderUrl = values[2];
         if (values[3] !== null && values[3] !== undefined) _northflankUrl = values[3];
         if (values[4] !== null && values[4] !== undefined) _northflankToken = values[4];

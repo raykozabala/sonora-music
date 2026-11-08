@@ -66,9 +66,17 @@
         addBtn.onclick = function () {
           window.location.hash = '#/playlists';
           setTimeout(function () {
-            var btn = document.getElementById('btn-create-playlist') || document.querySelector('[data-action="create-playlist"]');
-            if (btn) btn.click();
-          }, 100);
+            // El FAB real de la página de playlists es #btn-fab-create.
+            var btn = document.getElementById('btn-fab-create') ||
+              document.getElementById('btn-create-playlist') ||
+              document.querySelector('[data-action="create-playlist"]');
+            if (btn) {
+              btn.click();
+            } else {
+              var modal = document.getElementById('modal-create-playlist');
+              if (modal) modal.classList.add('active');
+            }
+          }, 260);
         };
       }
     },

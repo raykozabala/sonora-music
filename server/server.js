@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.17.1
+ * Sonora Music Server v7.17.2
  * Triple-mode backend server (Local PC, Render.com & Northflank compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -628,7 +628,7 @@ app.get('/api/health', (req, res) => {
       status: 'ok',
       server: isNorthflank ? 'northflank' : (isRender ? 'render' : 'local'),
       uptime: Math.floor(process.uptime()),
-      version: '7.17.1',
+      version: '7.17.2',
       mode: SERVER_MODE,
       connected: true
     });
@@ -815,7 +815,7 @@ app.get('/api/system', (req, res) => {
     mode: SERVER_MODE,
     node: process.version,
     platform: process.platform,
-    version: '7.17.1',
+    version: '7.17.2',
     ytdlp: { path: YTDLP_BIN, available: !!ytdlpVersion, version: ytdlpVersion || null },
     ffmpeg: { path: FFMPEG_BIN, available: !!ffmpegRaw, version: ffmpegRaw ? ffmpegRaw.split('\n')[0] : null },
     deno: { path: DENO_BIN, available: !!denoRaw, version: denoRaw ? denoRaw.split('\n')[0] : null },
@@ -1328,7 +1328,7 @@ async function lyricsFetchJson(url, timeoutMs = 4000, retries = 1, extraHeaders 
     try {
       const response = await fetch(url, {
         headers: Object.assign({
-          'User-Agent': 'SonoraMusic/7.17.1 (https://sonora-music.app)',
+          'User-Agent': 'SonoraMusic/7.17.2 (https://sonora-music.app)',
           'Accept': 'application/json'
         }, extraHeaders),
         signal: AbortSignal.timeout(timeoutMs)
@@ -2351,6 +2351,29 @@ function collabNormalizeCode(code) {
   return String(code || '').toUpperCase().trim();
 }
 
+/**
+ * Identidad estable de una canción dentro de una playlist colaborativa.
+ * El id local (autonumérico o "ext_...") no sirve entre dispositivos, así que
+ * usamos videoId / URL / ruta de archivo y, sólo como último recurso, el id.
+ * Dos dispositivos que añaden la misma canción deben producir la misma clave.
+ */
+function collabTrackKey(t) {
+  if (!t) return '';
+  if (t.videoId) return 'yt:' + String(t.videoId).trim();
+  if (t.sourceUrl) return 'url:' + String(t.sourceUrl).trim().toLowerCase();
+  if (t.filePath) return 'file:' + String(t.filePath).trim();
+  if (t.id !== undefined && t.id !== null && String(t.id).trim() !== '') {
+    return 'id:' + String(t.id).trim();
+  }
+  return 'txt:' + String(t.title || '').trim().toLowerCase() +
+    '|' + String(t.artist || '').trim().toLowerCase();
+}
+
+function collabSameTrack(a, b) {
+  if (!a || !b) return false;
+  return collabTrackKey(a) === collabTrackKey(b);
+}
+
 function collabGet(code) {
   const key = collabNormalizeCode(code);
   if (!key) return null;
@@ -2403,6 +2426,7 @@ function collabSave(pl) {
 }
 
 app.get('/api/playlists/collaborative/:code', (req, res) => {
+  res.set('Cache-Control', 'no-store, max-age=0');
   const pl = collabGet(req.params.code);
   if (!pl) return res.status(404).json({ error: 'Playlist no encontrada con este código' });
   res.json(pl);
@@ -2415,6 +2439,9 @@ app.post('/api/playlists/collaborative/:code', (req, res) => {
   const name = req.body.name || 'Playlist Colaborativa';
   const description = req.body.description || '';
   const tracks = Array.isArray(req.body.tracks) ? req.body.tracks : [];
+  // metaOnly: sólo cambia nombre/descripción y conserva las canciones que
+  // otros miembros hayan añadido mientras tanto.
+  const metaOnly = req.body.metaOnly === true;
 
   let pl = collabGet(code);
   if (!pl) {
@@ -2429,8 +2456,10 @@ app.post('/api/playlists/collaborative/:code', (req, res) => {
   } else {
     pl.name = name;
     pl.description = description;
-    // La lista enviada es la versión completa y manda sobre la guardada.
-    pl.tracks = tracks;
+    if (!metaOnly) {
+      // La lista enviada es la versión completa y manda sobre la guardada.
+      pl.tracks = tracks;
+    }
     pl.updatedAt = new Date().toISOString();
   }
 
@@ -2455,7 +2484,12 @@ app.post('/api/playlists/collaborative/:code/tracks', (req, res) => {
     };
   }
 
-  if (!pl.tracks.some(t => String(t.id) === String(track.id) || t.title === track.title)) {
+  // Fusionar en vez de reemplazar: dos personas pueden añadir canciones a la
+  // vez sin que la última en guardar borre el trabajo de la otra.
+  const existingIdx = pl.tracks.findIndex(t => collabSameTrack(t, track));
+  if (existingIdx >= 0) {
+    pl.tracks[existingIdx] = Object.assign({}, pl.tracks[existingIdx], track);
+  } else {
     pl.tracks.push(track);
   }
   pl.updatedAt = new Date().toISOString();
@@ -2466,13 +2500,22 @@ app.post('/api/playlists/collaborative/:code/tracks', (req, res) => {
 
 app.delete('/api/playlists/collaborative/:code/tracks/:trackId', (req, res) => {
   const code = collabNormalizeCode(req.params.code);
-  const trackId = req.params.trackId;
+  const rawId = String(req.params.trackId || '');
 
   const pl = collabGet(code);
   if (!pl) return res.status(404).json({ error: 'Playlist no encontrada' });
 
+  const matches = t => {
+    if (!t) return false;
+    if (String(t.id) === rawId) return true;
+    if (t.videoId && String(t.videoId) === rawId) return true;
+    if (t.sourceUrl && String(t.sourceUrl) === rawId) return true;
+    if (collabTrackKey(t) === rawId) return true;
+    return false;
+  };
+
   const before = pl.tracks.length;
-  pl.tracks = pl.tracks.filter(t => String(t.id) !== String(trackId));
+  pl.tracks = pl.tracks.filter(t => !matches(t));
   const removed = before - pl.tracks.length;
   pl.updatedAt = new Date().toISOString();
   collabSave(pl);
@@ -3597,7 +3640,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('----------------------------------------------------');
-  console.log('🎵 Sonora Music Server v7.17.1');
+  console.log('🎵 Sonora Music Server v7.17.2');
   console.log(`📡 Mode: ${isNorthflank ? 'Northflank' : (isRender ? 'Render' : 'Local')}`);
   console.log(`🌐 Port: ${PORT}`);
   console.log(`📁 Music directory: ${musicDir}`);

@@ -1194,7 +1194,7 @@
 
               <h3 class="about-title">Sonora Music</h3>
               <div style="display:flex;align-items:center;gap:10px;margin:6px 0;flex-wrap:wrap;justify-content:center;">
-                <span class="about-version-badge">v7.17.1 (Build 2026)</span>
+                <span class="about-version-badge">v7.17.2 (Build 2026)</span>
                 <button id="btn-check-updates" class="btn-update-action" style="padding:4px 12px;font-size:11px;" title="Buscar nuevas versiones">
                   🔄 Buscar actualizaciones
                 </button>
