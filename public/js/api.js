@@ -595,8 +595,12 @@
         if (selfOrigin) {
           _localUrl = selfOrigin;
         } else if (autoLocal) {
-          // Abierta desde la nube/APK sin configuración: Modo Dispositivo.
-          _mode = 'device';
+          // Sin servidor local: si es una web servida por http/https, usamos
+          // Render (audio en la nube). En la app nativa (file:/tauri:) no hay
+          // red garantizada, así que Modo Dispositivo.
+          var proto = '';
+          try { proto = window.location.protocol; } catch (e) {}
+          _mode = (proto === 'http:' || proto === 'https:') ? 'render' : 'device';
         }
         if (values[2]) _renderUrl = values[2];
         if (values[3] !== null && values[3] !== undefined) _northflankUrl = values[3];
@@ -634,8 +638,8 @@
           });
         }
 
-        // Sin modo guardado: arrancamos en Modo Dispositivo. El usuario puede
-        // elegir Local/Render/Northflank desde Ajustes cuando quiera.
+        // Sin modo guardado: ya sea local, Render o Dispositivo según el
+        // origen desde el que se abrió la app (ver arriba).
         return { mode: _mode, result: null };
       }).then(function () {
         Sonora.Store.set('serverMode', _mode);
