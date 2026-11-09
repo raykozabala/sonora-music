@@ -1521,7 +1521,7 @@
      MAIN INITIALIZATION
      ══════════════════════════════════════════════ */
   function boot() {
-    console.log('🎵 Sonora Music v7.17.3 — Booting...');
+    console.log('🎵 Sonora Music v7.17.4 — Booting...');
 
     var splashScreen = $('#splash-screen');
 
@@ -1633,10 +1633,26 @@
           } catch (e) {}
         }, 2500);
 
+        // Step 10c: al volver a la app o recuperar la red, ponerse al día sin
+        // que el usuario tenga que pulsar "Sincronizar".
+        var syncCollabQuiet = function () {
+          try {
+            if (document.visibilityState && document.visibilityState !== 'visible') return;
+            if (navigator.onLine === false) return;
+            var el = document.activeElement;
+            if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+            if (document.querySelector('.sonora-modal-overlay.active, #sonora-action-sheet')) return;
+            var P = Sonora.Pages && Sonora.Pages.Playlists;
+            if (P && typeof P.syncAllCollab === 'function') P.syncAllCollab();
+          } catch (e) {}
+        };
+        document.addEventListener('visibilitychange', syncCollabQuiet);
+        window.addEventListener('online', syncCollabQuiet);
+
         // Step 11: Register Service Worker
         registerSW();
 
-        console.log('🎵 Sonora Music v7.17.3 — Ready!');
+        console.log('🎵 Sonora Music v7.17.4 — Ready!');
       })
       .catch(function (err) {
         console.error('[App] Boot error:', err);

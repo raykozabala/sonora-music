@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "🔨 Iniciando compilación de Sonora Music v7.17.3 APK..."
+echo "🔨 Iniciando compilación de Sonora Music v7.17.4 APK..."
 
 # D8 y apksigner necesitan JDK 11+. Preferimos el JBR de Android Studio;
 # si no está instalado, usamos OpenJDK 17 de Homebrew.
@@ -84,7 +84,7 @@ if [ ! -f "$KEYSTORE" ]; then
         -dname "CN=SonoraMusic, OU=App, O=Sonora, L=City, S=State, C=US"
 fi
 
-FINAL_APK="$PROJECT_ROOT/SonoraMusic_v7.17.3.apk"
+FINAL_APK="$PROJECT_ROOT/SonoraMusic_v7.17.4.apk"
 rm -f "$FINAL_APK"
 
 "$APKSIGNER" sign \
@@ -99,11 +99,11 @@ echo "✅ Verificando firma del APK..."
 "$APKSIGNER" verify "$FINAL_APK"
 
 # Copiar a Desktop y a la raíz de sonora-music
-cp "$FINAL_APK" /Users/rayko/Desktop/SonoraMusic_v7.17.3.apk 2>/dev/null || true
-cp "$FINAL_APK" "$PROJECT_ROOT/sonora-music/SonoraMusic_v7.17.3.apk" 2>/dev/null || true
+cp "$FINAL_APK" /Users/rayko/Desktop/SonoraMusic_v7.17.4.apk 2>/dev/null || true
+cp "$FINAL_APK" "$PROJECT_ROOT/sonora-music/SonoraMusic_v7.17.4.apk" 2>/dev/null || true
 
 SIZE=$(du -h "$FINAL_APK" | cut -f1)
-echo "🎉 ¡ÉXITO! APK v7.17.3 generado con éxito:"
+echo "🎉 ¡ÉXITO! APK v7.17.4 generado con éxito:"
 echo "📂 $FINAL_APK ($SIZE)"
-echo "📂 $PROJECT_ROOT/sonora-music/SonoraMusic_v7.17.3.apk"
-echo "📂 /Users/rayko/Desktop/SonoraMusic_v7.17.3.apk"
+echo "📂 $PROJECT_ROOT/sonora-music/SonoraMusic_v7.17.4.apk"
+echo "📂 /Users/rayko/Desktop/SonoraMusic_v7.17.4.apk"

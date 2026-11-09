@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.17.3
+ * Sonora Music Server v7.17.4
  * Triple-mode backend server (Local PC, Render.com & Northflank compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -628,7 +628,7 @@ app.get('/api/health', (req, res) => {
       status: 'ok',
       server: isNorthflank ? 'northflank' : (isRender ? 'render' : 'local'),
       uptime: Math.floor(process.uptime()),
-      version: '7.17.3',
+      version: '7.17.4',
       mode: SERVER_MODE,
       connected: true
     });
@@ -815,7 +815,7 @@ app.get('/api/system', (req, res) => {
     mode: SERVER_MODE,
     node: process.version,
     platform: process.platform,
-    version: '7.17.3',
+    version: '7.17.4',
     ytdlp: { path: YTDLP_BIN, available: !!ytdlpVersion, version: ytdlpVersion || null },
     ffmpeg: { path: FFMPEG_BIN, available: !!ffmpegRaw, version: ffmpegRaw ? ffmpegRaw.split('\n')[0] : null },
     deno: { path: DENO_BIN, available: !!denoRaw, version: denoRaw ? denoRaw.split('\n')[0] : null },
@@ -1328,7 +1328,7 @@ async function lyricsFetchJson(url, timeoutMs = 4000, retries = 1, extraHeaders 
     try {
       const response = await fetch(url, {
         headers: Object.assign({
-          'User-Agent': 'SonoraMusic/7.17.3 (https://sonora-music.app)',
+          'User-Agent': 'SonoraMusic/7.17.4 (https://sonora-music.app)',
           'Accept': 'application/json'
         }, extraHeaders),
         signal: AbortSignal.timeout(timeoutMs)
@@ -3640,7 +3640,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('----------------------------------------------------');
-  console.log('🎵 Sonora Music Server v7.17.3');
+  console.log('🎵 Sonora Music Server v7.17.4');
   console.log(`📡 Mode: ${isNorthflank ? 'Northflank' : (isRender ? 'Render' : 'Local')}`);
   console.log(`🌐 Port: ${PORT}`);
   console.log(`📁 Music directory: ${musicDir}`);

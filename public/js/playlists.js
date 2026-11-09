@@ -325,7 +325,15 @@
   }
 
   function buildJoinLink(code) {
-    return 'https://sonora-music-b1ee.onrender.com/#/playlists/join?code=' + encodeURIComponent(code);
+    // El enlace debe apuntar al servidor donde vive la playlist: Render en la
+    // web/nube, o la IP del PC si se usa el servidor local en la misma red.
+    var base = '';
+    try {
+      if (Sonora.API && typeof Sonora.API.getCollabBase === 'function') base = Sonora.API.getCollabBase();
+    } catch (e) {}
+    if (!base) base = 'https://sonora-music-b1ee.onrender.com';
+    base = String(base).replace(/\/+$/, '');
+    return base + '/#/playlists/join?code=' + encodeURIComponent(code);
   }
 
   /** Compartir una playlist (código de invitación si es colaborativa) */
@@ -629,13 +637,20 @@
         if (lt && lt.isDeviceTrack) nextIds.push(localIds[li]);
       } catch (e) {}
     }
+
+    // El servidor manda en nombre y descripción. Comparar y aplicar con la
+    // misma regla evita un bucle de refresco cuando la descripción remota
+    // está vacía: antes se comparaba contra '' pero se conservaba el texto
+    // local, así que "cambiaba" en cada sincronización.
+    var remoteDesc = (remote.description === undefined || remote.description === null)
+      ? '' : String(remote.description);
     var changed = localIds.join('|') !== nextIds.join('|') ||
       (remote.name && remote.name !== pl.name) ||
-      ((remote.description || '') !== (pl.description || ''));
+      (remoteDesc !== String(pl.description || ''));
 
     if (changed) {
       pl.name = remote.name || pl.name;
-      pl.description = remote.description || pl.description || '';
+      pl.description = remoteDesc;
       pl.trackIds = remoteIds;
       pl.updatedAt = remote.updatedAt || new Date().toISOString();
       if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.update === 'function') {
@@ -690,8 +705,8 @@
     for (var i = 0; i < remoteTracks.length; i++) {
       var t = remoteTracks[i];
       if (!t || t.id === undefined || t.id === null) continue;
-      await mergeRemoteTrack(t);
-      trackIds.push(t.id);
+      var mergedJoin = await mergeRemoteTrack(t);
+      trackIds.push(mergedJoin && mergedJoin.id !== undefined ? mergedJoin.id : t.id);
     }
 
     // Si ya la teníamos unida, la actualizamos en vez de duplicarla.
@@ -712,7 +727,7 @@
     } else {
       localPl = await Sonora.DB.playlists.create({
         name: remote.name || ('Playlist ' + code),
-        description: remote.description || 'Playlist colaborativa',
+        description: remote.description || '',
         trackIds: trackIds,
         artworkUrl: '',
         isCollaborative: 1,
@@ -2326,21 +2341,9 @@
       const tracksMap = new Map();
       allTracks.forEach(t => tracksMap.set(String(t.id), t));
 
-      // Playlists colaborativas: traer los cambios que hicieron los demás
-      // antes de pintar. Si el servidor perdió la lista, se republica.
-      if (playlist.code) {
-        try {
-          const changedRemote = await pullCollabPlaylist(playlist, { silent: true });
-          if (changedRemote) {
-            const fresh = (await Sonora.DB.tracks.getAll()) || [];
-            allTracks = fresh;
-            tracksMap.clear();
-            fresh.forEach(t => tracksMap.set(String(t.id), t));
-          }
-        } catch (e) {
-          console.warn('[Playlists] No se pudo sincronizar la colaborativa:', e);
-        }
-      }
+      // Las playlists colaborativas se pintan ya con la copia local y se
+      // sincronizan en segundo plano más abajo: esperar al servidor antes de
+      // pintar dejaba la pantalla en "Cargando..." cuando Render hiberna.
 
       // Update Header info
       const titleEl = $('#detail-title');
@@ -3169,11 +3172,20 @@
           });
         }
 
-        startCollabRefresh(playlist.id, function () {
+        // Al abrir una colaborativa, ponerse al día sin bloquear el pintado.
+        const refreshIfStillHere = function () {
           const shell = document.querySelector('.playlist-detail-container');
           if (!shell || String(shell.getAttribute('data-playlist-id')) !== String(playlist.id)) return;
           if (Sonora.Router && typeof Sonora.Router.refresh === 'function') Sonora.Router.refresh();
-        });
+        };
+        setTimeout(async function () {
+          try {
+            const changed = await pullCollabPlaylist(playlist, { silent: true });
+            if (changed) refreshIfStillHere();
+          } catch (e) {}
+        }, 0);
+
+        startCollabRefresh(playlist.id, refreshIfStillHere);
       } else if (collabSyncBtn) {
         collabSyncBtn.style.display = 'none';
       }
