@@ -55,6 +55,24 @@
     return _renderUrl;
   }
 
+  /**
+   * Una canción compartida no debe llevar audio ni carátulas embebidas: el
+   * streamUrl se recalcula en cada dispositivo y una carátula en base64 puede
+   * pesar más que el límite del servidor (100 KB) y romper la sincronización.
+   */
+  function sanitizeCollabTrack(t) {
+    if (!t || typeof t !== 'object') return t;
+    var out = {};
+    for (var k in t) {
+      if (Object.prototype.hasOwnProperty.call(t, k)) out[k] = t[k];
+    }
+    delete out.streamUrl;
+    if (typeof out.artworkUrl === 'string' && out.artworkUrl.indexOf('data:') === 0) delete out.artworkUrl;
+    if (typeof out.lyrics === 'string' && out.lyrics.length > 20000) delete out.lyrics;
+    if (typeof out.syncedLyrics === 'string' && out.syncedLyrics.length > 40000) delete out.syncedLyrics;
+    return out;
+  }
+
   function getTimeoutForMode(mode) {
     if (mode === 'local') return 5000;
     if (mode === 'northflank') return 10000;
@@ -314,7 +332,7 @@
       return fetchWithTimeout(base + '/api/playlists/collaborative/' + encodeURIComponent(code) + '/tracks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.assign({}, track, { playlistName: playlistName }))
+        body: JSON.stringify(Object.assign(sanitizeCollabTrack(track) || {}, { playlistName: playlistName }))
       }, 8000).then(function (res) {
         if (!res.ok) throw new Error('Error al sincronizar');
         return res.json();
@@ -324,10 +342,12 @@
     saveCollaborativePlaylist: function (code, data) {
       var base = getCollabBase();
       if (!base) return Promise.reject(new Error('No server configured'));
+      var payload = Object.assign({}, data || {});
+      if (Array.isArray(payload.tracks)) payload.tracks = payload.tracks.map(sanitizeCollabTrack);
       return fetchWithTimeout(base + '/api/playlists/collaborative/' + encodeURIComponent(code), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data || {})
+        body: JSON.stringify(payload)
       }, 10000).then(function (res) {
         if (!res.ok) throw new Error('Error al guardar la playlist colaborativa');
         return res.json();

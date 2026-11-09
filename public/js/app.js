@@ -552,6 +552,8 @@
       try { _lyricsUnsub.destroy(); } catch (e) {}
     }
     _lyricsUnsub = null;
+    var _pipp = Sonora.Desktop && Sonora.Desktop.PiP;
+    if (_pipp && typeof _pipp.updateLyric === 'function') _pipp.updateLyric('', '');
 
     var seq = ++_lyricsRenderSeq;
 
@@ -613,7 +615,14 @@
         offset: Sonora.Lyrics.getOffset(track),
         autoScroll: true,
         getTime: speakerTime,
-        onActive: function () {},
+        onActive: function (index) {
+          var activeLine = lines[index];
+          var nextLine = lines[index + 1];
+          var pipp = Sonora.Desktop && Sonora.Desktop.PiP;
+          if (pipp && typeof pipp.updateLyric === 'function') {
+            pipp.updateLyric(activeLine ? activeLine.text : '', nextLine ? nextLine.text : '');
+          }
+        },
         onUserScroll: function () {
           if (syncBtn) syncBtn.classList.remove('hidden');
         }
@@ -1512,7 +1521,7 @@
      MAIN INITIALIZATION
      ══════════════════════════════════════════════ */
   function boot() {
-    console.log('🎵 Sonora Music v7.17.2 — Booting...');
+    console.log('🎵 Sonora Music v7.17.3 — Booting...');
 
     var splashScreen = $('#splash-screen');
 
@@ -1627,7 +1636,7 @@
         // Step 11: Register Service Worker
         registerSW();
 
-        console.log('🎵 Sonora Music v7.17.2 — Ready!');
+        console.log('🎵 Sonora Music v7.17.3 — Ready!');
       })
       .catch(function (err) {
         console.error('[App] Boot error:', err);

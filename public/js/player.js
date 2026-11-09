@@ -42,6 +42,9 @@
   var _queueIndex = -1;
   var _currentTrack = null;
   var _isPlaying = false;
+  // Contador compartido por todos los canales: si una canción falla, se
+  // reintenta con el otro servidor antes de rendirse.
+  var _consecutiveErrors = 0;
   var _isShuffled = false;
   var _repeatMode = 'off'; // 'off' | 'all' | 'one'
   var _volume = 0.8;
@@ -237,8 +240,6 @@
         handleTrackEnded();
       }
     });
-
-    var _consecutiveErrors = 0;
 
     audio.addEventListener('error', function (err) {
       console.warn('[Player] Audio channel ' + channelIdx + ' error:', err);

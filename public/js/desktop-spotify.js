@@ -590,6 +590,9 @@
       }
       this._lyricsSync = null;
       this.setLyricsSyncVisible(false);
+      if (typeof PiP !== 'undefined' && PiP && typeof PiP.updateLyric === 'function') {
+        PiP.updateLyric('', '');
+      }
     },
 
     /** Muestra u oculta el botón "Sincronizar" de la letra a pantalla completa. */
@@ -668,13 +671,18 @@
           self.activeLyricIndex = index;
           var line = lines[index];
           var next = lines[index + 1];
+          var currentText = line ? line.text : '';
+          var nextText = next ? next.text : '';
+          if (PiP && typeof PiP.updateLyric === 'function') {
+            PiP.updateLyric(currentText, nextText);
+          }
           if (PiP && PiP.channel) {
             try {
               PiP.channel.postMessage({
                 type: 'lyric',
                 data: {
-                  currentText: line ? line.text : '',
-                  nextText: next ? next.text : ''
+                  currentText: currentText,
+                  nextText: nextText
                 }
               });
             } catch (e) {}
@@ -1019,6 +1027,9 @@
       if (!track) return;
       var art = track.artworkUrl || '';
 
+      // La letra pertenece a la canción anterior: no dejamos versos viejos.
+      this.updateLyric('', '');
+
       // Disc artwork
       var vinylImg = $('#pip-vinyl-img');
       if (vinylImg && art) vinylImg.src = art;
@@ -1038,6 +1049,14 @@
       if (barImg && art) barImg.src = art;
       if (barTitle) barTitle.textContent = track.title || 'Sonora';
       if (barArtist) barArtist.textContent = track.artist || '';
+    },
+
+    /** Letra actual y siguiente, tal y como llegan del motor de letras. */
+    updateLyric: function (currentText, nextText) {
+      var cur = $('#pip-vert-lyric');
+      var nxt = $('#pip-vert-lyric-next');
+      if (cur) cur.textContent = currentText || '';
+      if (nxt) nxt.textContent = nextText || '';
     },
 
     updatePlayState: function (playing) {

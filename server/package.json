@@ -1,6 +1,6 @@
 {
   "name": "sonora-music-server",
-  "version": "7.17.2",
+  "version": "7.17.3",
   "description": "Sonora Music triple-mode server (local + Render + Northflank compatible)",
   "main": "server.js",
   "scripts": {
