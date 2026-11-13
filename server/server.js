@@ -798,6 +798,11 @@ app.get('/api/health', (req, res) => {
 app.get('/api/lan', (req, res) => {
   res.set('Cache-Control', 'no-store, max-age=0');
   try {
+    // En la nube la IP del contenedor (10.x) no es accesible desde el móvil.
+    // Devolvemos vacío para que el cliente siga usando la URL pública.
+    if (isRender || isNorthflank) {
+      return res.json({ ip: '', port: '', url: '', interfaces: [] });
+    }
     const nets = os.networkInterfaces();
     const candidates = [];
     Object.keys(nets).forEach(function (name) {
