@@ -1194,7 +1194,7 @@
 
               <h3 class="about-title">Sonora Music</h3>
               <div style="display:flex;align-items:center;gap:10px;margin:6px 0;flex-wrap:wrap;justify-content:center;">
-                <span class="about-version-badge">v7.17.4 (Build 2026)</span>
+                <span class="about-version-badge">v7.17.5 (Build 2026)</span>
                 <button id="btn-check-updates" class="btn-update-action" style="padding:4px 12px;font-size:11px;" title="Buscar nuevas versiones">
                   🔄 Buscar actualizaciones
                 </button>
@@ -1211,11 +1211,11 @@
               </p>
 
               <div class="about-links">
-                <a href="https://github.com/raykozabala/sonora-music-server" target="_blank" rel="noopener noreferrer" class="about-link">GitHub</a>
+                <a href="https://github.com/raykozabala/sonora-music" target="_blank" rel="noopener noreferrer" class="about-link">GitHub</a>
                 <span style="color:var(--color-divider);">•</span>
                 <a href="https://sonora-music-b1ee.onrender.com" target="_blank" rel="noopener noreferrer" id="link-about-web" class="about-link">Sitio Web</a>
                 <span style="color:var(--color-divider);">•</span>
-                <a href="https://github.com/raykozabala/sonora-music-server/issues" target="_blank" rel="noopener noreferrer" id="link-about-feedback" class="about-link">Sugerencias</a>
+                <a href="https://github.com/raykozabala/sonora-music/issues" target="_blank" rel="noopener noreferrer" id="link-about-feedback" class="about-link">Sugerencias</a>
               </div>
             </div>
           </section>
@@ -2185,7 +2185,7 @@
 
       if (btnResetAll) {
         addTrackedListener(btnResetAll, 'click', async () => {
-          const step1 = window.confirm('⚠️ ADVERTENCIA: ¿Estás seguro de que deseas restablecer TODOS los datos de Sonora Music?\nSe borrarán tus playlists, historial, descargas y configuraciones.');
+          const step1 = window.confirm('⚠️ ADVERTENCIA: ¿Estás seguro de que deseas restablecer TODOS los datos de Sonora Music?\nSe borrarán tus playlists, historial, descargas y configuraciones.\nTambién se eliminarán del servidor las playlists colaborativas que creaste (las de otras personas solo se quitarán de este dispositivo).');
           if (!step1) return;
 
           const step2 = window.confirm('⚠️ Confirmación final: ¿Realmente deseas restablecer la aplicación a su estado de fábrica?\n\nEsta acción no se puede deshacer.');
@@ -2197,6 +2197,25 @@
           try {
             // 1) Detener reproducción y liberar blobs/descargas en memoria.
             try { if (Sonora.Player && typeof Sonora.Player.stop === 'function') Sonora.Player.stop(); } catch (e) {}
+
+            // 1.5) Borrar del servidor las colaborativas creadas por este
+            //      dispositivo. Antes el reset sólo limpiaba lo local y las
+            //      playlists seguían existiendo en la nube (y visibles desde
+            //      otros dispositivos).
+            let serverCleanup = { deleted: 0, failed: 0 };
+            try {
+              const localPlaylists = (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.getAll === 'function')
+                ? await Sonora.DB.playlists.getAll()
+                : [];
+              const ownedCollabs = (localPlaylists || []).filter(function (pl) {
+                return pl && pl.code && pl.userCreated;
+              });
+              if (ownedCollabs.length && Sonora.API && typeof Sonora.API.deleteOwnedCollaborativePlaylists === 'function') {
+                serverCleanup = await Sonora.API.deleteOwnedCollaborativePlaylists(ownedCollabs);
+              }
+            } catch (serverErr) {
+              console.warn('[Settings] No se pudieron borrar las colaborativas del servidor:', serverErr);
+            }
 
             // 2) Cerrar la base y esperar a que IndexedDB la borre de verdad.
             //    Antes se llamaba deleteDatabase con la conexión abierta, así
@@ -2247,7 +2266,15 @@
               } catch (e) {}
             }
 
-            alert('Sonora Music ha sido restablecida. La aplicación se recargará ahora.');
+            const serverInfo = [];
+            if (serverCleanup && serverCleanup.deleted > 0) {
+              serverInfo.push('Se eliminaron ' + serverCleanup.deleted + ' playlist(s) colaborativa(s) del servidor.');
+            }
+            if (serverCleanup && serverCleanup.failed > 0) {
+              serverInfo.push('No se pudieron eliminar ' + serverCleanup.failed + ' del servidor; revisa tu conexión.');
+            }
+            alert('Sonora Music ha sido restablecida. La aplicación se recargará ahora.'
+              + (serverInfo.length ? '\n\n' + serverInfo.join('\n') : ''));
             setTimeout(() => {
               try { window.location.reload(); } catch (e) { window.location.href = window.location.pathname; }
             }, 250);
@@ -2322,7 +2349,7 @@
         linkWeb.setAttribute('href', 'https://sonora-music-b1ee.onrender.com');
       }
       if (linkFb && !linkFb.getAttribute('href')) {
-        linkFb.setAttribute('href', 'https://github.com/raykozabala/sonora-music-server/issues');
+        linkFb.setAttribute('href', 'https://github.com/raykozabala/sonora-music/issues');
       }
     },
 

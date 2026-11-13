@@ -8,8 +8,11 @@
 
   var Sonora = window.Sonora = window.Sonora || {};
 
-  var CURRENT_VERSION = '7.17.4';
-  var GITHUB_REPO = 'raykozabala/sonora-music-server';
+  var CURRENT_VERSION = '7.17.5';
+  // Las releases reales (APK/DMG) se publican en este repositorio. Antes
+  // apuntaba a sonora-music-server, que se quedó en 7.17.1, así que la app
+  // nunca veía las versiones nuevas.
+  var GITHUB_REPO = 'raykozabala/sonora-music';
   var _lastCheckTime = 0;
   var _updateInfo = null;
 
@@ -191,6 +194,11 @@
                 if (/\.dmg$/i.test(asset.name)) info.dmgUrl = asset.browser_download_url;
               });
             }
+
+            // Antes se leía la release pero NUNCA se marcaba hasUpdate, así
+            // que la app siempre decía "estás al día" aunque hubiera una
+            // versión nueva publicada.
+            info.hasUpdate = isNewerVersion(tag, CURRENT_VERSION);
           }
         } else if (resp.status === 404) {
           // El repositorio no tiene releases publicados. No es un fallo de

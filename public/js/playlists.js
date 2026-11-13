@@ -324,12 +324,18 @@
     }
   }
 
-  function buildJoinLink(code) {
+  async function buildJoinLink(code) {
     // El enlace debe apuntar al servidor donde vive la playlist: Render en la
     // web/nube, o la IP del PC si se usa el servidor local en la misma red.
     var base = '';
     try {
-      if (Sonora.API && typeof Sonora.API.getCollabBase === 'function') base = Sonora.API.getCollabBase();
+      // Si el PC abrió Sonora por localhost, esperamos a resolver la IP LAN:
+      // "localhost" en el teléfono apunta al propio teléfono.
+      if (Sonora.API && typeof Sonora.API.probeLan === 'function') {
+        await Sonora.API.probeLan();
+      }
+      if (Sonora.API && typeof Sonora.API.getInviteBase === 'function') base = Sonora.API.getInviteBase();
+      else if (Sonora.API && typeof Sonora.API.getCollabBase === 'function') base = Sonora.API.getCollabBase();
     } catch (e) {}
     if (!base) base = 'https://sonora-music-b1ee.onrender.com';
     base = String(base).replace(/\/+$/, '');
@@ -337,10 +343,10 @@
   }
 
   /** Compartir una playlist (código de invitación si es colaborativa) */
-  function sharePlaylist(pl) {
+  async function sharePlaylist(pl) {
     var isCollab = !!(pl.isCollaborative || pl.code);
     if (isCollab && pl.code) {
-      var link = buildJoinLink(pl.code);
+      var link = await buildJoinLink(pl.code);
       var text = '🎧 Escucha mi playlist colaborativa "' + pl.name + '" en Sonora Music.\n' +
                  'Código para unirte: ' + pl.code + '\n' + link;
       openActionSheet({
@@ -786,13 +792,13 @@
   }
 
   /** Muestra el código de una playlist colaborativa con opciones de copiar. */
-  function showPlaylistCode(pl) {
+  async function showPlaylistCode(pl) {
     var code = String(pl.code || '').toUpperCase();
     if (!code) {
       showToast('Esta playlist no es colaborativa', 'info');
       return;
     }
-    var link = buildJoinLink(code);
+    var link = await buildJoinLink(code);
     openActionSheet({
       title: '🔑 Código: ' + code,
       subtitle: pl.name,

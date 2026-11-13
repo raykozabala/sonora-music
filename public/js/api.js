@@ -13,6 +13,10 @@
   var _northflankUrl = '';
   var _northflankToken = '';
   var _timeout = 15000;
+  // IP de la red local para enlaces de invitación cuando el PC abre Sonora
+  // por localhost (ese hostname en el teléfono apunta al propio teléfono).
+  var _lanUrl = '';
+  var _lanProbe = null;
 
   function isLocalHostname(hostname) {
     if (!hostname) return false;
@@ -53,6 +57,45 @@
     var base = getBaseUrl();
     if (base) return base;
     return _renderUrl;
+  }
+
+  /**
+   * Sondeo de la IP LAN. Sólo se hace cuando la web se abrió desde
+   * localhost/127.0.0.1, porque en ese caso el enlace de invitación debe
+   * apuntar a la IP del PC y no a "localhost".
+   */
+  function shouldProbeLan() {
+    try {
+      if (typeof window === 'undefined' || !window.location) return false;
+      var host = window.location.hostname;
+      return (host === 'localhost' || host === '127.0.0.1') &&
+        (window.location.protocol === 'http:' || window.location.protocol === 'https:');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function probeLan() {
+    if (!shouldProbeLan()) return Promise.resolve('');
+    if (_lanProbe) return _lanProbe;
+    _lanProbe = fetch(window.location.origin.replace(/\/+$/, '') + '/api/lan', { cache: 'no-store' })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (data && data.url) _lanUrl = String(data.url).replace(/\/+$/, '');
+        return _lanUrl;
+      })
+      .catch(function () { return _lanUrl; });
+    return _lanProbe;
+  }
+
+  /**
+   * Servidor que debe aparecer en los enlaces de invitación.
+   * En modo local con localhost usamos la IP LAN; en Render/Dispositivo,
+   * la nube; si ya se abrió por IP LAN o .local, el propio origen.
+   */
+  function getInviteBase() {
+    if (_mode === 'local' && _lanUrl) return _lanUrl;
+    return getCollabBase();
   }
 
   /**
@@ -144,6 +187,9 @@
       saveSettingPersistent('server_mode', _mode);
       updateStatusDotUI(_mode);
       console.log('[API] Mode set to:', _mode);
+      // Si el usuario acaba de cambiar a modo local, resolvemos la IP LAN
+      // para que los enlaces de invitación sean válidos en el teléfono.
+      try { probeLan(); } catch (e) {}
     },
 
     /**
@@ -273,6 +319,20 @@
     },
 
     /**
+     * Base para enlaces de invitación (IP LAN si el PC abrió por localhost).
+     */
+    getInviteBase: function () {
+      return getInviteBase();
+    },
+
+    /**
+     * Fuerza el sondeo de la IP LAN (se llama al iniciar y al cambiar de modo).
+     */
+    probeLan: function () {
+      return probeLan();
+    },
+
+    /**
      * Get related music recommendations for continuous autoplay
      */
     getRecommendations: function (artist, title, genre, excludeTitles) {
@@ -365,6 +425,44 @@
         if (!res.ok) throw new Error('Error al eliminar (HTTP ' + res.status + ')');
         return res.json();
       });
+    },
+
+    /**
+     * Borra del servidor las playlists colaborativas creadas por este
+     * dispositivo. Las que sólo se unió se conservan porque pertenecen a otra
+     * persona: en ese caso el reset únicamente "sale" de ellas en local.
+     * Devuelve un resumen para poder informar al usuario.
+     */
+    deleteOwnedCollaborativePlaylists: function (playlists) {
+      var base = getCollabBase();
+      var result = { supported: !!base, requested: 0, deleted: 0, failed: 0, errors: [] };
+      if (!base) return Promise.resolve(result);
+
+      var codes = [];
+      (playlists || []).forEach(function (pl) {
+        if (!pl || !pl.code) return;
+        // Sólo el creador puede borrar en el servidor. Si el flag no existe,
+        // preferimos conservar la playlist antes que borrar la de otra persona.
+        if (!pl.userCreated) return;
+        var code = String(pl.code).trim().toUpperCase();
+        if (code && codes.indexOf(code) === -1) codes.push(code);
+      });
+
+      result.requested = codes.length;
+      if (!codes.length) return Promise.resolve(result);
+
+      var api = Sonora.API;
+      if (!api || typeof api.deleteCollaborativePlaylist !== 'function') {
+        return Promise.resolve(result);
+      }
+      return Promise.all(codes.map(function (code) {
+        return api.deleteCollaborativePlaylist(code).then(function () {
+          result.deleted++;
+        }).catch(function (err) {
+          result.failed++;
+          result.errors.push({ code: code, message: (err && err.message) || String(err) });
+        });
+      })).then(function () { return result; });
     },
 
     removeTrackFromCollaborative: function (code, trackId) {
@@ -665,10 +763,17 @@
         Sonora.Store.set('serverMode', _mode);
         Sonora.Store.set('activeServerUrl', getBaseUrl());
         updateStatusDotUI(_mode);
+        // Resolver la IP LAN en segundo plano para los enlaces de invitación.
+        if (_mode === 'local') probeLan();
       }).catch(function (err) {
         console.warn('[API] Init error:', err);
         Sonora.API.setMode('device');
       });
     }
   };
+
+  // Arrancar el sondeo de IP LAN lo antes posible. Sólo hace algo si la web
+  // se abrió desde localhost/127.0.0.1; así el enlace de invitación ya está
+  // listo cuando el usuario pulsa "Compartir".
+  try { probeLan(); } catch (e) {}
 })();

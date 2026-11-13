@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.17.4
+ * Sonora Music Server v7.17.5
  * Triple-mode backend server (Local PC, Render.com & Northflank compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -9,6 +9,8 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const dns = require('dns').promises;
+const net = require('net');
 const http = require('http');
 const https = require('https');
 const multer = require('multer');
@@ -593,7 +595,94 @@ const storage = multer.diskStorage({
     cb(null, `upload_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`);
   }
 });
-const upload = multer({ storage });
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 300 * 1024 * 1024, // 300 MB
+    files: 1
+  }
+});
+
+// ---------------------------------------------------------------------------
+// SSRF protection
+// Las rutas de streaming aceptan una URL y se la pasan a yt-dlp/ffmpeg. Sin
+// validación, cualquiera podía pedir http://127.0.0.1, la IP del router o
+// metadatos del cloud. Sólo permitimos http/https públicos.
+// ---------------------------------------------------------------------------
+const SAFE_HOST_TTL = 5 * 60 * 1000;
+const safeHostCache = new Map();
+
+function isPrivateIp(ip) {
+  if (!ip) return true;
+  if (net.isIPv4(ip)) {
+    const p = ip.split('.').map(Number);
+    if (p[0] === 0 || p[0] === 10 || p[0] === 127) return true;
+    if (p[0] === 169 && p[1] === 254) return true;
+    if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true;
+    if (p[0] === 192 && p[1] === 168) return true;
+    if (p[0] === 100 && p[1] >= 64 && p[1] <= 127) return true; // CGNAT
+    if (p[0] >= 224) return true; // multicast / reservado
+    return false;
+  }
+  const low = String(ip).toLowerCase();
+  if (low === '::1' || low === '::') return true;
+  if (low.indexOf('::ffff:') === 0) return isPrivateIp(low.slice(7));
+  if (low.indexOf('fc') === 0 || low.indexOf('fd') === 0) return true; // ULA
+  if (/^fe[89ab]/.test(low)) return true; // link-local
+  return false;
+}
+
+async function assertPublicHttpUrl(raw) {
+  let parsed;
+  try {
+    parsed = new URL(String(raw));
+  } catch (e) {
+    throw new Error('URL inválida');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('Sólo se permiten URLs http/https');
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('La URL no puede incluir credenciales');
+  }
+
+  const host = parsed.hostname.replace(/^\[|\]$/g, '');
+  if (!host) throw new Error('La URL no tiene host');
+
+  if (net.isIP(host)) {
+    if (isPrivateIp(host)) throw new Error('Host privado no permitido');
+    return parsed;
+  }
+
+  const lower = host.toLowerCase();
+  if (lower === 'localhost' || lower.endsWith('.localhost') ||
+      lower.endsWith('.local') || lower.endsWith('.internal')) {
+    throw new Error('Host local no permitido');
+  }
+
+  const cachedUntil = safeHostCache.get(lower);
+  if (cachedUntil && cachedUntil > Date.now()) return parsed;
+
+  let addresses;
+  try {
+    addresses = await dns.lookup(host, { all: true, verbatim: true });
+  } catch (e) {
+    throw new Error('No se pudo resolver el host');
+  }
+  if (!addresses || !addresses.length) throw new Error('Host sin direcciones');
+  for (const addr of addresses) {
+    if (isPrivateIp(addr.address)) throw new Error('Host privado no permitido');
+  }
+
+  safeHostCache.set(lower, Date.now() + SAFE_HOST_TTL);
+  if (safeHostCache.size > 500) {
+    const now = Date.now();
+    for (const [k, until] of safeHostCache) {
+      if (until <= now) safeHostCache.delete(k);
+    }
+  }
+  return parsed;
+}
 
 // ---------------------------------------------------------------------------
 // Express Application & Global Middlewares
@@ -603,9 +692,72 @@ const app = express();
 // CORS (Allow all origins for local dev and Render)
 app.use(cors());
 
+// Cabeceras de seguridad básicas (sin CSP: la app usa estilos/scripts inline).
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+});
+
+// ---------------------------------------------------------------------------
+// Rate limiting
+// Límites en memoria por IP. Protegen las rutas caras (búsqueda, vídeo,
+// descargas y subidas) de abusos sin molestar al uso normal: escuchar una
+// canción o navegar por la biblioteca nunca se acerca al límite.
+// Se puede desactivar con RATE_LIMIT_DISABLED=1 (pruebas locales).
+// ---------------------------------------------------------------------------
+const RATE_LIMIT_DISABLED = process.env.RATE_LIMIT_DISABLED === '1';
+const rateBuckets = new Map();
+
+function clientIp(req) {
+  const xff = req.headers['x-forwarded-for'];
+  if (xff) return String(xff).split(',')[0].trim();
+  return (req.socket && req.socket.remoteAddress) || 'unknown';
+}
+
+function rateLimit(name, max, windowMs) {
+  return function (req, res, next) {
+    if (RATE_LIMIT_DISABLED) return next();
+    const key = name + '|' + clientIp(req);
+    const now = Date.now();
+    let bucket = rateBuckets.get(key);
+    if (!bucket || bucket.reset <= now) {
+      bucket = { count: 0, reset: now + windowMs };
+      rateBuckets.set(key, bucket);
+    }
+    bucket.count += 1;
+    const remaining = Math.max(0, max - bucket.count);
+    const retryAfter = Math.max(1, Math.ceil((bucket.reset - now) / 1000));
+    res.setHeader('X-RateLimit-Limit', String(max));
+    res.setHeader('X-RateLimit-Remaining', String(remaining));
+    if (bucket.count > max) {
+      res.setHeader('Retry-After', String(retryAfter));
+      return res.status(429).json({
+        error: 'Demasiadas solicitudes',
+        message: 'Has hecho demasiadas peticiones seguidas. Espera unos segundos.',
+        retryAfter: retryAfter
+      });
+    }
+    next();
+  };
+}
+
+// Limpieza periódica para que el mapa no crezca sin control.
+setInterval(function () {
+  const now = Date.now();
+  for (const [key, bucket] of rateBuckets) {
+    if (bucket.reset <= now) rateBuckets.delete(key);
+  }
+}, 60 * 1000).unref();
+
+// Límite general para la API (holgado: cubre sondeo y navegación normal).
+app.use('/api', rateLimit('api', 600, 60 * 1000));
+
 // Request Parsing
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // Request Logger with Timestamp
 app.use((req, res, next) => {
@@ -628,12 +780,65 @@ app.get('/api/health', (req, res) => {
       status: 'ok',
       server: isNorthflank ? 'northflank' : (isRender ? 'render' : 'local'),
       uptime: Math.floor(process.uptime()),
-      version: '7.17.4',
+      version: '7.17.5',
       mode: SERVER_MODE,
       connected: true
     });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+/**
+ * GET /api/lan
+ * Devuelve la IP privada del PC para poder construir enlaces de invitación
+ * que funcionen en el teléfono. Si el navegador del PC abre Sonora por
+ * "localhost", ese enlace no sirve en otro dispositivo.
+ */
+app.get('/api/lan', (req, res) => {
+  res.set('Cache-Control', 'no-store, max-age=0');
+  try {
+    const nets = os.networkInterfaces();
+    const candidates = [];
+    Object.keys(nets).forEach(function (name) {
+      // Evitar VPNs, túneles y adaptadores virtuales: su IP no sirve en la
+      // red Wi-Fi doméstica.
+      if (/^(utun|tun|tap|awdl|llw|bridge|vmnet|docker|vboxnet)/i.test(name)) return;
+      (nets[name] || []).forEach(function (net) {
+        if (!net || net.internal) return;
+        const family = typeof net.family === 'string' ? net.family : (net.family === 4 ? 'IPv4' : 'IPv6');
+        if (family !== 'IPv4') return;
+        if (!/^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(net.address)) return;
+        candidates.push({ name: name, address: net.address });
+      });
+    });
+    const ifaceRank = function (name) {
+      if (/^(en0|eth0|wlan0)$/i.test(name)) return 0;
+      if (/^(en\d+|eth\d+)$/i.test(name)) return 1;
+      return 5;
+    };
+    const ipRank = function (ip) {
+      if (ip.indexOf('192.168.') === 0) return 0;
+      if (ip.indexOf('10.') === 0) return 1;
+      return 2;
+    };
+    candidates.sort(function (a, b) {
+      return (ifaceRank(a.name) - ifaceRank(b.name)) || (ipRank(a.address) - ipRank(b.address));
+    });
+
+    const hostHeader = String(req.headers.host || '');
+    const port = hostHeader.indexOf(':') !== -1
+      ? hostHeader.split(':').pop()
+      : String(process.env.PORT || '3000');
+    const ip = candidates.length ? candidates[0].address : '';
+    res.json({
+      ip: ip,
+      port: port,
+      url: ip ? ('http://' + ip + ':' + port) : '',
+      interfaces: candidates.map(function (c) { return c.address; })
+    });
+  } catch (err) {
+    res.status(500).json({ ip: '', port: '', url: '', error: err.message });
   }
 });
 
@@ -815,7 +1020,7 @@ app.get('/api/system', (req, res) => {
     mode: SERVER_MODE,
     node: process.version,
     platform: process.platform,
-    version: '7.17.4',
+    version: '7.17.5',
     ytdlp: { path: YTDLP_BIN, available: !!ytdlpVersion, version: ytdlpVersion || null },
     ffmpeg: { path: FFMPEG_BIN, available: !!ffmpegRaw, version: ffmpegRaw ? ffmpegRaw.split('\n')[0] : null },
     deno: { path: DENO_BIN, available: !!denoRaw, version: denoRaw ? denoRaw.split('\n')[0] : null },
@@ -933,7 +1138,7 @@ app.get('/api/ytdiag', async (req, res) => {
  * GET /api/search/external?q=
  * Live search across YouTube, YouTube Music and SoundCloud
  */
-app.get('/api/search/external', async (req, res) => {
+app.get('/api/search/external', rateLimit('search', 40, 60 * 1000), async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
     if (!q) return res.json([]);
@@ -1328,7 +1533,7 @@ async function lyricsFetchJson(url, timeoutMs = 4000, retries = 1, extraHeaders 
     try {
       const response = await fetch(url, {
         headers: Object.assign({
-          'User-Agent': 'SonoraMusic/7.17.4 (https://sonora-music.app)',
+          'User-Agent': 'SonoraMusic/7.17.5 (https://sonora-music.app)',
           'Accept': 'application/json'
         }, extraHeaders),
         signal: AbortSignal.timeout(timeoutMs)
@@ -1685,7 +1890,7 @@ function resolveLyrics(info) {
  * Resuelve la letra correcta por título + artista + duración.
  * Devuelve metadatos de la coincidencia para que el cliente pueda validarla.
  */
-app.get('/api/lyrics', async (req, res) => {
+app.get('/api/lyrics', rateLimit('lyrics', 40, 60 * 1000), async (req, res) => {
   try {
     const rawArtist = String(req.query.artist || '').trim();
     const rawTitle = String(req.query.title || '').trim();
@@ -1751,7 +1956,7 @@ app.get('/api/lyrics', async (req, res) => {
  * GET /api/stream/external
  * Streams audio live for playback in Sonora with universal MP3 decoding and CORS
  */
-app.get('/api/stream/external', async (req, res) => {
+app.get('/api/stream/external', rateLimit('stream-ext', 60, 60 * 1000), async (req, res) => {
   try {
     let targetUrl = req.query.url;
     if (!targetUrl && req.query.id) {
@@ -1771,6 +1976,12 @@ app.get('/api/stream/external', async (req, res) => {
     }
 
     if (!targetUrl) return res.status(400).send('Falta url, id o q');
+
+    try {
+      await assertPublicHttpUrl(targetUrl);
+    } catch (e) {
+      return res.status(400).json({ error: 'URL no permitida', message: e.message });
+    }
 
     // Calidad de audio elegida en Ajustes: 96/160/320 kbps.
     const requestedQuality = String(req.query.quality || '').toLowerCase();
@@ -2070,9 +2281,15 @@ function proxyVideoToClient(sourceUrl, req, res, redirectsLeft) {
  * Devuelve la pista de video o audio proxificada con soporte de Range,
  * para que el reproductor pueda buscar (seek) sin descargar todo el video.
  */
-app.get('/api/video/stream', async (req, res) => {
+app.get('/api/video/stream', rateLimit('video', 40, 60 * 1000), async (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) return res.status(400).json({ error: 'Falta el parámetro url' });
+
+  try {
+    await assertPublicHttpUrl(targetUrl);
+  } catch (e) {
+    return res.status(400).json({ error: 'URL no permitida', message: e.message });
+  }
 
   const mode = req.query.mode === 'audio' ? 'audio' : 'video';
   const quality = req.query.quality || '720p';
@@ -2120,9 +2337,14 @@ app.get('/api/video/stream', async (req, res) => {
  * GET /api/video/info?url=...
  * Metadatos reales (título, duración, calidades y subtítulos disponibles).
  */
-app.get('/api/video/info', async (req, res) => {
+app.get('/api/video/info', rateLimit('video', 40, 60 * 1000), async (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) return res.status(400).json({ error: 'Falta el parámetro url' });
+  try {
+    await assertPublicHttpUrl(targetUrl);
+  } catch (e) {
+    return res.status(400).json({ error: 'URL no permitida', message: e.message });
+  }
   try {
     const { stdout } = await runYtDlpWithFallback([
       '--dump-single-json', '--no-playlist', '--no-warnings', '--no-progress', '--', String(targetUrl)
@@ -2172,10 +2394,15 @@ function srtToVtt(text) {
  * GET /api/video/subtitles?url=...&lang=es&auto=1
  * Descarga subtítulos (manuales o automáticos) y los devuelve como VTT.
  */
-app.get('/api/video/subtitles', async (req, res) => {
+app.get('/api/video/subtitles', rateLimit('video', 40, 60 * 1000), async (req, res) => {
   const targetUrl = req.query.url;
   const lang = String(req.query.lang || 'es').toLowerCase();
   if (!targetUrl) return res.status(400).json({ error: 'Falta el parámetro url' });
+  try {
+    await assertPublicHttpUrl(targetUrl);
+  } catch (e) {
+    return res.status(400).json({ error: 'URL no permitida', message: e.message });
+  }
   if (!/^[a-z]{2,3}(-[a-z0-9]{2,8})?$/.test(lang)) {
     return res.status(400).json({ error: 'Idioma no válido' });
   }
@@ -2231,7 +2458,7 @@ app.get('/api/video/subtitles', async (req, res) => {
  * GET /api/download/external
  * Downloads in chosen format (MP3: 320k/192k/128k, MP4: 1080p/720p/360p) with embedded ID3 metadata & thumbnail
  */
-app.get('/api/download/external', (req, res) => {
+app.get('/api/download/external', rateLimit('download', 20, 60 * 1000), async (req, res) => {
   const targetUrl = req.query.url;
   const format = (req.query.format || 'mp3').toLowerCase();
   const quality = (req.query.quality || (format === 'mp3' ? '320k' : '720p')).toLowerCase();
@@ -2240,6 +2467,12 @@ app.get('/api/download/external', (req, res) => {
 
   if (!targetUrl) {
     return res.status(400).send('Falta el parámetro url');
+  }
+
+  try {
+    await assertPublicHttpUrl(targetUrl);
+  } catch (e) {
+    return res.status(400).json({ error: 'URL no permitida', message: e.message });
   }
 
   const filename = `${artist} - ${title}.${format}`;
@@ -3087,7 +3320,7 @@ app.get('/api/moods', (req, res) => {
  * Download YouTube video, convert to MP3, save to server, return download URL
  * Body: { url, title, artist }
  */
-app.post('/api/download/youtube', async (req, res) => {
+app.post('/api/download/youtube', rateLimit('download', 20, 60 * 1000), async (req, res) => {
   try {
     const { url, title = 'Cancion', artist = 'Sonora' } = req.body;
 
@@ -3411,7 +3644,7 @@ app.get('/api/stream/:id', (req, res) => {
  * POST /api/upload
  * Upload audio file or artwork into music directory
  */
-app.post('/api/upload', upload.single('file'), (req, res) => {
+app.post('/api/upload', rateLimit('upload', 10, 60 * 1000), upload.single('file'), (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -3618,11 +3851,19 @@ app.all('/api/*', (req, res) => {
 // Global Error Handler (Never crash)
 // ---------------------------------------------------------------------------
 app.use((err, req, res, next) => {
-  console.error(`[${new Date().toISOString()}] Unhandled Server Error:`, err);
+  const status = Number(err && (err.status || err.statusCode)) ||
+    (err && err.type === 'entity.too.large' ? 413 : 500);
+  if (status >= 500) {
+    console.error(`[${new Date().toISOString()}] Unhandled Server Error:`, err);
+  } else {
+    console.warn(`[${new Date().toISOString()}] Request rejected (${status}):`, err && err.message);
+  }
   if (!res.headersSent) {
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: err.message || 'An unexpected error occurred on the server.'
+    const label = status === 413 ? 'Payload Too Large'
+      : (status === 400 ? 'Bad Request' : 'Internal Server Error');
+    res.status(status).json({
+      error: label,
+      message: (err && err.message) || 'An unexpected error occurred on the server.'
     });
   }
 });
@@ -3640,7 +3881,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('----------------------------------------------------');
-  console.log('🎵 Sonora Music Server v7.17.4');
+  console.log('🎵 Sonora Music Server v7.17.5');
   console.log(`📡 Mode: ${isNorthflank ? 'Northflank' : (isRender ? 'Render' : 'Local')}`);
   console.log(`🌐 Port: ${PORT}`);
   console.log(`📁 Music directory: ${musicDir}`);
