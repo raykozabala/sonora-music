@@ -80,6 +80,20 @@ function parseTracks(tracks) {
   return [];
 }
 
+/**
+ * pg >= 8.23 trata `sslmode=require` como `verify-full` e ignora el objeto
+ * `ssl`. Quitamos esos parámetros y forzamos TLS explícitamente en el Pool,
+ * que además es compatible con el cambio de semántica de pg 9.
+ */
+function sanitizeConnectionString(raw) {
+  return String(raw || '')
+    .replace(/([?&])sslmode=[^&]*/gi, '$1')
+    .replace(/([?&])uselibpqcompat=[^&]*/gi, '$1')
+    .replace(/\?&/g, '?')
+    .replace(/&&/g, '&')
+    .replace(/[?&]$/, '');
+}
+
 function rowToPlaylist(row) {
   if (!row) return null;
   const toIso = (v) => {
@@ -132,7 +146,7 @@ class CollabStore {
     }
 
     const pool = new Pool({
-      connectionString: url,
+      connectionString: sanitizeConnectionString(url),
       // Supabase exige TLS. El pooler presenta certificados válidos, pero no
       // dependemos de la cadena de CA del contenedor.
       ssl: { rejectUnauthorized: false },
