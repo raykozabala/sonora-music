@@ -121,6 +121,9 @@ class CollabStore {
     this.locks = new Map();
     this.initPromise = null;
     this.keepaliveTimer = null;
+    this.reconnectTimer = null;
+    this.reconnecting = false;
+    this.databaseUrl = '';
   }
 
   /**
@@ -137,6 +140,7 @@ class CollabStore {
 
   async _init(databaseUrl) {
     const url = String(databaseUrl || '').trim();
+    this.databaseUrl = url;
 
     if (!url) {
       this.backend = 'sqlite';
@@ -145,6 +149,26 @@ class CollabStore {
       return this.status();
     }
 
+    try {
+      this.pool = await this._connectPostgres(url);
+      this.backend = 'postgres';
+      this.reason = 'ok';
+      console.log('[Collab] storage=postgres listo');
+
+      await this._backfillFromSqlite();
+      this._startKeepalive();
+      return this.status();
+    } catch (err) {
+      this.backend = 'sqlite';
+      this.reason = err.message;
+      console.warn('[Collab] Postgres no disponible, usando SQLite:', err.message);
+      this.pool = null;
+      this._startReconnect();
+      return this.status();
+    }
+  }
+
+  async _connectPostgres(url) {
     const pool = new Pool({
       connectionString: sanitizeConnectionString(url),
       // Supabase exige TLS. El pooler presenta certificados válidos, pero no
@@ -167,23 +191,44 @@ class CollabStore {
       await pool.query('SELECT 1');
       await pool.query(CREATE_TABLE_SQL);
       await pool.query(CREATE_INDEX_SQL);
-
-      this.pool = pool;
-      this.backend = 'postgres';
-      this.reason = 'ok';
-      console.log('[Collab] storage=postgres listo');
-
-      await this._backfillFromSqlite();
-      this._startKeepalive();
-      return this.status();
+      return pool;
     } catch (err) {
-      this.backend = 'sqlite';
-      this.reason = err.message;
-      console.warn('[Collab] Postgres no disponible, usando SQLite:', err.message);
       try { await pool.end(); } catch (_) { /* ignore */ }
-      this.pool = null;
-      return this.status();
+      throw err;
     }
+  }
+
+  /**
+   * Si el arranque no pudo conectar (red, Supabase pausado, DNS...), reintenta
+   * cada 5 min. Al recuperar Postgres migra lo que se haya escrito en SQLite
+   * durante la caída, para no dejar datos huérfanos en el contenedor.
+   */
+  _startReconnect() {
+    if (this.reconnectTimer || !this.databaseUrl) return;
+    const interval = Number(process.env.COLLAB_RETRY_MS) > 0
+      ? Number(process.env.COLLAB_RETRY_MS)
+      : 5 * 60 * 1000;
+    this.reconnectTimer = setInterval(async () => {
+      if (this.backend === 'postgres' || this.reconnecting) return;
+      this.reconnecting = true;
+      try {
+        const pool = await this._connectPostgres(this.databaseUrl);
+        this.pool = pool;
+        this.backend = 'postgres';
+        this.reason = 'ok';
+        this.cache.clear();
+        console.log('[Collab] Postgres recuperado; se abandona SQLite');
+        await this._backfillFromSqlite();
+        this._startKeepalive();
+        clearInterval(this.reconnectTimer);
+        this.reconnectTimer = null;
+      } catch (err) {
+        console.warn('[Collab] Reintento de Postgres falló:', err.message);
+      } finally {
+        this.reconnecting = false;
+      }
+    }, interval);
+    if (typeof this.reconnectTimer.unref === 'function') this.reconnectTimer.unref();
   }
 
   /**
