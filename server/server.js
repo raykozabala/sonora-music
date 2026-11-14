@@ -15,6 +15,7 @@ const http = require('http');
 const https = require('https');
 const multer = require('multer');
 const { spawn, execSync } = require('child_process');
+const { store: collabStore, rowToPlaylist: collabRowToPlaylist } = require('./collab-store');
 
 // Determine Server Mode & Environment
 const PORT = process.env.PORT || 3000;
@@ -782,6 +783,7 @@ app.get('/api/health', (req, res) => {
       uptime: Math.floor(process.uptime()),
       version: '7.17.5',
       mode: SERVER_MODE,
+      storage: collabStore.backend,
       connected: true
     });
   } catch (err) {
@@ -2565,10 +2567,47 @@ app.get('/api/recommendations', async (req, res) => {
 
 /**
  * Collaborative Playlists Sync
- * Persistente en SQLite: antes sólo vivía en memoria y las playlists
- * desaparecían cada vez que el servidor se reiniciaba o hibernaba.
+ * Postgres (Supabase) es la fuente de verdad cuando DATABASE_URL responde;
+ * SQLite queda como respaldo local. La lógica vive en collab-store.js.
  */
-const collaborativeStore = new Map();
+const collabSqliteAdapter = {
+  all() {
+    try {
+      return db.prepare('SELECT * FROM collab_playlists ORDER BY updated_at ASC').all();
+    } catch (err) {
+      return [];
+    }
+  },
+  get(code) {
+    try {
+      const row = db.prepare('SELECT * FROM collab_playlists WHERE code = ?').get(code);
+      return collabRowToPlaylist(row);
+    } catch (err) {
+      return null;
+    }
+  },
+  save(pl) {
+    db.prepare(`
+      INSERT INTO collab_playlists (code, name, description, tracks, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(code) DO UPDATE SET
+        name = excluded.name,
+        description = excluded.description,
+        tracks = excluded.tracks,
+        updated_at = excluded.updated_at
+    `).run(
+      pl.code,
+      pl.name || 'Playlist Colaborativa',
+      pl.description || '',
+      JSON.stringify(pl.tracks || []),
+      pl.createdAt || new Date().toISOString(),
+      pl.updatedAt || new Date().toISOString()
+    );
+  },
+  remove(code) {
+    db.prepare('DELETE FROM collab_playlists WHERE code = ?').run(code);
+  }
+};
 
 try {
   db.exec(`
@@ -2584,6 +2623,15 @@ try {
 } catch (err) {
   console.warn('[Collab] No se pudo crear la tabla persistente:', err.message);
 }
+
+collabStore
+  .init({ sqlite: collabSqliteAdapter, databaseUrl: process.env.DATABASE_URL })
+  .then((status) => {
+    console.log(`[Collab] Backend activo: ${status.backend}${status.reason && status.reason !== 'ok' ? ' (' + status.reason + ')' : ''}`);
+  })
+  .catch((err) => {
+    console.warn('[Collab] Init inesperado, se usa SQLite:', err.message);
+  });
 
 function collabNormalizeCode(code) {
   return String(code || '').toUpperCase().trim();
@@ -2612,65 +2660,46 @@ function collabSameTrack(a, b) {
   return collabTrackKey(a) === collabTrackKey(b);
 }
 
-function collabGet(code) {
+async function collabGet(code) {
   const key = collabNormalizeCode(code);
   if (!key) return null;
-  if (collaborativeStore.has(key)) return collaborativeStore.get(key);
-
-  try {
-    const row = db.prepare('SELECT * FROM collab_playlists WHERE code = ?').get(key);
-    if (!row) return null;
-    const pl = {
-      code: row.code,
-      name: row.name || 'Playlist Colaborativa',
-      description: row.description || '',
-      tracks: JSON.parse(row.tracks || '[]'),
-      createdAt: row.created_at || null,
-      updatedAt: row.updated_at || null
-    };
-    collaborativeStore.set(key, pl);
-    return pl;
-  } catch (err) {
-    return null;
-  }
+  return collabStore.get(key);
 }
 
-function collabSave(pl) {
+async function collabSave(pl) {
   const key = collabNormalizeCode(pl.code);
   if (!key) return null;
   pl.code = key;
-  collaborativeStore.set(key, pl);
-  try {
-    db.prepare(`
-      INSERT INTO collab_playlists (code, name, description, tracks, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(code) DO UPDATE SET
-        name = excluded.name,
-        description = excluded.description,
-        tracks = excluded.tracks,
-        updated_at = excluded.updated_at
-    `).run(
-      key,
-      pl.name || 'Playlist Colaborativa',
-      pl.description || '',
-      JSON.stringify(pl.tracks || []),
-      pl.createdAt || new Date().toISOString(),
-      pl.updatedAt || new Date().toISOString()
-    );
-  } catch (err) {
-    console.warn('[Collab] No se pudo guardar:', err.message);
-  }
-  return pl;
+  const saved = await collabStore.save(pl);
+  return saved || pl;
 }
 
-app.get('/api/playlists/collaborative/:code', (req, res) => {
+/**
+ * Postgres caído en caliente: 503 con reintento, nunca 404 "vacío" que
+ * haría pensar al usuario que su playlist colaborativa se borró.
+ */
+function collabStorageError(res, err, action) {
+  console.warn(`[Collab] ${action} falló:`, (err && err.message) || err);
+  res.set('Retry-After', '5');
   res.set('Cache-Control', 'no-store, max-age=0');
-  const pl = collabGet(req.params.code);
-  if (!pl) return res.status(404).json({ error: 'Playlist no encontrada con este código' });
-  res.json(pl);
+  return res.status(503).json({
+    error: 'Almacenamiento temporalmente no disponible. Reintenta en unos segundos.',
+    code: 'STORAGE_UNAVAILABLE'
+  });
+}
+
+app.get('/api/playlists/collaborative/:code', async (req, res) => {
+  res.set('Cache-Control', 'no-store, max-age=0');
+  try {
+    const pl = await collabGet(req.params.code);
+    if (!pl) return res.status(404).json({ error: 'Playlist no encontrada con este código' });
+    res.json(pl);
+  } catch (err) {
+    return collabStorageError(res, err, 'GET playlist');
+  }
 });
 
-app.post('/api/playlists/collaborative/:code', (req, res) => {
+app.post('/api/playlists/collaborative/:code', async (req, res) => {
   const code = collabNormalizeCode(req.params.code);
   if (!code) return res.status(400).json({ error: 'Código inválido' });
 
@@ -2681,93 +2710,114 @@ app.post('/api/playlists/collaborative/:code', (req, res) => {
   // otros miembros hayan añadido mientras tanto.
   const metaOnly = req.body.metaOnly === true;
 
-  let pl = collabGet(code);
-  if (!pl) {
-    pl = {
-      code,
-      name,
-      description,
-      tracks,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-  } else {
-    pl.name = name;
-    pl.description = description;
-    if (!metaOnly) {
-      // La lista enviada es la versión completa y manda sobre la guardada.
-      pl.tracks = tracks;
-    }
-    pl.updatedAt = new Date().toISOString();
-  }
+  try {
+    const pl = await collabStore.withLock(code, async () => {
+      let current = await collabGet(code);
+      if (!current) {
+        current = {
+          code,
+          name,
+          description,
+          tracks,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+      } else {
+        current.name = name;
+        current.description = description;
+        if (!metaOnly) {
+          // La lista enviada es la versión completa y manda sobre la guardada.
+          current.tracks = tracks;
+        }
+        current.updatedAt = new Date().toISOString();
+      }
+      return collabSave(current);
+    });
 
-  collabSave(pl);
-  res.json({ success: true, playlist: pl });
+    res.json({ success: true, playlist: pl });
+  } catch (err) {
+    return collabStorageError(res, err, 'POST playlist');
+  }
 });
 
-app.post('/api/playlists/collaborative/:code/tracks', (req, res) => {
+app.post('/api/playlists/collaborative/:code/tracks', async (req, res) => {
   const code = collabNormalizeCode(req.params.code);
   const track = req.body;
   if (!track || !track.title) return res.status(400).json({ error: 'Track inválido' });
 
-  let pl = collabGet(code);
-  if (!pl) {
-    pl = {
-      code,
-      name: req.body.playlistName || 'Playlist Colaborativa',
-      description: '',
-      tracks: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-  }
+  try {
+    const pl = await collabStore.withLock(code, async () => {
+      let current = await collabGet(code);
+      if (!current) {
+        current = {
+          code,
+          name: req.body.playlistName || 'Playlist Colaborativa',
+          description: '',
+          tracks: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+      }
 
-  // Fusionar en vez de reemplazar: dos personas pueden añadir canciones a la
-  // vez sin que la última en guardar borre el trabajo de la otra.
-  const existingIdx = pl.tracks.findIndex(t => collabSameTrack(t, track));
-  if (existingIdx >= 0) {
-    pl.tracks[existingIdx] = Object.assign({}, pl.tracks[existingIdx], track);
-  } else {
-    pl.tracks.push(track);
-  }
-  pl.updatedAt = new Date().toISOString();
-  collabSave(pl);
+      // Fusionar en vez de reemplazar: dos personas pueden añadir canciones a la
+      // vez sin que la última en guardar borre el trabajo de la otra.
+      const existingIdx = current.tracks.findIndex(t => collabSameTrack(t, track));
+      if (existingIdx >= 0) {
+        current.tracks[existingIdx] = Object.assign({}, current.tracks[existingIdx], track);
+      } else {
+        current.tracks.push(track);
+      }
+      current.updatedAt = new Date().toISOString();
+      return collabSave(current);
+    });
 
-  res.json({ success: true, count: pl.tracks.length, playlist: pl });
+    res.json({ success: true, count: pl.tracks.length, playlist: pl });
+  } catch (err) {
+    return collabStorageError(res, err, 'POST track');
+  }
 });
 
-app.delete('/api/playlists/collaborative/:code/tracks/:trackId', (req, res) => {
+app.delete('/api/playlists/collaborative/:code/tracks/:trackId', async (req, res) => {
   const code = collabNormalizeCode(req.params.code);
   const rawId = String(req.params.trackId || '');
 
-  const pl = collabGet(code);
-  if (!pl) return res.status(404).json({ error: 'Playlist no encontrada' });
+  try {
+    const result = await collabStore.withLock(code, async () => {
+      const current = await collabGet(code);
+      if (!current) return null;
 
-  const matches = t => {
-    if (!t) return false;
-    if (String(t.id) === rawId) return true;
-    if (t.videoId && String(t.videoId) === rawId) return true;
-    if (t.sourceUrl && String(t.sourceUrl) === rawId) return true;
-    if (collabTrackKey(t) === rawId) return true;
-    return false;
-  };
+      const matches = t => {
+        if (!t) return false;
+        if (String(t.id) === rawId) return true;
+        if (t.videoId && String(t.videoId) === rawId) return true;
+        if (t.sourceUrl && String(t.sourceUrl) === rawId) return true;
+        if (collabTrackKey(t) === rawId) return true;
+        return false;
+      };
 
-  const before = pl.tracks.length;
-  pl.tracks = pl.tracks.filter(t => !matches(t));
-  const removed = before - pl.tracks.length;
-  pl.updatedAt = new Date().toISOString();
-  collabSave(pl);
+      const before = current.tracks.length;
+      current.tracks = current.tracks.filter(t => !matches(t));
+      const removed = before - current.tracks.length;
+      current.updatedAt = new Date().toISOString();
+      const saved = await collabSave(current);
+      return { pl: saved, removed };
+    });
 
-  res.json({ success: true, removed, playlist: pl });
+    if (!result) return res.status(404).json({ error: 'Playlist no encontrada' });
+    res.json({ success: true, removed: result.removed, playlist: result.pl });
+  } catch (err) {
+    return collabStorageError(res, err, 'DELETE track');
+  }
 });
 
-app.delete('/api/playlists/collaborative/:code', (req, res) => {
+app.delete('/api/playlists/collaborative/:code', async (req, res) => {
   const code = collabNormalizeCode(req.params.code);
-  collaborativeStore.delete(code);
   try {
-    db.prepare('DELETE FROM collab_playlists WHERE code = ?').run(code);
-  } catch (err) {}
-  res.json({ success: true, deleted: true });
+    await collabStore.remove(code);
+    res.json({ success: true, deleted: true });
+  } catch (err) {
+    return collabStorageError(res, err, 'DELETE playlist');
+  }
 });
 
 /**

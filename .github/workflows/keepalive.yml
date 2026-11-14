@@ -1,0 +1,30 @@
+name: keepalive
+
+# Mantiene despierto Render (free duerme a los 15 min) y, sobre todo, evita
+# que Supabase pause el proyecto tras 7 días sin actividad.
+#
+# GitHub ejecuta los cron en modo "best effort": puede retrasarse varios
+# minutos. Con */5 cualquier retraso razonable sigue por debajo de los 15 min
+# de Render y de los 7 días de Supabase.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: sonora-keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping /api/health
+        run: |
+          curl -fsS --max-time 25 --retry 2 --retry-delay 5 \
+            https://sonora-music-b1ee.onrender.com/api/health | head -c 400
+          echo
