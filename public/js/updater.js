@@ -8,7 +8,7 @@
 
   var Sonora = window.Sonora = window.Sonora || {};
 
-  var CURRENT_VERSION = '7.17.5';
+  var CURRENT_VERSION = '7.17.6';
   // Las releases reales (APK/DMG) se publican en este repositorio. Antes
   // apuntaba a sonora-music-server, que se quedó en 7.17.1, así que la app
   // nunca veía las versiones nuevas.

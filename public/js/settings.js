@@ -12,7 +12,7 @@
   function $(sel, ctx) { return (ctx || document).querySelector(sel); }
   function $$(sel, ctx) { return [...(ctx || document).querySelectorAll(sel)]; }
   function formatTime(sec) {
-    if (isNaN(sec) || sec === null || sec === undefined) return '0:00';
+    if (!isFinite(Number(sec)) || Number(sec) <= 0) return '0:00';
     const m = Math.floor(sec / 60);
     const s = Math.floor(sec % 60);
     return m + ':' + (s < 10 ? '0' : '') + s;
@@ -1194,7 +1194,7 @@
 
               <h3 class="about-title">Sonora Music</h3>
               <div style="display:flex;align-items:center;gap:10px;margin:6px 0;flex-wrap:wrap;justify-content:center;">
-                <span class="about-version-badge">v7.17.5 (Build 2026)</span>
+                <span class="about-version-badge">v7.17.6 (Build 2026)</span>
                 <button id="btn-check-updates" class="btn-update-action" style="padding:4px 12px;font-size:11px;" title="Buscar nuevas versiones">
                   🔄 Buscar actualizaciones
                 </button>

@@ -6,7 +6,7 @@
   function $(sel, ctx) { return (ctx || document).querySelector(sel); }
   function $$(sel, ctx) { return [...(ctx || document).querySelectorAll(sel)]; }
   function formatTime(sec) {
-    if (!sec || isNaN(sec)) return '0:00';
+    if (!isFinite(Number(sec)) || Number(sec) <= 0) return '0:00';
     const m = Math.floor(sec / 60);
     const s = Math.floor(sec % 60);
     return m + ':' + (s < 10 ? '0' : '') + s;

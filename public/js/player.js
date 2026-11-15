@@ -217,6 +217,85 @@
   }
 
   /**
+   * Duración fiable para la UI y el crossfade.
+   * Los streams transcodificados en vivo (chunked, sin Content-Length) hacen
+   * que Chrome reporte duration = Infinity. En ese caso usamos la duración
+   * conocida de la pista; si tampoco existe, 0 (nunca Infinity/NaN).
+   */
+  function effectiveDuration(audio, track) {
+    var real = audio ? Number(audio.duration) : NaN;
+    if (isFinite(real) && real > 0) return real;
+    var meta = track ? Number(track.duration) : NaN;
+    return (isFinite(meta) && meta > 0) ? meta : 0;
+  }
+
+  // Evita cerrar dos veces la misma pista ("ended" + detector de fin real).
+  var _endingTrack = false;
+  var _endHandledForTrack = null;
+
+  function trackEndKey(track) {
+    if (!track) return null;
+    if (track.id !== undefined && track.id !== null && String(track.id) !== '') return String(track.id);
+    if (track.videoId) return 'yt:' + String(track.videoId);
+    var txt = String(track.title || '') + '|' + String(track.artist || '');
+    return txt === '|' ? null : txt;
+  }
+
+  function finishTrackOnce(reason) {
+    var key = trackEndKey(_currentTrack);
+    if (key !== null && _endHandledForTrack === key) return;
+    _endHandledForTrack = key;
+    _endingTrack = true;
+    if (reason) console.log('[Player] Fin de pista: ' + reason);
+    handleTrackEnded();
+  }
+
+  /**
+   * Cierra la pista aunque el navegador no dispare "ended", típico de los
+   * streams chunked con duración infinita: si el tiempo de reproducción deja
+   * de avanzar y ya no queda buffer por delante, el recurso terminó.
+   * No usamos la duración de metadatos para cortar porque puede ser un valor
+   * por defecto equivocado (cortaría canciones largas antes de tiempo).
+   */
+  function checkTrackFinished() {
+    if (_endingTrack) return;
+
+    var ch = _channels[_activeChannelIdx];
+    if (!ch || !ch.audio || !_isPlaying || _isCrossfading) return;
+
+    var a = ch.audio;
+    var t = Number(a.currentTime) || 0;
+
+    // 1) El navegador sí conoce la duración real: cerrar justo al final.
+    if (isFinite(a.duration) && a.duration > 0 && t >= a.duration - 0.3) {
+      finishTrackOnce('duración alcanzada');
+      return;
+    }
+
+    if (!ch._stall) ch._stall = { lastTime: t, lastAt: Date.now() };
+    var st = ch._stall;
+    if (t > st.lastTime + 0.05) {
+      st.lastTime = t;
+      st.lastAt = Date.now();
+      return;
+    }
+
+    var stagnantMs = Date.now() - st.lastAt;
+    if (stagnantMs < 4000 || t < 3) return;
+
+    var atBufferEnd = true;
+    try {
+      var b = a.buffered;
+      atBufferEnd = !b || b.length === 0 || (b.end(b.length - 1) - t) < 1.0;
+    } catch (e) {}
+    if (!atBufferEnd) return;
+    if (a.networkState === 2) return; // todavía descargando
+    if (a.readyState < 2) return;
+
+    finishTrackOnce('fin de stream');
+  }
+
+  /**
    * Attach lifecycle event listeners to HTML5 Audio element
    */
   function attachChannelEvents(audio, channelIdx) {
@@ -237,7 +316,7 @@
 
     audio.addEventListener('ended', function () {
       if (channelIdx === _activeChannelIdx && !_isCrossfading) {
-        handleTrackEnded();
+        finishTrackOnce('ended');
       }
     });
 
@@ -745,6 +824,7 @@
     stopProgressTimer();
     _progressInterval = setInterval(function () {
       if (!_isPlaying) return;
+      checkTrackFinished();
       var prog = Sonora.Player.getProgress();
       updateState('progress', prog);
       updateMediaSessionPosition();
@@ -777,12 +857,15 @@
     if (_crossfadeMs <= 0 || _isCrossfading || _queue.length <= 1) return;
 
     var ch = _channels[_activeChannelIdx];
-    if (!ch || !ch.audio || isNaN(ch.audio.duration)) return;
+    if (!ch || !ch.audio) return;
 
-    var remainingSeconds = ch.audio.duration - ch.audio.currentTime;
+    var duration = Number(ch.audio.duration);
+    if (!isFinite(duration) || duration <= 0) return;
+
+    var remainingSeconds = duration - (Number(ch.audio.currentTime) || 0);
     var fadeSeconds = _crossfadeMs / 1000;
 
-    if (ch.audio.duration > (fadeSeconds * 2) && remainingSeconds <= fadeSeconds) {
+    if (duration > (fadeSeconds * 2) && remainingSeconds <= fadeSeconds) {
       triggerCrossfadeNext();
     }
   }
@@ -884,9 +967,17 @@
     }
 
     if (_repeatMode === 'one') {
-      // Replay same track from start
-      Sonora.Player.seek(0);
-      Sonora.Player.resume();
+      _endingTrack = false;
+      _endHandledForTrack = null;
+      var repeatCh = _channels[_activeChannelIdx];
+      if (repeatCh && repeatCh.audio && isFinite(repeatCh.audio.duration) && repeatCh.audio.duration > 0) {
+        // Replay same track from start
+        Sonora.Player.seek(0);
+        Sonora.Player.resume();
+      } else {
+        // Stream sin duración: seek(0) no funciona, hay que recargar la fuente.
+        Sonora.Player.play(_currentTrack);
+      }
       return;
     }
 
@@ -1039,6 +1130,11 @@
           ch.audio.currentTime = 0;
           ch.audio.playbackRate = _speed;
 
+          // Nueva pista: reiniciar el detector de fin y el estado de estancamiento.
+          _endingTrack = false;
+          _endHandledForTrack = null;
+          if (ch) ch._stall = null;
+
           var playPromise = ch.audio.play();
           if (playPromise !== undefined) {
             playPromise.then(function () {
@@ -1145,12 +1241,15 @@
     stop: function () {
       try {
         stopProgressTimer();
+        _endingTrack = false;
+        _endHandledForTrack = null;
 
         for (var i = 0; i < _channels.length; i++) {
           var ch = _channels[i];
           if (ch && ch.audio) {
             ch.audio.pause();
             ch.audio.currentTime = 0;
+            ch._stall = null;
           }
         }
 
@@ -1234,9 +1333,10 @@
         var s = Math.max(0, Number(seconds) || 0);
 
         var ch = _channels[_activeChannelIdx];
-        if (ch && ch.audio && !isNaN(ch.audio.duration)) {
+        if (ch && ch.audio && isFinite(ch.audio.duration) && ch.audio.duration > 0) {
           s = Math.min(s, ch.audio.duration);
           ch.audio.currentTime = s;
+          ch._stall = null;
           var prog = this.getProgress();
           updateState('progress', prog);
           updateMediaSessionPosition();
@@ -1537,8 +1637,10 @@
     getProgress: function () {
       var ch = _channels[_activeChannelIdx];
       if (ch && ch.audio) {
-        var current = ch.audio.currentTime || 0;
-        var duration = isNaN(ch.audio.duration) ? ((_currentTrack && _currentTrack.duration) || 0) : ch.audio.duration;
+        var current = Number(ch.audio.currentTime) || 0;
+        if (!isFinite(current) || current < 0) current = 0;
+        var duration = effectiveDuration(ch.audio, _currentTrack);
+        if (duration > 0) current = Math.min(current, duration);
         return {
           current: Math.round(current * 10) / 10,
           duration: Math.round(duration * 10) / 10,

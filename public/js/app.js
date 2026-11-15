@@ -12,7 +12,7 @@
   function $$(sel, ctx) { return [].slice.call((ctx || document).querySelectorAll(sel)); }
 
   function formatTime(sec) {
-    if (!sec || isNaN(sec)) return '0:00';
+    if (!isFinite(Number(sec)) || Number(sec) <= 0) return '0:00';
     var m = Math.floor(sec / 60);
     var s = Math.floor(sec % 60);
     return m + ':' + (s < 10 ? '0' : '') + s;
@@ -1521,7 +1521,7 @@
      MAIN INITIALIZATION
      ══════════════════════════════════════════════ */
   function boot() {
-    console.log('🎵 Sonora Music v7.17.5 — Booting...');
+    console.log('🎵 Sonora Music v7.17.6 — Booting...');
 
     var splashScreen = $('#splash-screen');
 
@@ -1652,7 +1652,7 @@
         // Step 11: Register Service Worker
         registerSW();
 
-        console.log('🎵 Sonora Music v7.17.5 — Ready!');
+        console.log('🎵 Sonora Music v7.17.6 — Ready!');
       })
       .catch(function (err) {
         console.error('[App] Boot error:', err);

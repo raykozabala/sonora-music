@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.17.5
+ * Sonora Music Server v7.17.6
  * Triple-mode backend server (Local PC, Render.com & Northflank compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -781,7 +781,7 @@ app.get('/api/health', (req, res) => {
       status: 'ok',
       server: isNorthflank ? 'northflank' : (isRender ? 'render' : 'local'),
       uptime: Math.floor(process.uptime()),
-      version: '7.17.5',
+      version: '7.17.6',
       mode: SERVER_MODE,
       storage: collabStore.backend,
       connected: true
@@ -1027,7 +1027,7 @@ app.get('/api/system', (req, res) => {
     mode: SERVER_MODE,
     node: process.version,
     platform: process.platform,
-    version: '7.17.5',
+    version: '7.17.6',
     ytdlp: { path: YTDLP_BIN, available: !!ytdlpVersion, version: ytdlpVersion || null },
     ffmpeg: { path: FFMPEG_BIN, available: !!ffmpegRaw, version: ffmpegRaw ? ffmpegRaw.split('\n')[0] : null },
     deno: { path: DENO_BIN, available: !!denoRaw, version: denoRaw ? denoRaw.split('\n')[0] : null },
@@ -1540,7 +1540,7 @@ async function lyricsFetchJson(url, timeoutMs = 4000, retries = 1, extraHeaders 
     try {
       const response = await fetch(url, {
         headers: Object.assign({
-          'User-Agent': 'SonoraMusic/7.17.5 (https://sonora-music.app)',
+          'User-Agent': 'SonoraMusic/7.17.6 (https://sonora-music.app)',
           'Accept': 'application/json'
         }, extraHeaders),
         signal: AbortSignal.timeout(timeoutMs)
@@ -2032,7 +2032,10 @@ app.get('/api/stream/external', rateLimit('stream-ext', 60, 60 * 1000), async (r
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
     res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Accept-Ranges', 'bytes');
+    // Stream en vivo sin Content-Length: no soportamos Range. Si anunciamos
+    // "bytes", Chrome intenta buscar y se queda con duración infinita.
+    res.setHeader('Accept-Ranges', 'none');
+    res.setHeader('Cache-Control', 'no-store');
 
     const startTranscode = (sourceUrl) => {
       // ffmpeg lee la URL firmada y devuelve MP3 con el bitrate elegido.
@@ -3615,7 +3618,9 @@ app.get('/api/stream/:id', (req, res) => {
       res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
       res.setHeader('Content-Type', 'audio/mpeg');
-      res.setHeader('Accept-Ranges', 'bytes');
+      // yt-dlp -> ffmpeg en vivo: sin longitud conocida, sin Range.
+      res.setHeader('Accept-Ranges', 'none');
+      res.setHeader('Cache-Control', 'no-store');
 
       const ytdlpArgs = [
         '--no-playlist',
@@ -3936,7 +3941,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('----------------------------------------------------');
-  console.log('🎵 Sonora Music Server v7.17.5');
+  console.log('🎵 Sonora Music Server v7.17.6');
   console.log(`📡 Mode: ${isNorthflank ? 'Northflank' : (isRender ? 'Render' : 'Local')}`);
   console.log(`🌐 Port: ${PORT}`);
   console.log(`📁 Music directory: ${musicDir}`);

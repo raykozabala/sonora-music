@@ -9,7 +9,7 @@
   function $$(sel, ctx) { return [...(ctx || document).querySelectorAll(sel)]; }
 
   function formatTime(sec) {
-    if (!sec || isNaN(sec)) return '0:00';
+    if (!isFinite(Number(sec)) || Number(sec) <= 0) return '0:00';
     const total = Math.floor(Number(sec) || 0);
     const h = Math.floor(total / 3600);
     const m = Math.floor((total % 3600) / 60);

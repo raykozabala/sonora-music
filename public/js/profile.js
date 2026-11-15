@@ -12,7 +12,7 @@
   function $(sel, ctx) { return (ctx || document).querySelector(sel); }
   function $$(sel, ctx) { return [...(ctx || document).querySelectorAll(sel)]; }
   function formatTime(sec) {
-    if (isNaN(sec) || sec === null || sec === undefined) return '0:00';
+    if (!isFinite(Number(sec)) || Number(sec) <= 0) return '0:00';
     const m = Math.floor(sec / 60);
     const s = Math.floor(sec % 60);
     return m + ':' + (s < 10 ? '0' : '') + s;
@@ -196,7 +196,7 @@
     }
     const payload = await Sonora.DB.exportData();
     payload.appVersion = (Sonora.Updater && Sonora.Updater.getCurrentVersion)
-      ? Sonora.Updater.getCurrentVersion() : '7.17.5';
+      ? Sonora.Updater.getCurrentVersion() : '7.17.6';
     const text = JSON.stringify(payload, null, 2);
     const date = new Date().toISOString().slice(0, 10);
     const filename = `Sonora_Backup_${date}.json`;
@@ -823,7 +823,7 @@
             </h2>
             <div style="background:var(--color-surface, #1a1a2e);border:1px solid var(--color-card-border, rgba(255,255,255,0.08));border-radius:var(--radius-md, 14px);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;">
               <div>
-                <div style="font-weight:700;font-size:14px;color:#fff;">Versión instalada: <span style="color:var(--color-primary, #FF4757);">v7.17.5</span></div>
+                <div style="font-weight:700;font-size:14px;color:#fff;">Versión instalada: <span style="color:var(--color-primary, #FF4757);">v7.17.6</span></div>
                 <div style="font-size:12px;color:var(--color-text-secondary, #A0A5BA);margin-top:2px;">Comprueba si hay nuevas versiones de Sonora para Mac, Web o Android.</div>
               </div>
               <button id="btn-profile-check-updates" class="btn-update-action" style="padding:8px 16px;font-size:12px;font-weight:700;border-radius:20px;">
