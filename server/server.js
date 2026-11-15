@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.17.6
+ * Sonora Music Server v7.17.7
  * Triple-mode backend server (Local PC, Render.com & Northflank compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -22,6 +22,13 @@ const PORT = process.env.PORT || 3000;
 const SERVER_MODE = (process.env.SERVER_MODE || (process.env.RENDER ? 'render' : (process.env.NORTHFLANK ? 'northflank' : 'local'))).toLowerCase();
 const isRender = SERVER_MODE === 'render';
 const isNorthflank = SERVER_MODE === 'northflank';
+
+// Versión de la aplicación y repositorio oficial de instaladores. El endpoint
+// /api/app/latest usa estos datos para que la app nunca descargue una versión
+// distinta de la que anuncia.
+const APP_VERSION = '7.17.7';
+const APP_REPO = 'raykozabala/sonora-music';
+const APP_RELEASE_BASE = `https://github.com/${APP_REPO}/releases`;
 
 // Paths
 const dataDir = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : __dirname;
@@ -771,6 +778,135 @@ app.use((req, res, next) => {
 // API Endpoints
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Actualizaciones de la app
+// ---------------------------------------------------------------------------
+
+function compareVersions(a, b) {
+  const parse = (v) => String(v || '').replace(/^[^\d]*/, '').split('-')[0]
+    .split('.').map((n) => parseInt(n, 10) || 0);
+  const pa = parse(a);
+  const pb = parse(b);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0)) return 1;
+    if ((pa[i] || 0) < (pb[i] || 0)) return -1;
+  }
+  return 0;
+}
+
+function assetVersion(name) {
+  const m = String(name || '').match(/(\d+\.\d+\.\d+)/);
+  return m ? m[1] : '';
+}
+
+function releaseAssetUrls(version) {
+  const base = `${APP_RELEASE_BASE}/download/v${version}`;
+  return {
+    apk: `${base}/SonoraMusic_v${version}.apk`,
+    dmg: `${base}/Sonora.Music_${version}_aarch64.dmg`
+  };
+}
+
+let _appLatestCache = { at: 0, payload: null };
+
+async function fetchLatestRelease() {
+  const now = Date.now();
+  if (_appLatestCache.payload && (now - _appLatestCache.at) < 5 * 60 * 1000) {
+    return _appLatestCache.payload;
+  }
+
+  let payload = null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    let resp = null;
+    try {
+      resp = await fetch(`https://api.github.com/repos/${APP_REPO}/releases/latest`, {
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': `SonoraMusicServer/${APP_VERSION}`
+        },
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (resp && resp.ok) {
+      const data = await resp.json();
+      const tagVersion = String(data.tag_name || data.name || '')
+        .replace(/^[^\d]*/, '').split('-')[0];
+      const assets = {};
+      for (const asset of (data.assets || [])) {
+        if (assetVersion(asset.name) !== tagVersion) continue;
+        if (/\.apk$/i.test(asset.name)) assets.apk = asset.browser_download_url;
+        else if (/\.dmg$/i.test(asset.name)) assets.dmg = asset.browser_download_url;
+      }
+      payload = {
+        version: tagVersion || APP_VERSION,
+        tag: data.tag_name || `v${APP_VERSION}`,
+        releaseName: data.name || `Sonora Music v${tagVersion || APP_VERSION}`,
+        releaseUrl: data.html_url || `${APP_RELEASE_BASE}/tag/v${APP_VERSION}`,
+        notes: data.body || '',
+        assets,
+        source: 'github'
+      };
+    }
+  } catch (err) {
+    console.warn('[Update] GitHub release check failed:', err.message);
+  }
+
+  if (!payload) {
+    payload = {
+      version: APP_VERSION,
+      tag: `v${APP_VERSION}`,
+      releaseName: `Sonora Music v${APP_VERSION}`,
+      releaseUrl: `${APP_RELEASE_BASE}/tag/v${APP_VERSION}`,
+      notes: '',
+      assets: releaseAssetUrls(APP_VERSION),
+      source: 'server'
+    };
+  } else if (compareVersions(APP_VERSION, payload.version) > 0) {
+    // El servidor está desplegado antes de publicar la release: anunciamos la
+    // versión del servidor y construimos las URLs para ESA versión.
+    payload = {
+      version: APP_VERSION,
+      tag: `v${APP_VERSION}`,
+      releaseName: `Sonora Music v${APP_VERSION}`,
+      releaseUrl: `${APP_RELEASE_BASE}/tag/v${APP_VERSION}`,
+      notes: payload.notes || '',
+      assets: releaseAssetUrls(APP_VERSION),
+      source: 'server'
+    };
+  } else {
+    // Nunca mezclar versiones: si falta un asset, se completa con la URL
+    // construida para la versión anunciada (no con la de otra release).
+    const built = releaseAssetUrls(payload.version);
+    payload.assets = payload.assets || {};
+    if (!payload.assets.apk) payload.assets.apk = built.apk;
+    if (!payload.assets.dmg) payload.assets.dmg = built.dmg;
+  }
+
+  _appLatestCache = { at: Date.now(), payload };
+  return payload;
+}
+
+/**
+ * GET /api/app/latest
+ * Manifiesto de actualización: versión y enlaces de descarga que SIEMPRE
+ * corresponden a esa versión. Evita depender del límite de la API de GitHub
+ * en cada cliente y que el aviso diga una versión y descargue otra.
+ */
+app.get('/api/app/latest', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  try {
+    const payload = await fetchLatestRelease();
+    res.json(payload);
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudo obtener la última versión', message: err.message });
+  }
+});
+
 /**
  * GET /api/health
  * Server health check and mode status
@@ -781,7 +917,7 @@ app.get('/api/health', (req, res) => {
       status: 'ok',
       server: isNorthflank ? 'northflank' : (isRender ? 'render' : 'local'),
       uptime: Math.floor(process.uptime()),
-      version: '7.17.6',
+      version: APP_VERSION,
       mode: SERVER_MODE,
       storage: collabStore.backend,
       connected: true
@@ -1027,7 +1163,7 @@ app.get('/api/system', (req, res) => {
     mode: SERVER_MODE,
     node: process.version,
     platform: process.platform,
-    version: '7.17.6',
+    version: APP_VERSION,
     ytdlp: { path: YTDLP_BIN, available: !!ytdlpVersion, version: ytdlpVersion || null },
     ffmpeg: { path: FFMPEG_BIN, available: !!ffmpegRaw, version: ffmpegRaw ? ffmpegRaw.split('\n')[0] : null },
     deno: { path: DENO_BIN, available: !!denoRaw, version: denoRaw ? denoRaw.split('\n')[0] : null },
@@ -1540,7 +1676,7 @@ async function lyricsFetchJson(url, timeoutMs = 4000, retries = 1, extraHeaders 
     try {
       const response = await fetch(url, {
         headers: Object.assign({
-          'User-Agent': 'SonoraMusic/7.17.6 (https://sonora-music.app)',
+          'User-Agent': `SonoraMusic/${APP_VERSION} (https://sonora-music.app)`,
           'Accept': 'application/json'
         }, extraHeaders),
         signal: AbortSignal.timeout(timeoutMs)
@@ -3941,7 +4077,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('----------------------------------------------------');
-  console.log('🎵 Sonora Music Server v7.17.6');
+  console.log(`🎵 Sonora Music Server v${APP_VERSION}`);
   console.log(`📡 Mode: ${isNorthflank ? 'Northflank' : (isRender ? 'Render' : 'Local')}`);
   console.log(`🌐 Port: ${PORT}`);
   console.log(`📁 Music directory: ${musicDir}`);
