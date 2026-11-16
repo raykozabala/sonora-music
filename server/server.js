@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.17.7
+ * Sonora Music Server v7.18.0
  * Triple-mode backend server (Local PC, Render.com & Northflank compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -26,7 +26,7 @@ const isNorthflank = SERVER_MODE === 'northflank';
 // Versión de la aplicación y repositorio oficial de instaladores. El endpoint
 // /api/app/latest usa estos datos para que la app nunca descargue una versión
 // distinta de la que anuncia.
-const APP_VERSION = '7.17.7';
+const APP_VERSION = '7.18.0';
 const APP_REPO = 'raykozabala/sonora-music';
 const APP_RELEASE_BASE = `https://github.com/${APP_REPO}/releases`;
 
@@ -2777,6 +2777,58 @@ function collabNormalizeCode(code) {
 }
 
 /**
+ * Código de invitación: SON- + 6 caracteres sin letras/números ambiguos.
+ * Se genera EN EL SERVIDOR para que el código que ve el usuario sea el que
+ * existe de verdad; antes se generaba en el cliente y, si la publicación
+ * fallaba, el código local no existía en la nube ("playlist no encontrada").
+ */
+const COLLAB_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function generateCollabCode() {
+  let out = '';
+  for (let i = 0; i < 6; i++) {
+    out += COLLAB_CODE_ALPHABET.charAt(
+      Math.floor(Math.random() * COLLAB_CODE_ALPHABET.length)
+    );
+  }
+  return 'SON-' + out;
+}
+
+/**
+ * POST /api/playlists/collaborative
+ * Crea una playlist colaborativa con un código único asignado por el servidor.
+ * Evita colisiones y que el cliente se invente un código inexistente.
+ */
+app.post('/api/playlists/collaborative', async (req, res) => {
+  res.set('Cache-Control', 'no-store, max-age=0');
+  const name = String(req.body.name || 'Playlist Colaborativa').slice(0, 120);
+  const description = String(req.body.description || '').slice(0, 2000);
+  const tracks = Array.isArray(req.body.tracks) ? req.body.tracks : [];
+
+  try {
+    const pl = await collabStore.withLock('__allocate__', async () => {
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const code = generateCollabCode();
+        const existing = await collabGet(code);
+        if (existing) continue;
+        return collabSave({
+          code,
+          name,
+          description,
+          tracks,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      throw new Error('No se pudo asignar un código libre');
+    });
+
+    res.json({ success: true, code: pl.code, playlist: pl });
+  } catch (err) {
+    return collabStorageError(res, err, 'crear playlist colaborativa');
+  }
+});
+
+/**
  * Identidad estable de una canción dentro de una playlist colaborativa.
  * El id local (autonumérico o "ext_...") no sirve entre dispositivos, así que
  * usamos videoId / URL / ruta de archivo y, sólo como último recurso, el id.
@@ -4020,6 +4072,36 @@ app.put('/api/users/:id/profile', (req, res) => {
 // ---------------------------------------------------------------------------
 // Static Frontend Files & SPA Routing
 // ---------------------------------------------------------------------------
+
+/**
+ * App Links de Android.
+ * El APK de Sonora se firma siempre con la misma clave, así que este
+ * fingerprint permite que los enlaces https://<servidor>/#/... abran la app
+ * directamente en lugar del navegador.
+ *
+ * express.static ignora los directorios que empiezan por punto, por eso esta
+ * ruta se declara a mano antes del estático.
+ */
+const ANDROID_APP_PACKAGE = 'com.sonoramusic.app';
+const ANDROID_SIGNING_SHA256 =
+  'D4:78:E6:A6:42:39:CA:71:18:8F:D6:02:4C:F4:EC:33:98:DA:69:E2:8F:99:E0:42:96:5E:01:57:8C:EF:06:20';
+
+app.get('/.well-known/assetlinks.json', (req, res) => {
+  res.set('Content-Type', 'application/json');
+  res.set('Cache-Control', 'public, max-age=300');
+  res.set('Access-Control-Allow-Origin', '*');
+  res.json([
+    {
+      relation: ['delegate_permission/common.handle_all_urls'],
+      target: {
+        namespace: 'android_app',
+        package_name: ANDROID_APP_PACKAGE,
+        sha256_cert_fingerprints: [ANDROID_SIGNING_SHA256]
+      }
+    }
+  ]);
+});
+
 app.use(express.static(publicDir));
 
 // Fallback for SPA (non-API GET requests)

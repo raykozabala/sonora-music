@@ -134,6 +134,12 @@
   }
 
   function shareText(title, text) {
+    // El módulo Share (share.js) añade la hoja con WhatsApp/Telegram/Correo y
+    // el puente nativo de macOS. Si aún no está cargado, usamos el respaldo.
+    if (window.Sonora && Sonora.Share && typeof Sonora.Share.shareText === 'function' &&
+        Sonora.Share.shareText !== shareText) {
+      return Sonora.Share.shareText(title, text);
+    }
     try {
       if (window.SonoraNative && typeof window.SonoraNative.shareText === 'function') {
         window.SonoraNative.shareText(title || 'Sonora Music', text || '');
@@ -151,9 +157,6 @@
       showToast(ok ? 'Contenido copiado al portapapeles' : 'No se pudo compartir', ok ? 'success' : 'error');
     });
   }
-
-  // Se expone para que otras páginas (reproductor, biblioteca...) lo usen.
-  Sonora.Share = { shareText: shareText, copy: copyPlainText };
   // La biblioteca y otras páginas usan esta hoja de acciones para elegir
   // playlist en lugar de escribir el nombre a mano.
   Sonora.UI = Sonora.UI || {};
@@ -325,50 +328,75 @@
   }
 
   async function buildJoinLink(code) {
-    // El enlace debe apuntar al servidor donde vive la playlist: Render en la
-    // web/nube, o la IP del PC si se usa el servidor local en la misma red.
+    // El enlace apunta siempre a la nube de Sonora: los códigos funcionan
+    // fuera de la red local y los App Links de Android solo se verifican
+    // contra el dominio https (si fuera la IP LAN, el enlace nunca abriría
+    // la app).
     var base = '';
     try {
-      // Si el PC abrió Sonora por localhost, esperamos a resolver la IP LAN:
-      // "localhost" en el teléfono apunta al propio teléfono.
-      if (Sonora.API && typeof Sonora.API.probeLan === 'function') {
-        await Sonora.API.probeLan();
-      }
       if (Sonora.API && typeof Sonora.API.getInviteBase === 'function') base = Sonora.API.getInviteBase();
       else if (Sonora.API && typeof Sonora.API.getCollabBase === 'function') base = Sonora.API.getCollabBase();
     } catch (e) {}
     if (!base) base = 'https://sonora-music-b1ee.onrender.com';
     base = String(base).replace(/\/+$/, '');
-    return base + '/#/playlists/join?code=' + encodeURIComponent(code);
+    return base + '/#/playlists/join?code=' + encodeURIComponent(normalizeCollabCode(code));
   }
 
   /** Compartir una playlist (código de invitación si es colaborativa) */
   async function sharePlaylist(pl) {
     var isCollab = !!(pl.isCollaborative || pl.code);
-    if (isCollab && pl.code) {
-      var link = await buildJoinLink(pl.code);
-      var text = '🎧 Escucha mi playlist colaborativa "' + pl.name + '" en Sonora Music.\n' +
-                 'Código para unirte: ' + pl.code + '\n' + link;
-      openActionSheet({
-        title: 'Compartir playlist',
-        subtitle: 'Código ' + pl.code,
-        actions: [
-          { icon: '📤', label: 'Compartir con…', onSelect: function () { shareText('Sonora Music', text); } },
-          { icon: '📋', label: 'Copiar código', onSelect: function () { copyPlainText(pl.code).then(function (ok) { showToast(ok ? 'Código copiado: ' + pl.code : 'No se pudo copiar', ok ? 'success' : 'error'); }); } },
-          { icon: '🔗', label: 'Copiar enlace de invitación', onSelect: function () { copyPlainText(link).then(function (ok) { showToast(ok ? 'Enlace copiado' : 'No se pudo copiar', ok ? 'success' : 'error'); }); } }
-        ]
-      });
-    } else {
+    if (!isCollab || !pl.code) {
       shareText('Sonora Music', '🎧 Escucha mi playlist "' + pl.name + '" en Sonora Music.');
+      return;
     }
+
+    var code = normalizeCollabCode(pl.code);
+    var link = await buildJoinLink(code);
+
+    if (Sonora.Share && typeof Sonora.Share.sharePlaylist === 'function') {
+      Sonora.Share.sharePlaylist({
+        name: pl.name,
+        code: code,
+        link: link,
+        pending: !!pl.pendingPublish,
+        onRetry: async function () {
+          var ok = await publishCollabPlaylist(pl, { metaOnly: false });
+          showToast(ok
+            ? 'Playlist publicada. El código ' + code + ' ya funciona en otros dispositivos.'
+            : 'No se pudo publicar todavía. Se reintentará automáticamente.', ok ? 'success' : 'error');
+          return ok;
+        }
+      });
+      return;
+    }
+
+    var text = '🎧 Escucha mi playlist colaborativa "' + pl.name + '" en Sonora Music.\n' +
+               'Código para unirte: ' + code + '\n' + link;
+    openActionSheet({
+      title: 'Compartir playlist',
+      subtitle: 'Código ' + code,
+      actions: [
+        { icon: '📤', label: 'Compartir con…', onSelect: function () { shareText('Sonora Music', text); } },
+        { icon: '📋', label: 'Copiar código', onSelect: function () { copyPlainText(code).then(function (ok) { showToast(ok ? 'Código copiado: ' + code : 'No se pudo copiar', ok ? 'success' : 'error'); }); } },
+        { icon: '🔗', label: 'Copiar enlace de invitación', onSelect: function () { copyPlainText(link).then(function (ok) { showToast(ok ? 'Enlace copiado' : 'No se pudo copiar', ok ? 'success' : 'error'); }); } }
+      ]
+    });
   }
 
-  /** Código de invitación para playlists colaborativas: SON-XXXX */
+  /** Código de invitación (respaldo sin conexión): SON-XXXXXX */
   function genCollabCode() {
     var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     var out = '';
-    for (var i = 0; i < 4; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
+    for (var i = 0; i < 6; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
     return 'SON-' + out;
+  }
+
+  /** Código limpio: acepta el código suelto o la URL de invitación completa. */
+  function normalizeCollabCode(raw) {
+    if (Sonora.API && typeof Sonora.API.parseCollabCode === 'function') {
+      return Sonora.API.parseCollabCode(raw);
+    }
+    return String(raw || '').trim().toUpperCase();
   }
 
   /** Clave estable de una canción para el servidor colaborativo. */
@@ -487,6 +515,7 @@
   /**
    * Sube la playlist colaborativa al servidor.
    * options.metaOnly = true cambia sólo nombre/descripción (no pisa canciones).
+   * Devuelve el resultado del servidor o null si no se pudo publicar.
    */
   async function syncCollabPlaylistToServer(pl, options) {
     options = options || {};
@@ -511,13 +540,101 @@
       payload.tracks = tracks;
     }
 
-    return Sonora.API.saveCollaborativePlaylist(pl.code, payload).then(function (result) {
+    try {
+      var result = await Sonora.API.saveCollaborativePlaylist(pl.code, payload);
+      if (result && result.playlist && result.playlist.code) {
+        // El servidor normaliza el código: guardamos el suyo.
+        pl.code = String(result.playlist.code).toUpperCase();
+      }
       pl.syncedAt = new Date().toISOString();
+      pl.pendingPublish = 0;
+      pl.publishedAt = pl.syncedAt;
+      try {
+        if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.update === 'function') {
+          await Sonora.DB.playlists.update(pl);
+        }
+      } catch (e) {}
       return result;
-    }).catch(function (e) {
-      console.warn('[Playlists] sync collab falló:', e && e.message);
+    } catch (e) {
+      pl.pendingPublish = 1;
+      try {
+        if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.update === 'function') {
+          await Sonora.DB.playlists.update(pl);
+        }
+      } catch (e2) {}
+      console.warn('[Playlists] publicar collab falló:', (e && e.message) || e);
       return null;
-    });
+    }
+  }
+
+  /** Publica y deja constancia del estado (publicada / pendiente). */
+  async function publishCollabPlaylist(pl, options) {
+    if (!pl || !pl.code) return false;
+    var result = await syncCollabPlaylistToServer(pl, options);
+    var ok = !!result;
+    pl.pendingPublish = ok ? 0 : 1;
+    if (ok) pl.publishedAt = new Date().toISOString();
+    try {
+      if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.update === 'function') {
+        await Sonora.DB.playlists.update(pl);
+      }
+    } catch (e) {}
+    return ok;
+  }
+
+  /**
+   * Reintenta publicar las colaborativas que quedaron pendientes (sin red,
+   * servidor hibernando...). Sin esto, un código creado sin conexión nunca
+   * llegaba a existir en la nube y en el teléfono decía "no encontrada".
+   */
+  var _publishRetryTimer = null;
+  async function publishPendingCollabs(options) {
+    options = options || {};
+    var published = 0;
+    try {
+      if (!(Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.getAll === 'function')) return 0;
+      var all = (await Sonora.DB.playlists.getAll()) || [];
+      for (var i = 0; i < all.length; i++) {
+        var pl = all[i];
+        if (!pl || !pl.code || !pl.userCreated) continue;
+        if (pl.pendingPublish) {
+          // Sabemos que nunca llegó a publicarse: se sube entera.
+          var okPending = await publishCollabPlaylist(pl, { metaOnly: false });
+          if (okPending) published++;
+          continue;
+        }
+        if (pl.syncedAt) continue;
+
+        // Playlist antigua sin estado de sincronización: comprobar si existe
+        // antes de subirla, para no pisar cambios hechos en otro dispositivo.
+        try {
+          await Sonora.API.getCollaborativePlaylist(pl.code);
+          pl.syncedAt = new Date().toISOString();
+          try {
+            if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.update === 'function') {
+              await Sonora.DB.playlists.update(pl);
+            }
+          } catch (e) {}
+        } catch (e) {
+          if (e && e.code === 'not_found') {
+            var okMissing = await publishCollabPlaylist(pl, { metaOnly: false });
+            if (okMissing) published++;
+          }
+        }
+      }
+    } catch (e) {}
+    if (published && !options.silent) {
+      notifyPlaylistsChanged();
+    }
+    return published;
+  }
+
+  function startPublishRetry() {
+    if (_publishRetryTimer) return;
+    var tick = function () { publishPendingCollabs({ silent: true }); };
+    setTimeout(tick, 4000);
+    _publishRetryTimer = setInterval(tick, 30000);
+    try { window.addEventListener('online', tick); } catch (e) {}
   }
 
   /* ── Cola de cambios pendientes (sin conexión / servidor caído) ── */
@@ -604,10 +721,11 @@
       remote = await Sonora.API.getCollaborativePlaylist(pl.code);
     } catch (e) {
       var msg = (e && e.message) || '';
+      var notFound = (e && e.code === 'not_found') || /no encontr|no existe|not found|404/i.test(msg);
 
       // El servidor perdió la playlist (reinicio, hibernación...) pero la
       // tenemos en local: la volvemos a publicar con el mismo código.
-      if (/no encontr|not found|404/i.test(msg)) {
+      if (notFound && pl.userCreated) {
         var reuploaded = await syncCollabPlaylistToServer(pl);
         if (reuploaded) {
           if (!options.silent) showToast('Playlist colaborativa republicada con el código ' + pl.code, 'success');
@@ -615,7 +733,11 @@
         }
       }
 
-      if (!options.silent) showToast('Sin conexión al servidor de playlists colaborativas', 'error');
+      if (!options.silent) {
+        showToast((e && (e.code === 'server_down' || e.code === 'timeout' || e.code === 'offline'))
+          ? 'Sin conexión con el servidor de playlists. Se reintentará solo.'
+          : 'No se pudo sincronizar la playlist', 'error');
+      }
       return false;
     }
 
@@ -693,16 +815,85 @@
   }
 
 
+  function collabSleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  /**
+   * Mensaje claro según el fallo real: antes TODO se mostraba como
+   * "Playlist no encontrada", incluso con el servidor despertando o sin red.
+   */
+  function friendlyJoinError(err, code) {
+    var kind = (err && err.code) || '';
+    if (kind === 'not_found') {
+      return new Error('No existe ninguna playlist con el código ' + code +
+        '. Comprueba el código o pide un enlace de invitación nuevo.');
+    }
+    if (kind === 'server_down' || kind === 'timeout') {
+      return new Error('El servidor de Sonora está despertando. Espera unos segundos y vuelve a intentarlo.');
+    }
+    if (kind === 'offline') {
+      return new Error('No hay conexión con el servidor de Sonora. Revisa tu internet.');
+    }
+    if (kind === 'invalid') {
+      return new Error('Introduce un código válido (por ejemplo SON-ABC123).');
+    }
+    return new Error((err && err.message) || 'No se pudo abrir la playlist');
+  }
+
+  /**
+   * Pide la playlist al servidor con reintentos: Render (plan gratuito)
+   * hiberna y la primera petición puede tardar 20-30 s en despertar.
+   */
+  async function fetchCollabWithRetry(code) {
+    var delays = [0, 4000, 8000];
+    var lastErr = null;
+    for (var i = 0; i < delays.length; i++) {
+      if (delays[i]) await collabSleep(delays[i]);
+      try {
+        return await Sonora.API.getCollaborativePlaylist(code);
+      } catch (e) {
+        lastErr = e;
+        var retriable = e && (e.code === 'server_down' || e.code === 'timeout' || e.code === 'offline');
+        if (!retriable) break;
+      }
+    }
+    throw lastErr || new Error('No se pudo abrir la playlist');
+  }
+
   /** Une una playlist colaborativa por su código y la guarda en local. */
   async function joinCollaborativeByCode(rawCode) {
-    var code = String(rawCode || '').trim().toUpperCase();
+    var code = normalizeCollabCode(rawCode);
     if (!code) throw new Error('Introduce un código de playlist');
 
     var remote = null;
-    if (Sonora.API && typeof Sonora.API.getCollaborativePlaylist === 'function') {
-      remote = await Sonora.API.getCollaborativePlaylist(code);
+    var lastErr = null;
+    try {
+      remote = await fetchCollabWithRetry(code);
+    } catch (err) {
+      lastErr = err;
+
+      // Puede ser una colaborativa creada en ESTE dispositivo que aún no se
+      // había publicado (sin red o servidor hibernando). La publicamos y
+      // volvemos a preguntar antes de decir que no existe.
+      if (err && err.code === 'not_found') {
+        var mine = null;
+        try {
+          var allLocal = (await Sonora.DB.playlists.getAll()) || [];
+          mine = allLocal.find(function (p) {
+            return p && p.userCreated && String(p.code || '').toUpperCase() === code;
+          }) || null;
+        } catch (e) {}
+        if (mine) {
+          var healed = await publishCollabPlaylist(mine, { metaOnly: false });
+          if (healed) {
+            try { remote = await Sonora.API.getCollaborativePlaylist(code); } catch (e2) { lastErr = e2; }
+          }
+        }
+      }
     }
-    if (!remote) throw new Error('No se encontró ninguna playlist con el código ' + code);
+
+    if (!remote) throw friendlyJoinError(lastErr, code);
 
     // Guardamos las canciones del servidor en la base local para poder
     // reproducirlas aunque el código lo compartió otra persona.
@@ -793,16 +984,23 @@
 
   /** Muestra el código de una playlist colaborativa con opciones de copiar. */
   async function showPlaylistCode(pl) {
-    var code = String(pl.code || '').toUpperCase();
+    var code = normalizeCollabCode(pl.code);
     if (!code) {
       showToast('Esta playlist no es colaborativa', 'info');
       return;
     }
     var link = await buildJoinLink(code);
+    var pending = !!pl.pendingPublish;
     openActionSheet({
-      title: '🔑 Código: ' + code,
+      title: '🔑 ' + code + (pending ? ' · pendiente de publicar' : ''),
       subtitle: pl.name,
       actions: [
+        pending ? { icon: '📡', label: 'Publicar ahora en Sonora', onSelect: async function () {
+            showToast('Publicando…', 'info');
+            var ok = await publishCollabPlaylist(pl, { metaOnly: false });
+            showToast(ok ? 'Publicada. El código ' + code + ' ya funciona.' : 'Sigue sin conexión. Se reintentará solo.', ok ? 'success' : 'error');
+            if (ok && Sonora.Router && Sonora.Router.refresh) Sonora.Router.refresh();
+          } } : null,
         { icon: '📋', label: 'Copiar solo el código', onSelect: function () {
             copyPlainText(code).then(function (ok) {
               showToast(ok ? 'Código copiado: ' + code : 'No se pudo copiar', ok ? 'success' : 'error');
@@ -814,7 +1012,7 @@
             });
           } },
         { icon: '📤', label: 'Compartir invitación', onSelect: function () { sharePlaylist(pl); } }
-      ]
+      ].filter(Boolean)
     });
   }
 
@@ -1868,13 +2066,19 @@
      * Se usa cuando alguien abre un enlace compartido (#/playlists/join?code=...)
      */
     async joinByCode(code) {
+      var clean = normalizeCollabCode(code);
+      if (!clean) {
+        showToast('Introduce un código válido (por ejemplo SON-ABC123)', 'error');
+        return null;
+      }
+      showToast('Buscando la playlist ' + clean + '…', 'info');
       try {
-        const pl = await joinCollaborativeByCode(code);
+        const pl = await joinCollaborativeByCode(clean);
         showToast(`¡Te uniste a "${pl.name}"!`, 'success');
         navigateDetail(pl.id);
         return pl;
       } catch (err) {
-        showToast('No se pudo unir: ' + (err && err.message ? err.message : 'código no válido'), 'error');
+        showToast((err && err.message) || 'No se pudo unir a la playlist', 'error');
         if (Sonora.Router) Sonora.Router.navigate('/playlists');
         return null;
       }
@@ -2143,6 +2347,32 @@
             return;
           }
 
+          // El código de una colaborativa lo asigna el servidor: así el que
+          // ves es el que existe de verdad en la nube. Sin conexión se usa uno
+          // provisional y queda marcada como pendiente para publicarla luego.
+          let assignedCode = '';
+          let publishPending = 0;
+          if (isCollab) {
+            try {
+              if (Sonora.API && typeof Sonora.API.createCollaborativePlaylist === 'function') {
+                const allocation = await Sonora.API.createCollaborativePlaylist({
+                  name: name,
+                  description: desc,
+                  tracks: []
+                });
+                if (allocation && allocation.code) {
+                  assignedCode = String(allocation.code).toUpperCase();
+                }
+              }
+            } catch (e) {
+              console.warn('[Playlists] no se pudo reservar código:', (e && e.message) || e);
+            }
+            if (!assignedCode) {
+              assignedCode = genCollabCode();
+              publishPending = 1;
+            }
+          }
+
           const newPlaylistData = {
             name: name,
             description: desc,
@@ -2150,7 +2380,11 @@
             artworkUrl: '',
             isCollaborative: isCollab ? 1 : 0,
             userCreated: 1,
-            code: isCollab ? genCollabCode() : '',
+            code: assignedCode,
+            joined: isCollab ? 1 : 0,
+            pendingPublish: publishPending,
+            publishedAt: publishPending ? '' : new Date().toISOString(),
+            syncedAt: publishPending ? '' : new Date().toISOString(),
             ownerId: (Sonora.Store && Sonora.Store.get && Sonora.Store.get('currentUser') && Sonora.Store.get('currentUser').id) || null,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
@@ -2164,13 +2398,10 @@
               await Sonora.DB.playlists.add(newPlaylistData);
               created = newPlaylistData;
             }
-            // Si es colaborativa, la registramos en el servidor para que otros
-            // puedan unirse con el código.
-            if (isCollab && created) {
-              syncCollabPlaylistToServer(created);
-            }
             showToast(isCollab
-              ? 'Playlist colaborativa creada · código ' + (created && created.code || '')
+              ? (publishPending
+                  ? 'Playlist creada · código ' + assignedCode + ' (pendiente de publicar; se reintentará)'
+                  : 'Playlist colaborativa publicada · código ' + assignedCode)
               : 'Playlist creada correctamente');
             notifyPlaylistsChanged();
             closeCreateModal();
@@ -2237,7 +2468,7 @@
 
         if (btnSubmitJoinCode) {
           addTrackedListener(btnSubmitJoinCode, 'click', async () => {
-            const rawCode = inputJoinCode ? inputJoinCode.value.trim().toUpperCase() : '';
+            const rawCode = inputJoinCode ? inputJoinCode.value.trim() : '';
             if (!rawCode) {
               showToast('Introduce un código de playlist', 'warning');
               return;
@@ -2252,7 +2483,7 @@
               closeJoin();
               navigateDetail(localPl.id);
             } catch (err) {
-              showToast('No se pudo unir: ' + (err && err.message ? err.message : 'código no válido'), 'error');
+              showToast((err && err.message) || 'No se pudo unir a la playlist', 'error');
             } finally {
               btnSubmitJoinCode.disabled = false;
               btnSubmitJoinCode.textContent = 'Unirse';
@@ -2366,12 +2597,20 @@
       // Código visible debajo del nombre (para unirse a la playlist colaborativa)
       const codeEl = document.getElementById('detail-collab-code');
       if (codeEl) {
-        if ((playlist.isCollaborative || playlist.code) && playlist.code) {
+        const realCode = normalizeCollabCode(playlist.code);
+        if ((playlist.isCollaborative || playlist.code) && realCode) {
+          const pending = !!playlist.pendingPublish;
           codeEl.style.display = 'inline-flex';
           codeEl.style.cssText = 'display:inline-flex;align-items:center;gap:8px;margin-top:10px;padding:7px 14px;border-radius:999px;background:rgba(var(--color-primary-rgb,255,71,87),0.16);border:1px solid rgba(var(--color-primary-rgb,255,71,87),0.45);font-size:13px;font-weight:700;color:var(--color-text-primary,#fff);cursor:pointer;';
-          codeEl.innerHTML = '🔑 Código: ' + escapeHtml(playlist.code) + ' · toca para copiar';
+          codeEl.innerHTML = pending
+            ? '⏳ ' + escapeHtml(realCode) + ' · pendiente de publicar · toca para reintentar'
+            : '🔑 ' + escapeHtml(realCode) + ' · toca para compartir';
           codeEl.onclick = () => {
-            copyPlainText(playlist.code).then(ok => showToast(ok ? 'Código copiado: ' + playlist.code : 'No se pudo copiar', ok ? 'success' : 'error'));
+            if (pending) {
+              showPlaylistCode(playlist);
+            } else {
+              sharePlaylist(playlist);
+            }
           };
         } else {
           codeEl.style.display = 'none';
@@ -3233,6 +3472,11 @@
    */
   async function syncAllCollaborativePlaylists() {
     try {
+      // Primero publicar lo pendiente: un código que no existe en la nube es
+      // la causa real de "playlist no encontrada" en el otro dispositivo.
+      try { await publishPendingCollabs({ silent: true }); } catch (e) {}
+      startPublishRetry();
+
       if (!(Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.getAll === 'function')) return;
       var all = (await Sonora.DB.playlists.getAll()) || [];
       for (var i = 0; i < all.length; i++) {
@@ -3244,4 +3488,6 @@
   }
 
   Sonora.Pages.Playlists.syncAllCollab = syncAllCollaborativePlaylists;
+  Sonora.Pages.Playlists.publishPending = publishPendingCollabs;
+  Sonora.Pages.Playlists.publishPlaylist = publishCollabPlaylist;
 })();

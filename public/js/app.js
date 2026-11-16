@@ -1213,6 +1213,10 @@
     function shareCurrentTrack() {
       var track = Sonora.Player.getCurrentTrack();
       if (!track) return;
+      if (Sonora.Share && typeof Sonora.Share.shareTrack === 'function') {
+        Sonora.Share.shareTrack(track);
+        return;
+      }
       var title = track.title || 'Canción';
       var artist = track.artist || 'Artista desconocido';
       var text = '🎧 Escuchando "' + title + '" de ' + artist + ' en Sonora Music.';
@@ -1421,6 +1425,23 @@
           if (code && P && typeof P.joinByCode === 'function') P.joinByCode(code);
         }, 350);
       })
+      // Enlace de canción compartida: en la app reproduce directo (y salta al
+      // minuto); en el navegador muestra la ficha con botón Reproducir.
+      .on('/share/track', function (params) {
+        if (Sonora.Share && typeof Sonora.Share.openSharedTrack === 'function') {
+          Sonora.Share.openSharedTrack(params || {});
+        } else {
+          loadPage('home');
+        }
+      })
+      .on('/share/playlist', function (params) {
+        var code = (params && params.code) || '';
+        if (code) {
+          Sonora.Router.navigate('/playlists/join?code=' + encodeURIComponent(code));
+        } else {
+          loadPage('playlists');
+        }
+      })
       .on('/playlist/:id', function (params) { loadPage('playlists', params); })
       // La app navega a /playlists/<id> (plural): sin esta ruta el detalle de
       // una playlist no se abría nunca y volvía al inicio.
@@ -1521,7 +1542,7 @@
      MAIN INITIALIZATION
      ══════════════════════════════════════════════ */
   function boot() {
-    console.log('🎵 Sonora Music v7.17.7 — Booting...');
+    console.log('🎵 Sonora Music v7.18.0 — Booting...');
 
     var splashScreen = $('#splash-screen');
 
@@ -1652,7 +1673,7 @@
         // Step 11: Register Service Worker
         registerSW();
 
-        console.log('🎵 Sonora Music v7.17.7 — Ready!');
+        console.log('🎵 Sonora Music v7.18.0 — Ready!');
       })
       .catch(function (err) {
         console.error('[App] Boot error:', err);

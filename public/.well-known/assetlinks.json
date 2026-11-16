@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.sonoramusic.app",
+      "sha256_cert_fingerprints": [
+        "D4:78:E6:A6:42:39:CA:71:18:8F:D6:02:4C:F4:EC:33:98:DA:69:E2:8F:99:E0:42:96:5E:01:57:8C:EF:06:20"
+      ]
+    }
+  }
+]

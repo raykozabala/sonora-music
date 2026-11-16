@@ -196,7 +196,7 @@
     }
     const payload = await Sonora.DB.exportData();
     payload.appVersion = (Sonora.Updater && Sonora.Updater.getCurrentVersion)
-      ? Sonora.Updater.getCurrentVersion() : '7.17.7';
+      ? Sonora.Updater.getCurrentVersion() : '7.18.0';
     const text = JSON.stringify(payload, null, 2);
     const date = new Date().toISOString().slice(0, 10);
     const filename = `Sonora_Backup_${date}.json`;
@@ -823,7 +823,7 @@
             </h2>
             <div style="background:var(--color-surface, #1a1a2e);border:1px solid var(--color-card-border, rgba(255,255,255,0.08));border-radius:var(--radius-md, 14px);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;">
               <div>
-                <div style="font-weight:700;font-size:14px;color:#fff;">Versión instalada: <span style="color:var(--color-primary, #FF4757);">v7.17.7</span></div>
+                <div style="font-weight:700;font-size:14px;color:#fff;">Versión instalada: <span style="color:var(--color-primary, #FF4757);">v7.18.0</span></div>
                 <div style="font-size:12px;color:var(--color-text-secondary, #A0A5BA);margin-top:2px;">Comprueba si hay nuevas versiones de Sonora para Mac, Web o Android.</div>
               </div>
               <button id="btn-profile-check-updates" class="btn-update-action" style="padding:8px 16px;font-size:12px;font-weight:700;border-radius:20px;">
@@ -1159,18 +1159,28 @@
 
       sharedContainer.innerHTML = shared.map(p => {
         const artwork = p.artworkUrl || generateArtwork(p.id, p.name);
-        const shareCode = `SONORA-${String(p.id).replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase()}`;
+        // El código real (SON-XXXXXX) es el que existe en la nube. Antes se
+        // inventaba "SONORA-<id local>" y al pegarlo en el teléfono daba
+        // "playlist no encontrada".
+        const realCode = (Sonora.API && typeof Sonora.API.parseCollabCode === 'function')
+          ? Sonora.API.parseCollabCode(p.code)
+          : String(p.code || '').trim().toUpperCase();
+        const pending = !!p.pendingPublish;
         const trackCount = Array.isArray(p.trackIds) ? p.trackIds.length : 0;
+        const metaParts = [trackCount + ' canciones'];
+        if (!p.userCreated) metaParts.push('compartida contigo');
+        if (pending) metaParts.push('pendiente de publicar');
 
         return `
           <div class="shared-playlist-card" data-playlist-id="${escapeHtml(p.id)}">
             <img src="${artwork}" class="shared-playlist-cover" alt="" loading="lazy" />
             <div class="shared-playlist-info">
               <div class="shared-playlist-name">${escapeHtml(p.name)}</div>
-              <div class="shared-playlist-meta">${trackCount} canciones • 2 miembros</div>
-              <div class="shared-code-tag" title="Toca para copiar código" data-code="${escapeHtml(shareCode)}">
-                📋 ${escapeHtml(shareCode)}
-              </div>
+              <div class="shared-playlist-meta">${escapeHtml(metaParts.join(' • '))}</div>
+              ${realCode ? `
+              <div class="shared-code-tag" title="Toca para copiar el código" data-code="${escapeHtml(realCode)}">
+                ${pending ? '⏳' : '📋'} ${escapeHtml(realCode)}
+              </div>` : ''}
             </div>
           </div>
         `;
@@ -1183,15 +1193,16 @@
           if (codeTag) {
             e.stopPropagation();
             const code = codeTag.getAttribute('data-code');
-            if (navigator.clipboard) {
-              navigator.clipboard.writeText(code).then(() => {
-                showToast(`Código ${code} copiado al portapapeles`);
-              }).catch(() => {
-                showToast(`Código: ${code}`);
-              });
-            } else {
+            const copy = (Sonora.Share && typeof Sonora.Share.copy === 'function')
+              ? Sonora.Share.copy(code)
+              : ((navigator.clipboard && navigator.clipboard.writeText)
+                  ? navigator.clipboard.writeText(code)
+                  : Promise.resolve(false));
+            Promise.resolve(copy).then(() => {
+              showToast(`Código ${code} copiado al portapapeles`);
+            }).catch(() => {
               showToast(`Código: ${code}`);
-            }
+            });
             return;
           }
 

@@ -3,7 +3,7 @@
  * Offline caching for PWA functionality
  */
 
-const CACHE_NAME = 'sonora-7.17.7';
+const CACHE_NAME = 'sonora-7.18.0';
 // Rutas relativas: funcionan en la raíz y también si Sonora se sirve bajo
 // un subdirectorio (antes las rutas absolutas rompían el modo offline).
 const STATIC_ASSETS = [
@@ -35,6 +35,7 @@ const STATIC_ASSETS = [
   './js/library.js',
   './js/discover.js',
   './js/playlists.js',
+  './js/share.js',
   './js/profile.js',
   './js/settings.js',
   './js/updater.js',
@@ -45,7 +46,7 @@ const STATIC_ASSETS = [
 
 // Install — cache all static assets
 self.addEventListener('install', function (event) {
-  console.log('[SW] Installing Sonora Music v7.17.7...');
+  console.log('[SW] Installing Sonora Music v7.18.0...');
   event.waitUntil(
     caches.open(CACHE_NAME).then(function (cache) {
       return cache.addAll(STATIC_ASSETS).catch(function (err) {

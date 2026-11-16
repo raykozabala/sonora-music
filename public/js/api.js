@@ -48,15 +48,27 @@
 
   /**
    * Servidor para playlists colaborativas.
-   * Las playlists colaborativas necesitan un servidor compartido, así que en
-   * Modo Dispositivo (APK, web local) usamos la nube de Sonora como respaldo.
-   * Antes esto devolvía '' y por eso "unirse por código" nunca funcionaba en
-   * el teléfono.
+   * Decisión de producto: las colaborativas viven SIEMPRE en la nube de
+   * Sonora, para que un código funcione desde cualquier red y dispositivo
+   * (el teléfono con datos móviles no puede alcanzar la IP LAN del Mac).
+   * Única excepción: si estás desarrollando en localhost, se usa ese servidor
+   * para no escribir datos de prueba en producción.
    */
   function getCollabBase() {
-    var base = getBaseUrl();
-    if (base) return base;
-    return _renderUrl;
+    try {
+      if (typeof window !== 'undefined' && window.location &&
+          (window.location.protocol === 'http:' || window.location.protocol === 'https:') &&
+          (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+        return String(window.location.origin).replace(/\/+$/, '');
+      }
+    } catch (e) {}
+    if (_mode === 'render' || _mode === 'northflank' || _mode === 'local') {
+      // En la app instalada el modo puede ser 'local' por configuración previa,
+      // pero las colaborativas deben seguir en la nube.
+      if (_mode === 'northflank' && _northflankUrl) return String(_northflankUrl).replace(/\/+$/, '');
+      return String(_renderUrl || '').replace(/\/+$/, '');
+    }
+    return String(_renderUrl || '').replace(/\/+$/, '');
   }
 
   /**
@@ -89,12 +101,20 @@
   }
 
   /**
-   * Servidor que debe aparecer en los enlaces de invitación.
-   * En modo local con localhost usamos la IP LAN; en Render/Dispositivo,
-   * la nube; si ya se abrió por IP LAN o .local, el propio origen.
+   * Base que aparece en los enlaces de invitación y de canción.
+   * SIEMPRE la nube: si el enlace llevara localhost o la IP LAN, en el teléfono
+   * apuntaría a sí mismo y los App Links de Android (que solo se verifican
+   * contra el dominio https) nunca abrirían la app.
    */
   function getInviteBase() {
-    if (_mode === 'local' && _lanUrl) return _lanUrl;
+    var cloud = String(_renderUrl || '').replace(/\/+$/, '');
+    if (cloud) return cloud;
+    try {
+      if (typeof window !== 'undefined' && window.location &&
+          (window.location.protocol === 'https:')) {
+        return String(window.location.origin).replace(/\/+$/, '');
+      }
+    } catch (e) {}
     return getCollabBase();
   }
 
@@ -113,6 +133,60 @@
     if (typeof out.artworkUrl === 'string' && out.artworkUrl.indexOf('data:') === 0) delete out.artworkUrl;
     if (typeof out.lyrics === 'string' && out.lyrics.length > 20000) delete out.lyrics;
     if (typeof out.syncedLyrics === 'string' && out.syncedLyrics.length > 40000) delete out.syncedLyrics;
+    return out;
+  }
+
+  /**
+   * Normaliza un código de invitación escrito a mano o pegado desde un enlace.
+   * Acepta "SON-ABC123", "son abc123", "ABC123" y la URL de invitación
+   * completa (https://…/#/playlists/join?code=SON-ABC123).
+   */
+  function parseCollabCode(raw) {
+    var s = String(raw == null ? '' : raw).trim();
+    if (!s) return '';
+    var m = s.match(/[?&#]code=([^&#\s]+)/i);
+    if (m) s = m[1];
+    try { s = decodeURIComponent(s); } catch (e) {}
+    s = s.replace(/\s+/g, '').toUpperCase();
+    s = s.replace(/[^A-Z0-9-]/g, '');
+    // "SONABC123" → "SON-ABC123"
+    if (/^SON[A-Z0-9]{4,}$/.test(s)) s = 'SON-' + s.slice(3);
+    // "ABC123" → "SON-ABC123" (el prefijo es obligatorio en los códigos nuevos)
+    if (/^[A-Z0-9]{6}$/.test(s)) s = 'SON-' + s;
+    return s;
+  }
+
+  /**
+   * Error tipado de las peticiones colaborativas. Antes cualquier fallo se
+   * mostraba como "Playlist no encontrada", incluso cuando el servidor estaba
+   * despertando o el teléfono no tenía red.
+   */
+  function collabRequestError(res, fallback) {
+    var err = new Error(fallback || 'Error del servidor');
+    err.status = res && res.status;
+    if (res && res.status === 404) {
+      err.code = 'not_found';
+      err.message = 'No existe ninguna playlist con ese código';
+    } else if (res && (res.status === 502 || res.status === 503 || res.status === 504)) {
+      err.code = 'server_down';
+      err.message = 'El servidor de Sonora está despertando. Reintentando…';
+      err.retryAfter = 3000;
+    } else {
+      err.code = 'http';
+      err.message = (fallback || 'Error del servidor') + ' (HTTP ' + (res && res.status) + ')';
+    }
+    return err;
+  }
+
+  function asCollabNetworkError(err) {
+    if (err && err.code) return err;
+    var msg = String((err && err.message) || '');
+    var out = new Error(/timeout/i.test(msg)
+      ? 'El servidor tardó demasiado en responder'
+      : 'Sin conexión con el servidor de Sonora');
+    out.code = /timeout/i.test(msg) ? 'timeout' : 'offline';
+    out.retryAfter = 4000;
+    out.original = err;
     return out;
   }
 
@@ -319,6 +393,13 @@
     },
 
     /**
+     * Normaliza un código de invitación (acepta también la URL completa).
+     */
+    parseCollabCode: function (raw) {
+      return parseCollabCode(raw);
+    },
+
+    /**
      * Base para enlaces de invitación (IP LAN si el PC abrió por localhost).
      */
     getInviteBase: function () {
@@ -378,12 +459,51 @@
      */
     getCollaborativePlaylist: function (code) {
       var base = getCollabBase();
-      if (!base) return Promise.reject(new Error('No server configured'));
-      return fetchWithTimeout(base + '/api/playlists/collaborative/' + encodeURIComponent(code), {}, 8000)
+      var clean = parseCollabCode(code);
+      if (!base) {
+        var noServer = new Error('No hay servidor configurado para playlists colaborativas');
+        noServer.code = 'offline';
+        return Promise.reject(noServer);
+      }
+      if (!clean) {
+        var invalid = new Error('Introduce un código de playlist válido');
+        invalid.code = 'invalid';
+        return Promise.reject(invalid);
+      }
+      return fetchWithTimeout(base + '/api/playlists/collaborative/' + encodeURIComponent(clean), {
+        cache: 'no-store'
+      }, 12000)
         .then(function (res) {
-          if (!res.ok) throw new Error('Playlist no encontrada');
+          if (!res.ok) throw collabRequestError(res, 'No se pudo abrir la playlist');
           return res.json();
-        });
+        })
+        .catch(function (err) { throw asCollabNetworkError(err); });
+    },
+
+    /**
+     * Crea una playlist colaborativa en el servidor y devuelve el código
+     * definitivo ({ code, playlist }). El código lo asigna el servidor para
+     * que nunca exista en local sin existir en la nube.
+     */
+    createCollaborativePlaylist: function (data) {
+      var base = getCollabBase();
+      if (!base) {
+        var noServer = new Error('No hay servidor configurado para playlists colaborativas');
+        noServer.code = 'offline';
+        return Promise.reject(noServer);
+      }
+      var payload = Object.assign({}, data || {});
+      if (Array.isArray(payload.tracks)) payload.tracks = payload.tracks.map(sanitizeCollabTrack);
+      return fetchWithTimeout(base + '/api/playlists/collaborative', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }, 12000)
+        .then(function (res) {
+          if (!res.ok) throw collabRequestError(res, 'No se pudo crear la playlist colaborativa');
+          return res.json();
+        })
+        .catch(function (err) { throw asCollabNetworkError(err); });
     },
 
     addTrackToCollaborative: function (code, track, playlistName) {
@@ -401,17 +521,29 @@
 
     saveCollaborativePlaylist: function (code, data) {
       var base = getCollabBase();
-      if (!base) return Promise.reject(new Error('No server configured'));
+      var clean = parseCollabCode(code);
+      if (!base) {
+        var noServer = new Error('No hay servidor configurado para playlists colaborativas');
+        noServer.code = 'offline';
+        return Promise.reject(noServer);
+      }
+      if (!clean) {
+        var invalid = new Error('Código de playlist inválido');
+        invalid.code = 'invalid';
+        return Promise.reject(invalid);
+      }
       var payload = Object.assign({}, data || {});
       if (Array.isArray(payload.tracks)) payload.tracks = payload.tracks.map(sanitizeCollabTrack);
-      return fetchWithTimeout(base + '/api/playlists/collaborative/' + encodeURIComponent(code), {
+      return fetchWithTimeout(base + '/api/playlists/collaborative/' + encodeURIComponent(clean), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      }, 10000).then(function (res) {
-        if (!res.ok) throw new Error('Error al guardar la playlist colaborativa');
-        return res.json();
-      });
+      }, 15000)
+        .then(function (res) {
+          if (!res.ok) throw collabRequestError(res, 'No se pudo publicar la playlist');
+          return res.json();
+        })
+        .catch(function (err) { throw asCollabNetworkError(err); });
     },
 
     deleteCollaborativePlaylist: function (code) {

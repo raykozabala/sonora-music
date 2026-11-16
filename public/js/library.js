@@ -3012,6 +3012,12 @@
 
   function handleShareTrack(track) {
     if (!track) return;
+
+    if (Sonora.Share && typeof Sonora.Share.shareTrack === 'function') {
+      Sonora.Share.shareTrack(track);
+      return;
+    }
+
     var text = '🎧 Escucha "' + (track.title || 'esta canción') + '" de ' +
       (track.artist || 'Sonora Music') + ' en Sonora Music.';
     var url = '';
