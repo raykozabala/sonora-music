@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.18.0
+ * Sonora Music Server v7.18.1
  * Triple-mode backend server (Local PC, Render.com & Northflank compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -26,7 +26,7 @@ const isNorthflank = SERVER_MODE === 'northflank';
 // Versión de la aplicación y repositorio oficial de instaladores. El endpoint
 // /api/app/latest usa estos datos para que la app nunca descargue una versión
 // distinta de la que anuncia.
-const APP_VERSION = '7.18.0';
+const APP_VERSION = '7.18.1';
 const APP_REPO = 'raykozabala/sonora-music';
 const APP_RELEASE_BASE = `https://github.com/${APP_REPO}/releases`;
 

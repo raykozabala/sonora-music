@@ -1121,6 +1121,26 @@
           </section>
 
           <!-- SECTION 7: PRIVACIDAD -->
+          <section class="settings-section" id="settings-app-links" style="display:none;">
+            <h2 class="settings-section__title">🔗 Enlaces de Sonora</h2>
+
+            <div class="setting-item-row setting-item-row--inline">
+              <div class="setting-label-box">
+                <span class="setting-label-title">Abrir enlaces en la app</span>
+                <span class="setting-label-sub" id="app-links-status">Comprobando…</span>
+              </div>
+              <button class="btn-pill btn-pill--secondary" id="btn-test-app-link">Probar</button>
+            </div>
+
+            <div class="setting-label-sub" style="margin-top:10px;line-height:1.65;">
+              <strong>Xiaomi / MIUI:</strong> Ajustes → Aplicaciones → Sonora Music →
+              <strong>Abrir por defecto</strong> → activa <strong>Abrir enlaces compatibles</strong>
+              y permite <em>sonora-music-b1ee.onrender.com</em>.<br>
+              Si WhatsApp abre su propio navegador, pulsa <strong>⋮</strong> →
+              «Abrir en el navegador» y desde ahí el botón de la app.
+            </div>
+          </section>
+
           <section class="settings-section">
             <h2 class="settings-section__title">🔒 Privacidad y Datos</h2>
 
@@ -1194,7 +1214,7 @@
 
               <h3 class="about-title">Sonora Music</h3>
               <div style="display:flex;align-items:center;gap:10px;margin:6px 0;flex-wrap:wrap;justify-content:center;">
-                <span class="about-version-badge">v7.18.0 (Build 2026)</span>
+                <span class="about-version-badge">v7.18.1 (Build 2026)</span>
                 <button id="btn-check-updates" class="btn-update-action" style="padding:4px 12px;font-size:11px;" title="Buscar nuevas versiones">
                   🔄 Buscar actualizaciones
                 </button>
@@ -1237,6 +1257,7 @@
           this.initDownloadsSection(),
           this.initLanguageSection(),
           this.initNotificationsSection(),
+          this.initLinksSection(),
           this.initPrivacySection(),
           this.initAboutSection()
         ]);
@@ -2104,6 +2125,47 @@
           ? 'Avisos de actualizaciones activados'
           : 'Avisos de actualizaciones desactivados');
       });
+    },
+
+    /**
+     * Enlaces de Sonora (Android): explica por qué un enlace de WhatsApp abre
+     * el navegador y permite probar la apertura de la app.
+     */
+    initLinksSection() {
+      const section = $('#settings-app-links');
+      if (!section) return;
+
+      const platform = (Sonora.Share && Sonora.Share.platform)
+        ? Sonora.Share.platform() : 'web';
+      if (platform !== 'android' && platform !== 'android-web') return;
+
+      section.style.display = '';
+
+      const status = $('#app-links-status');
+      const testBtn = $('#btn-test-app-link');
+
+      if (status) {
+        status.textContent = platform === 'android'
+          ? 'Dentro de la app: los enlaces ya abren Sonora directamente.'
+          : 'Estás en un navegador. Si los enlaces no abren la app, revisa los permisos.';
+      }
+
+      if (testBtn) {
+        addTrackedListener(testBtn, 'click', () => {
+          if (status) status.textContent = 'Abriendo Sonora…';
+          let how = '';
+          try {
+            how = Sonora.Share.attemptOpenNative('/home',
+              (Sonora.API && Sonora.API.getInviteBase ? Sonora.API.getInviteBase() : '') + '/#/home');
+          } catch (e) {}
+          setTimeout(() => {
+            if (status && !how) {
+              status.textContent = 'Este navegador no permite abrir la app desde aquí. ' +
+                'Pulsa ⋮ → «Abrir en el navegador» e inténtalo de nuevo.';
+            }
+          }, 1500);
+        });
+      }
     },
 
     /**

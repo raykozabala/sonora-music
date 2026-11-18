@@ -245,6 +245,151 @@
     return 'sonora://open/#' + clean;
   }
 
+  /** Ruta interna con "/" inicial y sin "#". */
+  function routeWithoutHash(route) {
+    var path = String(route || '').replace(/^#/, '');
+    if (path.charAt(0) !== '/') path = '/' + path;
+    return path;
+  }
+
+  /**
+   * sonora://open/... sin "#" interno. Sirve tanto para openFromUrl como para
+   * el intent:// de Android, que usa el "#" para sus parámetros.
+   */
+  function nativeUrlFor(route) {
+    return 'sonora://open' + routeWithoutHash(route);
+  }
+
+  /**
+   * Enlace intent:// de Android: abre Sonora directamente y, si la app no
+   * está instalada, vuelve a la página web (fallbackUrl).
+   * Formato: intent://open/ruta?x=1#Intent;scheme=sonora;package=...;end
+   */
+  function intentUrlFor(route, fallbackUrl) {
+    var parts = ['scheme=sonora', 'package=' + ANDROID_PACKAGE];
+    if (fallbackUrl) parts.push('S.browser_fallback_url=' + encodeURIComponent(fallbackUrl));
+    return 'intent://open' + routeWithoutHash(route) + '#Intent;' + parts.join(';') + ';end';
+  }
+
+  function isAndroidBrowser() {
+    return /Android/i.test(navigator.userAgent || '') && !nativeApp();
+  }
+
+  /**
+   * Intenta abrir la app nativa desde un navegador.
+   * Android usa intent:// (funciona en Chrome y en muchos navegadores
+   * internos); macOS usa sonora:// y el sistema pregunta si abrir la app.
+   */
+  function attemptOpenNative(route, fallbackUrl) {
+    var android = /Android/i.test(navigator.userAgent || '');
+    if (android) {
+      try {
+        window.location.href = intentUrlFor(route, fallbackUrl);
+        return 'intent';
+      } catch (e) {}
+    }
+
+    var direct = nativeUrlFor(route);
+    try {
+      var tauri = window.__TAURI__;
+      if (tauri && tauri.core && typeof tauri.core.invoke === 'function') {
+        tauriInvoke('open_external_url', { url: direct });
+        return 'scheme';
+      }
+    } catch (e) {}
+
+    try {
+      window.location.href = direct;
+      return 'scheme';
+    } catch (e) {}
+    return '';
+  }
+
+  /**
+   * Intento automático (una sola vez por pestaña) al abrir un enlace
+   * compartido en Android. Si el App Link ya funcionó, esta página ni se
+   * carga; si no, esto abre la app igualmente.
+   */
+  function autoOpenNative(route, fallbackUrl, delay) {
+    if (!isAndroidBrowser()) return false;
+    var key = 'sonora:autoopen:' + routeWithoutHash(route);
+    try {
+      if (sessionStorage.getItem(key)) return false;
+      sessionStorage.setItem(key, '1');
+    } catch (e) {}
+
+    setTimeout(function () {
+      try { if (document.visibilityState === 'hidden') return; } catch (e) {}
+      attemptOpenNative(route, fallbackUrl);
+    }, typeof delay === 'number' ? delay : 1000);
+    return true;
+  }
+
+  /**
+   * Aviso flotante con botón "Abrir app" (respaldo cuando el navegador
+   * interno de WhatsApp no deja abrir intent://).
+   */
+  function showOpenInAppBanner(route, fallbackUrl, label) {
+    if (!isAndroidBrowser()) return null;
+    try {
+      if (sessionStorage.getItem('sonora:open-banner-off') === '1') return null;
+    } catch (e) {}
+
+    var old = document.getElementById('sonora-open-app');
+    if (old) old.remove();
+
+    var bar = document.createElement('div');
+    bar.id = 'sonora-open-app';
+    bar.style.cssText = 'position:fixed;left:10px;right:10px;' +
+      'bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:99999;' +
+      'display:flex;align-items:center;gap:10px;padding:12px 10px 12px 16px;' +
+      'border-radius:16px;background:#1f1f27;border:1px solid rgba(255,255,255,.14);' +
+      'box-shadow:0 12px 40px rgba(0,0,0,.55);';
+    bar.innerHTML =
+      '<div style="flex:1;min-width:0;font-size:12px;line-height:1.35;color:#fff;">' +
+        '<div style="font-weight:800;font-size:13px;">' + esc(label || 'Abrir en Sonora') + '</div>' +
+        '<div style="color:#A0A5BA;margin-top:2px;">Si no se abre, pulsa ⋮ → «Abrir en el navegador».</div>' +
+      '</div>' +
+      '<button type="button" id="sonora-open-app-btn" style="border:0;border-radius:12px;' +
+        'padding:11px 14px;font-size:13px;font-weight:800;color:#fff;white-space:nowrap;' +
+        'background:linear-gradient(135deg,var(--color-primary,#FF4757),#B3243A);">Abrir app</button>' +
+      '<button type="button" id="sonora-open-app-close" aria-label="Cerrar" style="border:0;' +
+        'background:transparent;color:#A0A5BA;font-size:22px;line-height:1;padding:4px 4px 8px;' +
+        'cursor:pointer;">×</button>';
+
+    document.body.appendChild(bar);
+    var openBtn = bar.querySelector('#sonora-open-app-btn');
+    if (openBtn) {
+      openBtn.addEventListener('click', function () {
+        attemptOpenNative(route, fallbackUrl);
+      });
+    }
+    var closeBtn = bar.querySelector('#sonora-open-app-close');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', function () {
+        try { sessionStorage.setItem('sonora:open-banner-off', '1'); } catch (e) {}
+        bar.remove();
+      });
+    }
+    return bar;
+  }
+
+  /**
+   * Prepara una invitación abierta en un navegador Android: intenta abrir la
+   * app y deja el aviso de respaldo. Devuelve true si lanzó el intento.
+   */
+  function prepareInvite(rawCode) {
+    var code = (Sonora.API && Sonora.API.parseCollabCode)
+      ? Sonora.API.parseCollabCode(rawCode)
+      : String(rawCode || '').trim().toUpperCase();
+    if (!code) return false;
+    var route = '/playlists/join?code=' + encodeURIComponent(code);
+    var fallback = cloudBase() + '/#' + route;
+    var auto = autoOpenNative(route, fallback, 1200);
+    showOpenInAppBanner(route, fallback, 'Abrir la playlist en Sonora');
+    return auto;
+  }
+
   /* ── hoja de compartir ──────────────────────────────────────── */
 
   function openShareSheet(opts) {
@@ -634,17 +779,27 @@
       });
     }
 
+    var fallback = cloudBase() + '/#' + route;
     var openBtn = document.getElementById('share-landing-open');
     var hint = document.getElementById('share-landing-hint');
     if (openBtn) {
       openBtn.addEventListener('click', function () {
-        var opened = openExternal(appUrlFor(route));
+        var how = attemptOpenNative(route, fallback);
         if (hint) {
-          hint.textContent = opened
-            ? 'Abriendo Sonora… Si no se abre, instala la app desde sonora-music.'
+          hint.textContent = how
+            ? 'Abriendo Sonora… Si no se abre, pulsa ⋮ → «Abrir en el navegador».'
             : 'No se pudo abrir la app. Instálala o usa «Reproducir aquí».';
         }
       });
+    }
+
+    // Android sin App Links verificados: intentar abrir la app igualmente y
+    // ofrecer el botón visible como respaldo.
+    var auto = autoOpenNative(route, fallback, 900);
+    showOpenInAppBanner(route, fallback, 'Abrir esta canción en Sonora');
+    if (auto && hint) {
+      hint.textContent = 'Abriendo Sonora… Si no se abre, pulsa ⋮ → «Abrir en el navegador» ' +
+        'o usa «Reproducir aquí».';
     }
   }
 
@@ -737,6 +892,12 @@
     playlistLink: playlistLink,
     trackLink: trackLink,
     appUrlFor: appUrlFor,
+    nativeUrlFor: nativeUrlFor,
+    intentUrlFor: intentUrlFor,
+    attemptOpenNative: attemptOpenNative,
+    autoOpenNative: autoOpenNative,
+    showOpenInAppBanner: showOpenInAppBanner,
+    prepareInvite: prepareInvite,
     openSharedTrack: openSharedTrack,
     renderTrackLanding: renderTrackLanding,
     playSharedTrack: playSharedTrack,

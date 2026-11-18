@@ -1411,16 +1411,24 @@
       // Enlace compartido de playlist colaborativa: abre la app y se une sola.
       .on('/playlists/join', function (params) {
         loadPage('playlists');
+        var code = (params && params.code) || '';
+        // En un navegador Android, intentar abrir Sonora directamente (los
+        // App Links no siempre se verifican; WhatsApp usa su propio navegador).
+        if (code && Sonora.Share && typeof Sonora.Share.prepareInvite === 'function') {
+          Sonora.Share.prepareInvite(code);
+        }
         setTimeout(function () {
-          var code = (params && params.code) || '';
           var P = Sonora.Pages && (Sonora.Pages.Playlists || Sonora.Pages.Playlist);
           if (code && P && typeof P.joinByCode === 'function') P.joinByCode(code);
         }, 350);
       })
       .on('/playlist/join', function (params) {
         loadPage('playlists');
+        var code = (params && params.code) || '';
+        if (code && Sonora.Share && typeof Sonora.Share.prepareInvite === 'function') {
+          Sonora.Share.prepareInvite(code);
+        }
         setTimeout(function () {
-          var code = (params && params.code) || '';
           var P = Sonora.Pages && (Sonora.Pages.Playlists || Sonora.Pages.Playlist);
           if (code && P && typeof P.joinByCode === 'function') P.joinByCode(code);
         }, 350);
@@ -1542,7 +1550,7 @@
      MAIN INITIALIZATION
      ══════════════════════════════════════════════ */
   function boot() {
-    console.log('🎵 Sonora Music v7.18.0 — Booting...');
+    console.log('🎵 Sonora Music v7.18.1 — Booting...');
 
     var splashScreen = $('#splash-screen');
 
@@ -1673,7 +1681,7 @@
         // Step 11: Register Service Worker
         registerSW();
 
-        console.log('🎵 Sonora Music v7.18.0 — Ready!');
+        console.log('🎵 Sonora Music v7.18.1 — Ready!');
       })
       .catch(function (err) {
         console.error('[App] Boot error:', err);
