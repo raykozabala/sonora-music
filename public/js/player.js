@@ -834,7 +834,7 @@
       // si es la última de la cola (si hay siguiente ya está lista).
       try {
         var isLast = _queueIndex >= _queue.length - 1;
-        if (_autoplayEnabled && isLast && _currentTrack && prog && prog.percent >= 0.9) {
+        if (_autoplayEnabled && isLast && _currentTrack && prog && prog.percent >= 0.6) {
           prefetchNextRecommendation(_currentTrack);
         }
       } catch (e) {}

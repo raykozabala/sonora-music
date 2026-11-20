@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.19.0
+ * Sonora Music Server v7.19.1
  * Triple-mode backend server (Local PC, Render.com & Northflank compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -26,7 +26,7 @@ const isNorthflank = SERVER_MODE === 'northflank';
 // Versión de la aplicación y repositorio oficial de instaladores. El endpoint
 // /api/app/latest usa estos datos para que la app nunca descargue una versión
 // distinta de la que anuncia.
-const APP_VERSION = '7.19.0';
+const APP_VERSION = '7.19.1';
 const APP_REPO = 'raykozabala/sonora-music';
 const APP_RELEASE_BASE = `https://github.com/${APP_REPO}/releases`;
 
@@ -2744,10 +2744,10 @@ async function recFetchJson(url, timeoutMs) {
 async function recRelatedArtists(artist) {
   if (!artist) return [];
   const search = await recFetchJson(
-    'https://api.deezer.com/search/artist?q=' + encodeURIComponent(artist) + '&limit=1', 7000);
+    'https://api.deezer.com/search/artist?q=' + encodeURIComponent(artist) + '&limit=1', 4000);
   const found = search && Array.isArray(search.data) ? search.data[0] : null;
   if (!found || !found.id) return [];
-  const rel = await recFetchJson('https://api.deezer.com/artist/' + found.id + '/related?limit=12', 7000);
+  const rel = await recFetchJson('https://api.deezer.com/artist/' + found.id + '/related?limit=12', 4000);
   const list = rel && Array.isArray(rel.data) ? rel.data : [];
   return list
     .map((a) => ({ id: a.id, name: a.name }))
@@ -2758,7 +2758,7 @@ async function recRelatedArtists(artist) {
 /** Top de un artista en Deezer (títulos para buscar luego en YouTube). */
 async function recArtistTopTracks(artistId, limit) {
   const data = await recFetchJson(
-    'https://api.deezer.com/artist/' + artistId + '/top?limit=' + (limit || 3), 7000);
+    'https://api.deezer.com/artist/' + artistId + '/top?limit=' + (limit || 3), 4000);
   const list = data && Array.isArray(data.data) ? data.data : [];
   return list.map((t) => ({ title: t.title || '', duration: Number(t.duration) || 0 })).filter((t) => t.title);
 }
@@ -2833,7 +2833,7 @@ app.get('/api/recommendations', async (req, res) => {
           '--flat-playlist', '--dump-single-json', '--no-warnings', '--no-progress',
           '--playlist-end', '25', '--',
           `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`
-        ], 30000);
+        ], 12000);
         const info = JSON.parse(stdout);
         (info.entries || []).forEach((e) => addCandidate(e, 'mix'));
       } catch (e) {
@@ -2843,24 +2843,29 @@ app.get('/api/recommendations', async (req, res) => {
 
     // 2) Radio por artista (si el mix no dio suficiente).
     const yts = require('yt-search');
-    async function addFromSearch(query) {
-      if (!query || raw.length >= 18) return;
-      try {
-        const r = await yts(query);
-        (r && r.videos ? r.videos : []).slice(0, 14).forEach((v) => {
-          addCandidate({
-            id: v.videoId,
-            title: v.title,
-            uploader: v.author ? v.author.name : '',
-            duration: v.seconds
-          }, 'search');
-        });
-      } catch (e) {}
+
+    /** Búsqueda con tope duro: si YouTube tarda, seguimos sin bloquear. */
+    function searchWithTimeout(query, ms) {
+      return Promise.race([
+        yts(query),
+        new Promise((resolve) => setTimeout(() => resolve(null), ms || 8000))
+      ]).catch(() => null);
     }
 
-    if (raw.length < 10 && artist) await addFromSearch(artist + ' radio');
-    if (raw.length < 10 && artist) await addFromSearch('artists like ' + artist);
-    if (raw.length < 8) await addFromSearch((genre || 'pop') + ' music mix');
+    async function addFromSearch(query) {
+      if (!query || raw.length >= 18) return;
+      const r = await searchWithTimeout(query, 8000);
+      (r && r.videos ? r.videos : []).slice(0, 14).forEach((v) => {
+        addCandidate({
+          id: v.videoId,
+          title: v.title,
+          uploader: v.author ? v.author.name : '',
+          duration: v.seconds
+        }, 'search');
+      });
+    }
+
+    if (raw.length < 6) await addFromSearch((genre || 'pop') + ' music mix');
 
     // 2b) Refuerzo real de variedad: artistas relacionados en Deezer y cada
     //     tema buscado en YouTube. Sólo si el Mix sigue siendo monotemático.
@@ -2869,15 +2874,15 @@ app.get('/api/recommendations', async (req, res) => {
     );
     if (artist && distinctNow.size < 4) {
       try {
-        const related = (await recRelatedArtists(artist)).slice(0, 5);
+        const related = (await recRelatedArtists(artist)).slice(0, 4);
         const pools = await Promise.all(related.map(async (rel) => {
-          const tops = await recArtistTopTracks(rel.id, 2);
+          const tops = await recArtistTopTracks(rel.id, 1);
           return tops.map((t) => ({ artist: rel.name, title: t.title, duration: t.duration }));
         }));
-        const wanted = pools.flat().slice(0, 8);
+        const wanted = pools.flat().slice(0, 4);
         const searched = await Promise.all(wanted.map(async (want) => {
           try {
-            const r = await yts((want.artist + ' ' + want.title).trim());
+            const r = await searchWithTimeout((want.artist + ' ' + want.title).trim(), 9000);
             const videos = (r && r.videos ? r.videos : []).filter((v) => {
               if (!v || !v.videoId) return false;
               if (recIsJunk(v.title, v.seconds, v.author && v.author.name)) return false;
