@@ -1274,7 +1274,17 @@ app.get('/api/ytdiag', async (req, res) => {
     }));
   }
 
-  res.json({ id: id, mode: SERVER_MODE, proxy: !!process.env.YTDLP_PROXY, http: http, results: results, instances: instances });
+  // Deezer alimenta los artistas relacionados del recomendador; saber si es
+  // accesible desde este servidor evita diagnósticos a ciegas.
+  let deezer = { ok: false, related: 0 };
+  try {
+    const rel = await recRelatedArtists('Radiohead');
+    deezer = { ok: rel.length > 0, related: rel.length };
+  } catch (e) {
+    deezer = { ok: false, related: 0, error: String(e.message || e).slice(0, 80) };
+  }
+
+  res.json({ id: id, mode: SERVER_MODE, proxy: !!process.env.YTDLP_PROXY, http: http, results: results, instances: instances, deezer: deezer });
 });
 
 /**
@@ -2826,35 +2836,19 @@ app.get('/api/recommendations', async (req, res) => {
       });
     }
 
-    // 1) Mix/Radio de YouTube para la canción que está sonando.
-    if (/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
-      try {
-        const { stdout } = await runYtDlpWithFallback([
-          '--flat-playlist', '--dump-single-json', '--no-warnings', '--no-progress',
-          '--playlist-end', '25', '--',
-          `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`
-        ], 12000);
-        const info = JSON.parse(stdout);
-        (info.entries || []).forEach((e) => addCandidate(e, 'mix'));
-      } catch (e) {
-        console.warn('[Recommendations] mix falló:', e.message);
-      }
-    }
-
-    // 2) Radio por artista (si el mix no dio suficiente).
     const yts = require('yt-search');
 
     /** Búsqueda con tope duro: si YouTube tarda, seguimos sin bloquear. */
     function searchWithTimeout(query, ms) {
       return Promise.race([
         yts(query),
-        new Promise((resolve) => setTimeout(() => resolve(null), ms || 8000))
+        new Promise((resolve) => setTimeout(() => resolve(null), ms || 7000))
       ]).catch(() => null);
     }
 
     async function addFromSearch(query) {
       if (!query || raw.length >= 18) return;
-      const r = await searchWithTimeout(query, 8000);
+      const r = await searchWithTimeout(query, 7000);
       (r && r.videos ? r.videos : []).slice(0, 14).forEach((v) => {
         addCandidate({
           id: v.videoId,
@@ -2865,16 +2859,28 @@ app.get('/api/recommendations', async (req, res) => {
       });
     }
 
-    if (raw.length < 6) await addFromSearch((genre || 'pop') + ' music mix');
+    // Mix de YouTube y artistas relacionados (Deezer) EN PARALELO: en Render
+    // yt-dlp puede tardar o estar bloqueado, y no queremos sumar esperas.
+    const mixTask = (async () => {
+      if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return [];
+      try {
+        const { stdout } = await runYtDlpWithFallback([
+          '--flat-playlist', '--dump-single-json', '--no-warnings', '--no-progress',
+          '--playlist-end', '25', '--',
+          `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`
+        ], 8000);
+        return JSON.parse(stdout).entries || [];
+      } catch (e) {
+        console.warn('[Recommendations] mix no disponible:', e.message);
+        return [];
+      }
+    })();
 
-    // 2b) Refuerzo real de variedad: artistas relacionados en Deezer y cada
-    //     tema buscado en YouTube. Sólo si el Mix sigue siendo monotemático.
-    const distinctNow = new Set(
-      raw.filter((x) => !x.isSeed).map((x) => recNorm(x.artist)).filter(Boolean)
-    );
-    if (artist && distinctNow.size < 4) {
+    const relatedTask = (async () => {
+      if (!artist) return [];
       try {
         const related = (await recRelatedArtists(artist)).slice(0, 4);
+        if (!related.length) return [];
         const pools = await Promise.all(related.map(async (rel) => {
           const tops = await recArtistTopTracks(rel.id, 1);
           return tops.map((t) => ({ artist: rel.name, title: t.title, duration: t.duration }));
@@ -2882,7 +2888,7 @@ app.get('/api/recommendations', async (req, res) => {
         const wanted = pools.flat().slice(0, 4);
         const searched = await Promise.all(wanted.map(async (want) => {
           try {
-            const r = await searchWithTimeout((want.artist + ' ' + want.title).trim(), 9000);
+            const r = await searchWithTimeout((want.artist + ' ' + want.title).trim(), 7000);
             const videos = (r && r.videos ? r.videos : []).filter((v) => {
               if (!v || !v.videoId) return false;
               if (recIsJunk(v.title, v.seconds, v.author && v.author.name)) return false;
@@ -2900,10 +2906,26 @@ app.get('/api/recommendations', async (req, res) => {
             };
           } catch (e) { return null; }
         }));
-        searched.filter(Boolean).forEach((e) => addCandidate(e, 'related'));
+        return searched.filter(Boolean);
       } catch (e) {
-        console.warn('[Recommendations] relacionados fallaron:', e.message);
+        console.warn('[Recommendations] relacionados no disponibles:', e.message);
+        return [];
       }
+    })();
+
+    const mixEntries = await mixTask;
+    mixEntries.forEach((e) => addCandidate(e, 'mix'));
+    const relatedEntries = await relatedTask;
+    relatedEntries.forEach((e) => addCandidate(e, 'related'));
+
+    // Sin Mix (Render bloquea yt-dlp a veces): canciones populares del género.
+    // Nunca "music mix", que el filtro descarta por ser recopilatorio.
+    if (raw.length < 6) {
+      await addFromSearch(genre ? (genre + ' songs') : 'popular songs');
+    }
+    // Último recurso: del propio artista, mejor algo que silencio.
+    if (raw.length < 3 && artist) {
+      await addFromSearch(artist + ' songs');
     }
 
     // 3) Diversidad: como máximo 2 por artista y el artista semilla sólo si
