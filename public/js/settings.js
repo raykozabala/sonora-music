@@ -653,6 +653,35 @@
               overflow-y: auto;
               margin-bottom: 14px;
             }
+            .downloads-audit-row {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              gap: 12px;
+              flex-wrap: wrap;
+              padding-top: 6px;
+              border-top: 1px solid var(--color-card-border, rgba(255,255,255,0.08));
+            }
+            .downloads-audit-actions {
+              display: flex;
+              gap: 8px;
+              flex-wrap: wrap;
+            }
+            .download-track-item .dl-badge {
+              display: inline-block;
+              margin-left: 6px;
+              padding: 1px 6px;
+              border-radius: 999px;
+              font-size: 9px;
+              font-weight: 800;
+              letter-spacing: .02em;
+              background: rgba(255, 71, 87, .16);
+              color: #FF8A95;
+            }
+            .download-track-item .dl-badge--ok {
+              background: rgba(46, 213, 115, .14);
+              color: #57E39B;
+            }
             .download-track-item {
               display: flex;
               align-items: center;
@@ -1081,10 +1110,18 @@
                   No hay pistas descargadas para uso offline.
                 </div>
               </div>
-              <div style="display:flex;justify-content:flex-end;">
-                <button class="btn-pill btn-pill--danger" id="btn-clear-all-downloads">
-                  🗑️ Borrar todas las descargas
-                </button>
+              <div class="downloads-audit-row">
+                <span class="setting-label-sub" id="downloads-audit-status">
+                  Comprueba que cada canción tiene audio, portada y letra sin internet.
+                </span>
+                <div class="downloads-audit-actions">
+                  <button class="btn-pill btn-pill--secondary" id="btn-audit-downloads">
+                    🔍 Revisar descargas
+                  </button>
+                  <button class="btn-pill btn-pill--danger" id="btn-clear-all-downloads">
+                    🗑️ Borrar todas
+                  </button>
+                </div>
               </div>
             </div>
           </section>
@@ -1214,7 +1251,7 @@
 
               <h3 class="about-title">Sonora Music</h3>
               <div style="display:flex;align-items:center;gap:10px;margin:6px 0;flex-wrap:wrap;justify-content:center;">
-                <span class="about-version-badge">v7.18.1 (Build 2026)</span>
+                <span class="about-version-badge">v7.19.0 (Build 2026)</span>
                 <button id="btn-check-updates" class="btn-update-action" style="padding:4px 12px;font-size:11px;" title="Buscar nuevas versiones">
                   🔄 Buscar actualizaciones
                 </button>
@@ -2007,12 +2044,18 @@
           const artist = (track && track.artist) || 'Pista no encontrada';
           const artwork = (track && track.artworkUrl) || generateArtwork(id, title);
           const sizeStr = rec.size ? formatBytes(rec.size) : ((track && track.fileSize) ? formatBytes(track.fileSize) : '—');
+          const hasLyrics = !!(track && (track.syncedLyrics || track.lyrics));
+          const hasCover = !!(track && String(track.artworkUrl || '').indexOf('data:') === 0);
+          const badges = track
+            ? `<span class="dl-badge${hasCover ? ' dl-badge--ok' : ''}">${hasCover ? '✓' : '✕'} portada</span>` +
+              `<span class="dl-badge${hasLyrics ? ' dl-badge--ok' : ''}">${hasLyrics ? '✓' : '✕'} letra</span>`
+            : '';
           return `
             <div class="download-track-item">
               <img src="${artwork}" class="download-track-img" alt="" />
               <div class="download-track-info">
                 <div class="download-track-name">${escapeHtml(title)}</div>
-                <div class="download-track-artist">${escapeHtml(artist)} • ${sizeStr}</div>
+                <div class="download-track-artist">${escapeHtml(artist)} • ${sizeStr}${badges}</div>
               </div>
               <button class="btn-delete-download" data-track-id="${escapeHtml(id)}" data-record-id="${escapeHtml(rec.id || '')}" title="Eliminar descarga">
                 🗑️
@@ -2051,6 +2094,50 @@
       };
 
       await renderDownloadsUI();
+
+      const btnAudit = $('#btn-audit-downloads');
+      const auditStatus = $('#downloads-audit-status');
+      if (btnAudit) {
+        addTrackedListener(btnAudit, 'click', async () => {
+          if (!Sonora.Download || typeof Sonora.Download.repairOffline !== 'function') {
+            showToast('La revisión de descargas no está disponible', 'error');
+            return;
+          }
+          btnAudit.disabled = true;
+          const original = btnAudit.textContent;
+          btnAudit.textContent = '⏳ Revisando…';
+          if (auditStatus) auditStatus.textContent = 'Comprobando audio, portada y letra de cada descarga…';
+          try {
+            const report = await Sonora.Download.repairOffline();
+            await renderDownloadsUI();
+            const bad = (report.total || 0) - (report.healthy || 0);
+            if (auditStatus) {
+              auditStatus.textContent = report.total === 0
+                ? 'No hay descargas que revisar.'
+                : (bad === 0
+                  ? `✓ ${report.total} descargas correctas: audio, portada y letra listos sin internet.`
+                  : `${report.total} descargas · ${report.healthy} correctas · ${bad} incompletas ` +
+                    `(${report.missingAudio.length} sin audio, ${report.missingCovers.length} sin portada, ` +
+                    `${report.missingLyrics.length} sin letra). Pulsa la canción para reintentar.`);
+            }
+            showToast(bad === 0
+              ? `✓ ${report.total} descargas verificadas`
+              : `Revisión terminada: ${bad} descargas necesitan atención`,
+              bad === 0 ? 'success' : 'warning');
+
+            if (report.incomplete && report.incomplete.length) {
+              window.__sonoraDownloadIssues = report.incomplete;
+            }
+          } catch (e) {
+            console.warn('[Settings] audit downloads error', e);
+            showToast('No se pudieron revisar las descargas', 'error');
+            if (auditStatus) auditStatus.textContent = 'La revisión falló. Inténtalo de nuevo.';
+          } finally {
+            btnAudit.disabled = false;
+            btnAudit.textContent = original;
+          }
+        });
+      }
 
       if (btnClearAll) {
         addTrackedListener(btnClearAll, 'click', async () => {

@@ -1477,3 +1477,180 @@
   color: #FF5252;
   border-color: rgba(255, 82, 82, 0.25);
 }
+
+/* ==========================================================================
+   Modo vídeo de fondo + estado sin letra (v7.19.0)
+   ========================================================================== */
+
+/* El vídeo ocupa toda la pantalla, silenciado; el audio sigue siendo el del
+   reproductor de Sonora, así que la letra y los controles no se duplican. */
+#fullscreen-overlay.is-video-bg .fs-bg-ambient {
+  opacity: .18;
+}
+
+#fullscreen-overlay.is-video-bg .fs-video-container {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  background: #000;
+  pointer-events: none;
+}
+
+#fullscreen-overlay.is-video-bg .fs-video-bg-media {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: .92;
+}
+
+#fullscreen-overlay.is-video-bg .fs-video-container::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 90% at 20% 20%, rgba(0, 0, 0, .05), rgba(0, 0, 0, .45) 65%),
+    linear-gradient(90deg, rgba(0, 0, 0, .08) 0%, rgba(0, 0, 0, .5) 55%, rgba(0, 0, 0, .72) 100%);
+  pointer-events: none;
+}
+
+#fullscreen-overlay.is-video-bg .fs-showcase {
+  position: relative;
+  z-index: 6;
+}
+
+#fullscreen-overlay.is-video-bg .fs-artwork-card {
+  background: transparent;
+  box-shadow: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#fullscreen-overlay.is-video-bg .fs-lyrics-col {
+  position: relative;
+  z-index: 3;
+  padding: 22px 26px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(10, 10, 16, .38), rgba(10, 10, 16, .62));
+  border: 1px solid rgba(255, 255, 255, .08);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+}
+
+#fullscreen-overlay.is-video-bg .fs-header,
+#fullscreen-overlay.is-video-bg .fs-controls-bar {
+  z-index: 8;
+}
+
+/* Respaldo cuando el vídeo no se puede resolver */
+.fs-video-fallback {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: #07070c;
+  z-index: 0;
+  padding: 24px;
+  text-align: center;
+}
+
+.fs-video-fallback img {
+  width: min(42vh, 320px);
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 22px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .7);
+  opacity: .75;
+}
+
+.fs-video-fallback__msg {
+  max-width: 420px;
+  color: rgba(255, 255, 255, .78);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.fs-video-fallback__retry {
+  border: 1px solid rgba(255, 255, 255, .22);
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+  border-radius: 999px;
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.fs-video-fallback__retry:hover {
+  background: rgba(255, 255, 255, .2);
+}
+
+/* Estado "sin letra": portada centrada y botón de reintento al lado. */
+.fs-nolyrics {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 26px 8px;
+  text-align: center;
+}
+
+.fs-nolyrics__cover {
+  width: min(30vh, 190px);
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 20px;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, .55);
+  margin-bottom: 6px;
+}
+
+.fs-nolyrics__disc {
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 3rem;
+  background: radial-gradient(circle at 35% 30%, #33374d, #12131d 70%);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, .55);
+  margin-bottom: 6px;
+}
+
+.fs-nolyrics__title {
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: #fff;
+}
+
+.fs-nolyrics__sub {
+  font-size: 1.1rem;
+  color: rgba(255, 255, 255, .62);
+}
+
+.fs-nolyrics__hint {
+  max-width: 320px;
+  font-size: .95rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, .38);
+}
+
+.fs-nolyrics__retry {
+  margin-top: 8px;
+  border: 1px solid rgba(255, 255, 255, .22);
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+  border-radius: 999px;
+  padding: 8px 20px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.fs-nolyrics__retry:hover {
+  background: rgba(255, 255, 255, .2);
+}

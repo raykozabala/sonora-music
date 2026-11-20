@@ -416,7 +416,7 @@
     /**
      * Get related music recommendations for continuous autoplay
      */
-    getRecommendations: function (artist, title, genre, excludeTitles) {
+    getRecommendations: function (artist, title, genre, excludeTitles, videoId) {
       // En Modo Dispositivo no hay servidor activo: usamos la nube de Sonora
       // para que Inicio/Discover sigan teniendo recomendaciones reales.
       var base = this.getMediaBase();
@@ -425,6 +425,7 @@
         + '?artist=' + encodeURIComponent(artist || '')
         + '&title=' + encodeURIComponent(title || '')
         + '&genre=' + encodeURIComponent(genre || '')
+        + '&videoId=' + encodeURIComponent(videoId || '')
         + '&exclude=' + encodeURIComponent((excludeTitles || []).join('|'));
       return fetchWithTimeout(url, {}, 12000)
         .then(function (res) {

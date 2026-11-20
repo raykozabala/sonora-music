@@ -342,12 +342,64 @@
     return base + '/#/playlists/join?code=' + encodeURIComponent(normalizeCollabCode(code));
   }
 
-  /** Compartir una playlist (código de invitación si es colaborativa) */
+  /**
+   * Convierte una playlist privada en una copia colaborativa en la nube para
+   * poder compartir un enlace que SÍ abre la playlist en la app. Devuelve el
+   * código o '' si no se pudo publicar.
+   */
+  async function ensureShareablePlaylist(pl) {
+    if (!pl) return '';
+    if (pl.code) return normalizeCollabCode(pl.code);
+    if (!(Sonora.API && typeof Sonora.API.createCollaborativePlaylist === 'function')) return '';
+
+    var tracks = [];
+    try {
+      for (var i = 0; i < (pl.trackIds || []).length; i++) {
+        var t = await Sonora.DB.tracks.getById(pl.trackIds[i]);
+        if (t && isShareableTrack(t)) tracks.push(t);
+      }
+    } catch (e) {}
+
+    var allocation = await Sonora.API.createCollaborativePlaylist({
+      name: pl.name,
+      description: pl.description || 'Compartida desde Sonora Music',
+      tracks: tracks
+    });
+    if (!allocation || !allocation.code) return '';
+
+    var code = String(allocation.code).toUpperCase();
+    pl.isCollaborative = 1;
+    pl.code = code;
+    pl.joined = 1;
+    pl.userCreated = 1;
+    pl.pendingPublish = 0;
+    pl.syncedAt = new Date().toISOString();
+    pl.publishedAt = pl.syncedAt;
+    try {
+      if (Sonora.DB && Sonora.DB.playlists && typeof Sonora.DB.playlists.update === 'function') {
+        await Sonora.DB.playlists.update(pl);
+      }
+    } catch (e) {}
+    return code;
+  }
+
+  /** Compartir una playlist: crea el enlace en la nube si aún no existe. */
   async function sharePlaylist(pl) {
-    var isCollab = !!(pl.isCollaborative || pl.code);
-    if (!isCollab || !pl.code) {
-      shareText('Sonora Music', '🎧 Escucha mi playlist "' + pl.name + '" en Sonora Music.');
-      return;
+    if (!pl) return;
+
+    if (!pl.code) {
+      showToast('Creando un enlace para compartir…', 'info');
+      try {
+        await ensureShareablePlaylist(pl);
+      } catch (e) {
+        console.warn('[Playlists] no se pudo publicar para compartir:', (e && e.message) || e);
+      }
+      if (!pl.code) {
+        showToast('Sin conexión no se puede crear el enlace. Se compartirá solo el texto.', 'error');
+        shareText('Sonora Music', '🎧 Escucha mi playlist "' + pl.name + '" en Sonora Music.');
+        return;
+      }
+      notifyPlaylistsChanged();
     }
 
     var code = normalizeCollabCode(pl.code);
@@ -1057,21 +1109,36 @@
 
   // Helper to generate playlist mosaic or artwork HTML
   function renderMosaicHtml(tracks, playlist) {
-    if (playlist.artworkUrl && playlist.artworkUrl.trim()) {
-      return `<img src="${escapeHtml(playlist.artworkUrl)}" class="playlist-cover-img" alt="${escapeHtml(playlist.name)}" loading="lazy" />`;
+    const artUrl = String((playlist && playlist.artworkUrl) || '');
+    // Una portada subida por el usuario manda. Las carátulas remotas de
+    // playlists importadas se sustituyen por el mosaico de sus 4 canciones.
+    if (artUrl.indexOf('data:') === 0) {
+      return `<img src="${escapeHtml(artUrl)}" class="playlist-cover-img" alt="${escapeHtml(playlist.name)}" loading="lazy" />`;
     }
-    const validTracksWithArt = (tracks || []).filter(t => t && t.artworkUrl);
-    if (validTracksWithArt.length >= 4) {
+
+    const withArt = (tracks || []).filter(t => t && t.artworkUrl);
+    // Primero las descargadas (su portada ya es un data URL y se ve sin red).
+    const ordered = withArt.slice().sort((a, b) => {
+      const aOff = a.isDownloaded ? 1 : 0;
+      const bOff = b.isDownloaded ? 1 : 0;
+      return bOff - aOff;
+    });
+
+    if (ordered.length >= 4) {
       return `
-        <div class="mosaic-grid">
-          <img src="${escapeHtml(validTracksWithArt[0].artworkUrl)}" alt="" loading="lazy" />
-          <img src="${escapeHtml(validTracksWithArt[1].artworkUrl)}" alt="" loading="lazy" />
-          <img src="${escapeHtml(validTracksWithArt[2].artworkUrl)}" alt="" loading="lazy" />
-          <img src="${escapeHtml(validTracksWithArt[3].artworkUrl)}" alt="" loading="lazy" />
+        <div class="mosaic-grid" aria-hidden="true">
+          <img src="${escapeHtml(ordered[0].artworkUrl)}" alt="" loading="lazy" />
+          <img src="${escapeHtml(ordered[1].artworkUrl)}" alt="" loading="lazy" />
+          <img src="${escapeHtml(ordered[2].artworkUrl)}" alt="" loading="lazy" />
+          <img src="${escapeHtml(ordered[3].artworkUrl)}" alt="" loading="lazy" />
         </div>
       `;
-    } else if (validTracksWithArt.length > 0) {
-      return `<img src="${escapeHtml(validTracksWithArt[0].artworkUrl)}" class="playlist-cover-img" alt="${escapeHtml(playlist.name)}" loading="lazy" />`;
+    }
+    if (artUrl.trim()) {
+      return `<img src="${escapeHtml(artUrl)}" class="playlist-cover-img" alt="${escapeHtml(playlist.name)}" loading="lazy" />`;
+    }
+    if (ordered.length > 0) {
+      return `<img src="${escapeHtml(ordered[0].artworkUrl)}" class="playlist-cover-img" alt="${escapeHtml(playlist.name)}" loading="lazy" />`;
     }
     return `<img src="${generateArtwork(playlist.id || 1, playlist.name)}" class="playlist-cover-img" alt="${escapeHtml(playlist.name)}" loading="lazy" />`;
   }

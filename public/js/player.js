@@ -480,7 +480,8 @@
           track.artist || '',
           track.title || '',
           track.genre || '',
-          exclude
+          exclude,
+          track.videoId || (String(track.id || '').indexOf('yt_') === 0 ? String(track.id).slice(3) : '')
         );
       }
       if (!recs || recs.length === 0) return [];

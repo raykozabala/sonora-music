@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.18.1
+ * Sonora Music Server v7.19.0
  * Triple-mode backend server (Local PC, Render.com & Northflank compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -26,7 +26,7 @@ const isNorthflank = SERVER_MODE === 'northflank';
 // Versión de la aplicación y repositorio oficial de instaladores. El endpoint
 // /api/app/latest usa estos datos para que la app nunca descargue una versión
 // distinta de la que anuncia.
-const APP_VERSION = '7.18.1';
+const APP_VERSION = '7.19.0';
 const APP_REPO = 'raykozabala/sonora-music';
 const APP_RELEASE_BASE = `https://github.com/${APP_REPO}/releases`;
 
@@ -2673,31 +2673,258 @@ app.get('/api/download/external', rateLimit('download', 20, 60 * 1000), async (r
  * GET /api/recommendations?artist=...&title=...
  * Continuous autoplay / radio recommendations for related tracks
  */
+/**
+ * Recomendaciones parecidas a Spotify.
+ *
+ * Antes se buscaba "<artista> top songs" y salía casi siempre el mismo artista.
+ * Ahora se parte del Mix/Radio de YouTube (el mismo motor de "siguientes" que
+ * usa YouTube Music), se descartan el título actual y lo que ya está en cola,
+ * y se limita la repetición de un mismo artista. Si el Mix falla, se cae a
+ * búsquedas de radio/género. Se cachea 20 minutos por semilla.
+ */
+const REC_CACHE = new Map();
+const REC_TTL = 20 * 60 * 1000;
+
+function recNorm(text) {
+  return String(text || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\b(feat|ft|official|video|audio|lyrics|letra|remaster(ed)?|hd|hq|version)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function recCacheGet(key) {
+  const hit = REC_CACHE.get(key);
+  if (!hit) return null;
+  if (Date.now() > hit.expires) { REC_CACHE.delete(key); return null; }
+  return hit.items;
+}
+
+function recCacheSet(key, items) {
+  if (REC_CACHE.size > 300) {
+    const oldest = REC_CACHE.keys().next().value;
+    if (oldest) REC_CACHE.delete(oldest);
+  }
+  REC_CACHE.set(key, { expires: Date.now() + REC_TTL, items });
+}
+
+/** Descarta recopilatorios, mixes largos y resultados de canales genéricos. */
+function recIsJunk(title, duration, uploader) {
+  const t = String(title || '').toLowerCase();
+  const u = String(uploader || '').toLowerCase();
+  if (!t) return true;
+  if (/(greatest hits|top hits|best of|full album|album completo|playlist|compilation|recopilatorio|mixtape|mashup|1 hour|10 hours|hours of|nonstop|non-stop)/.test(t)) return true;
+  if (/(interview|entrevista|talking about|hablando de|documentary|documental|podcast|reaction|reacci[oó]n|radio session|live on .*radio)/.test(t)) return true;
+  if (/\b(mix|dj set)\b/.test(t) && !/remix/.test(t)) return true;
+  if (Number(duration) > 900 || (Number(duration) > 0 && Number(duration) < 45)) return true;
+  if (/(compilation|records|music hits|top music|playlist)/.test(u) && !/vevo/.test(u)) return true;
+  return false;
+}
+
+/** GET JSON con timeout corto (Deezer/otros servicios públicos). */
+async function recFetchJson(url, timeoutMs) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs || 8000);
+  try {
+    const resp = await fetch(url, { signal: ctrl.signal, headers: { 'Accept': 'application/json' } });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Artistas parecidos vía Deezer (API pública, sin clave). Devuelve una lista
+ * de nombres; es la pieza que evita que todo sea "más del mismo artista".
+ */
+async function recRelatedArtists(artist) {
+  if (!artist) return [];
+  const search = await recFetchJson(
+    'https://api.deezer.com/search/artist?q=' + encodeURIComponent(artist) + '&limit=1', 7000);
+  const found = search && Array.isArray(search.data) ? search.data[0] : null;
+  if (!found || !found.id) return [];
+  const rel = await recFetchJson('https://api.deezer.com/artist/' + found.id + '/related?limit=12', 7000);
+  const list = rel && Array.isArray(rel.data) ? rel.data : [];
+  return list
+    .map((a) => ({ id: a.id, name: a.name }))
+    .filter((a) => a.id && a.name && recNorm(a.name) !== recNorm(artist))
+    .slice(0, 8);
+}
+
+/** Top de un artista en Deezer (títulos para buscar luego en YouTube). */
+async function recArtistTopTracks(artistId, limit) {
+  const data = await recFetchJson(
+    'https://api.deezer.com/artist/' + artistId + '/top?limit=' + (limit || 3), 7000);
+  const list = data && Array.isArray(data.data) ? data.data : [];
+  return list.map((t) => ({ title: t.title || '', duration: Number(t.duration) || 0 })).filter((t) => t.title);
+}
+
 app.get('/api/recommendations', async (req, res) => {
   try {
-    const artist = (req.query.artist || '').trim();
-    const title = (req.query.title || '').trim();
-    const query = artist ? `${artist} top songs` : (title ? `${title} related songs` : 'rock pop hits');
+    const artist = String(req.query.artist || '').trim();
+    const title = String(req.query.title || '').trim();
+    const genre = String(req.query.genre || '').trim();
+    const videoId = String(req.query.videoId || '').trim();
+    const excludes = String(req.query.exclude || '')
+      .split('|').map(recNorm).filter(Boolean);
+    const excludeSet = new Set(excludes);
+    const seedKey = recNorm(artist + ' ' + title);
+    const cacheKey = [seedKey, recNorm(genre), videoId].join('::');
 
-    const yts = require('yt-search');
-    const r = await yts(query);
-    const items = [];
-    if (r && r.videos && r.videos.length > 0) {
-      for (const v of r.videos.slice(0, 8)) {
-        items.push({
-          id: 'yt_' + v.videoId,
-          videoId: v.videoId,
-          title: v.title,
-          artist: v.author ? v.author.name : (artist || 'Música recomendada'),
-          duration: v.seconds || 210,
-          durationText: v.timestamp || '3:30',
-          thumbnail: v.thumbnail || `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
-          platform: 'youtube',
-          url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`
-        });
+    const cached = recCacheGet(cacheKey);
+    if (cached) {
+      res.set('Cache-Control', 'public, max-age=300');
+      return res.json(cached);
+    }
+
+    const seedArtist = recNorm(artist);
+    const seedTitle = recNorm(title);
+    const seen = new Set();
+    const seenSongs = new Set();
+    const raw = [];
+
+    function addCandidate(entry, source) {
+      if (!entry || !entry.id) return;
+      const id = String(entry.id);
+      if (!/^[A-Za-z0-9_-]{6,}$/.test(id)) return;
+      if (seen.has(id)) return;
+      if (videoId && id === videoId) return;
+      const cleanTitle = String(entry.title || '').replace(/\s+/g, ' ').trim();
+      if (!cleanTitle) return;
+      const normTitle = recNorm(cleanTitle);
+      if (!normTitle || normTitle === seedTitle) return;
+      // Nunca recomendar la misma canción (ni una versión/cover de ella).
+      if (seedTitle && normTitle.includes(seedTitle)) return;
+      if (excludeSet.has(normTitle)) return;
+      // Deduplicar versiones de la misma canción (Live, Visualizer, Lyrics…).
+      const songKey = normTitle
+        .replace(/\b(live|visualizer|lyrics|letra|official|video|audio|remaster|remastered|version|unplugged|mtv|hd|hq)\b/g, ' ')
+        .replace(/\s+/g, ' ').trim();
+      if (songKey && seenSongs.has(songKey)) return;
+      seen.add(id);
+      if (songKey) seenSongs.add(songKey);
+      const uploader = String(entry.uploader || entry.channel || entry.artist || '').trim() || 'YouTube Music';
+      // Si el título o el canal mencionan al artista semilla, cuenta como
+      // "mismo artista" aunque el canal sea una re-subida con otro nombre.
+      const haystack = recNorm(cleanTitle + ' ' + uploader);
+      const isSeed = !!(seedArtist && haystack.includes(seedArtist));
+      raw.push({
+        id: 'yt_' + id,
+        videoId: id,
+        title: cleanTitle,
+        artist: uploader,
+        isSeed: isSeed,
+        duration: Number(entry.duration) || 0,
+        thumbnail: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+        platform: 'youtube',
+        url: `https://www.youtube.com/watch?v=${id}`,
+        source: source || 'mix'
+      });
+    }
+
+    // 1) Mix/Radio de YouTube para la canción que está sonando.
+    if (/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+      try {
+        const { stdout } = await runYtDlpWithFallback([
+          '--flat-playlist', '--dump-single-json', '--no-warnings', '--no-progress',
+          '--playlist-end', '25', '--',
+          `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`
+        ], 30000);
+        const info = JSON.parse(stdout);
+        (info.entries || []).forEach((e) => addCandidate(e, 'mix'));
+      } catch (e) {
+        console.warn('[Recommendations] mix falló:', e.message);
       }
     }
-    res.json(items);
+
+    // 2) Radio por artista (si el mix no dio suficiente).
+    const yts = require('yt-search');
+    async function addFromSearch(query) {
+      if (!query || raw.length >= 18) return;
+      try {
+        const r = await yts(query);
+        (r && r.videos ? r.videos : []).slice(0, 14).forEach((v) => {
+          addCandidate({
+            id: v.videoId,
+            title: v.title,
+            uploader: v.author ? v.author.name : '',
+            duration: v.seconds
+          }, 'search');
+        });
+      } catch (e) {}
+    }
+
+    if (raw.length < 10 && artist) await addFromSearch(artist + ' radio');
+    if (raw.length < 10 && artist) await addFromSearch('artists like ' + artist);
+    if (raw.length < 8) await addFromSearch((genre || 'pop') + ' music mix');
+
+    // 2b) Refuerzo real de variedad: artistas relacionados en Deezer y cada
+    //     tema buscado en YouTube. Sólo si el Mix sigue siendo monotemático.
+    const distinctNow = new Set(
+      raw.filter((x) => !x.isSeed).map((x) => recNorm(x.artist)).filter(Boolean)
+    );
+    if (artist && distinctNow.size < 4) {
+      try {
+        const related = (await recRelatedArtists(artist)).slice(0, 5);
+        const pools = await Promise.all(related.map(async (rel) => {
+          const tops = await recArtistTopTracks(rel.id, 2);
+          return tops.map((t) => ({ artist: rel.name, title: t.title, duration: t.duration }));
+        }));
+        const wanted = pools.flat().slice(0, 8);
+        const searched = await Promise.all(wanted.map(async (want) => {
+          try {
+            const r = await yts((want.artist + ' ' + want.title).trim());
+            const videos = (r && r.videos ? r.videos : []).filter((v) => {
+              if (!v || !v.videoId) return false;
+              if (recIsJunk(v.title, v.seconds, v.author && v.author.name)) return false;
+              if (want.duration && v.seconds && Math.abs(v.seconds - want.duration) > 45) return false;
+              return true;
+            });
+            const v = videos[0];
+            if (!v) return null;
+            return {
+              id: v.videoId,
+              title: v.title,
+              uploader: want.artist,
+              duration: v.seconds,
+              source: 'related'
+            };
+          } catch (e) { return null; }
+        }));
+        searched.filter(Boolean).forEach((e) => addCandidate(e, 'related'));
+      } catch (e) {
+        console.warn('[Recommendations] relacionados fallaron:', e.message);
+      }
+    }
+
+    // 3) Diversidad: como máximo 2 por artista y el artista semilla sólo si
+    //    no hay suficientes resultados distintos (antes se repetía siempre).
+    const perArtist = new Map();
+    const primary = [];
+    const sameArtist = [];
+    for (const item of raw) {
+      if (recIsJunk(item.title, item.duration, item.artist)) continue;
+      if (item.isSeed) { sameArtist.push(item); continue; }
+      const a = recNorm(item.artist);
+      if (!a) { primary.push(item); continue; }
+      const count = perArtist.get(a) || 0;
+      if (count >= 2) continue;
+      perArtist.set(a, count + 1);
+      primary.push(item);
+    }
+
+    // Como mucho 2 del artista semilla: el resto debe sonar a otra cosa.
+    let selected = primary.slice(0, 10);
+    if (selected.length < 10) selected = selected.concat(sameArtist.slice(0, 2));
+    selected = selected.slice(0, 10);
+
+    recCacheSet(cacheKey, selected);
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json(selected);
   } catch (err) {
     console.warn('[Recommendations] error:', err.message);
     res.json([]);

@@ -452,9 +452,11 @@
       var toggleBtn = $('#fs-mode-toggle-btn');
       var videoContainer = $('#fs-video-container');
       var artworkImg = $('#fs-artwork-img');
+      var overlay = $('#fullscreen-overlay');
 
       if (toggleBtn) toggleBtn.classList.toggle('active', this.isVideoMode);
       if (label) label.textContent = this.isVideoMode ? 'Modo Música' : 'Modo Video';
+      if (overlay) overlay.classList.toggle('is-video-bg', this.isVideoMode);
 
       if (this.isVideoMode) {
         if (artworkImg) artworkImg.classList.add('hidden');
@@ -463,36 +465,107 @@
           this.mountVideoPlayer();
         }
       } else {
+        this.stopBackgroundVideo();
         if (artworkImg) artworkImg.classList.remove('hidden');
-        if (videoContainer) videoContainer.classList.add('hidden');
+        if (videoContainer) {
+          videoContainer.classList.add('hidden');
+          videoContainer.innerHTML = '';
+        }
       }
     },
 
+    /** Detiene y libera el video de fondo (sin tocar el audio). */
+    stopBackgroundVideo: function () {
+      if (this._videoTimer) {
+        clearInterval(this._videoTimer);
+        this._videoTimer = null;
+      }
+      if (this._videoEl) {
+        try { this._videoEl.pause(); } catch (e) {}
+        try { this._videoEl.removeAttribute('src'); this._videoEl.load(); } catch (e) {}
+        this._videoEl = null;
+      }
+    },
+
+    /**
+     * Video de fondo con el proxy de Sonora (mismo audio que el reproductor,
+     * por eso va silenciado). Evita el iframe de YouTube, que en videos
+     * musicales devuelve errores 101/103/150 y sólo ofrece "Ver en YouTube".
+     */
     mountVideoPlayer: function () {
       var container = $('#fs-video-container');
       var track = Sonora.Player ? Sonora.Player.getCurrentTrack() : null;
       if (!container || !track) return;
 
+      this.stopBackgroundVideo();
+
       var vidId = track.videoId || (track.id && String(track.id).startsWith('yt_') ? String(track.id).replace('yt_', '') : '');
-      if (vidId) {
-        container.innerHTML = `
-          <iframe
-            src="https://www.youtube-nocookie.com/embed/${vidId}?autoplay=1&enablejsapi=1&playsinline=1"
-            title="Video Player"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowfullscreen>
-          </iframe>
-        `;
-      } else if (track.streamUrl) {
-        container.innerHTML = `
-          <video src="${track.streamUrl}" controls autoplay playsinline style="width:100%;height:100%;object-fit:contain;"></video>
-        `;
-      } else {
-        container.innerHTML = `
-          <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#fff;font-size:14px;">
-            🎬 Video no disponible para esta canción
-          </div>
-        `;
+      var base = (Sonora.API && Sonora.API.getMediaBase) ? String(Sonora.API.getMediaBase() || '').replace(/\/+$/, '') : '';
+
+      if (!vidId || !base) {
+        this.showVideoFallback('Esta canción no tiene vídeo. La letra sigue disponible.');
+        return;
+      }
+
+      var self = this;
+      var video = document.createElement('video');
+      video.className = 'fs-video-bg-media';
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.setAttribute('playsinline', '');
+      video.preload = 'auto';
+      video.src = base + '/api/video/stream?url=' +
+        encodeURIComponent('https://www.youtube.com/watch?v=' + vidId) +
+        '&mode=video&quality=480p';
+
+      video.addEventListener('canplay', function () {
+        video.play().catch(function () {});
+      });
+      video.addEventListener('error', function () {
+        self.showVideoFallback('No se pudo cargar el vídeo. Puedes seguir escuchando con la letra.');
+      });
+
+      container.innerHTML = '';
+      container.appendChild(video);
+      this._videoEl = video;
+
+      // Mantiene el vídeo alineado con el audio sin pelearse con el usuario.
+      this._videoTimer = setInterval(function () { self.syncBackgroundVideo(); }, 4000);
+      this.syncBackgroundVideo(true);
+    },
+
+    syncBackgroundVideo: function (force) {
+      var video = this._videoEl;
+      if (!video || !Sonora.Player) return;
+      try {
+        var prog = Sonora.Player.getProgress ? Sonora.Player.getProgress() : null;
+        var playing = Sonora.Player.isPlaying ? Sonora.Player.isPlaying() : true;
+        if (!prog) return;
+        if (force || Math.abs((video.currentTime || 0) - (prog.current || 0)) > 2.5) {
+          video.currentTime = Math.max(0, prog.current || 0);
+        }
+        if (playing && video.paused) video.play().catch(function () {});
+        if (!playing && !video.paused) video.pause();
+      } catch (e) {}
+    },
+
+    showVideoFallback: function (message) {
+      var container = $('#fs-video-container');
+      if (!container) return;
+      var track = Sonora.Player ? Sonora.Player.getCurrentTrack() : null;
+      var art = (track && track.artworkUrl) || '';
+      this.stopBackgroundVideo();
+      container.innerHTML =
+        '<div class="fs-video-fallback">' +
+          (art ? '<img src="' + escHtml(art) + '" alt="" />' : '') +
+          '<div class="fs-video-fallback__msg">' + escHtml(message) + '</div>' +
+          '<button type="button" class="fs-video-fallback__retry" id="fs-video-retry">🔄 Reintentar vídeo</button>' +
+        '</div>';
+      var retry = container.querySelector('#fs-video-retry');
+      if (retry) {
+        var self = this;
+        retry.addEventListener('click', function () { self.mountVideoPlayer(); });
       }
     },
 
@@ -521,6 +594,20 @@
       var hasVid = !!(track.videoId || (track.id && String(track.id).startsWith('yt_')));
       if (toggleBtn) {
         toggleBtn.style.display = hasVid ? 'inline-flex' : 'none';
+      }
+      var label = $('#fs-mode-toggle-label');
+      if (this.isVideoMode) {
+        if (hasVid) this.mountVideoPlayer();
+        else {
+          this.isVideoMode = false;
+          var overlayEl = $('#fullscreen-overlay');
+          if (overlayEl) overlayEl.classList.remove('is-video-bg');
+          if (artImg) artImg.classList.remove('hidden');
+          var vc = $('#fs-video-container');
+          if (vc) { vc.classList.add('hidden'); vc.innerHTML = ''; }
+          if (label) label.textContent = 'Modo Video';
+          if (toggleBtn) toggleBtn.classList.remove('active');
+        }
       }
 
       // Load lyrics
@@ -715,13 +802,17 @@
       this.currentLyrics = [];
       this.activeLyricIndex = -1;
 
+      var cover = (track && (track.artworkUrl || track.thumbnail)) || '';
       container.innerHTML =
-        '<div style="text-align:center;padding:40px 0;color:rgba(255,255,255,0.5);">' +
-          '<div style="font-size:3rem;margin-bottom:14px;">🎶</div>' +
-          '<div style="font-size:1.8rem;font-weight:700;color:#fff;">Sintiendo el ritmo</div>' +
-          '<div style="font-size:1.2rem;margin-top:6px;margin-bottom:18px;">No hay letra disponible para esta canción</div>' +
-          '<button id="fs-retry-lyrics-btn" class="btn" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:20px;padding:6px 18px;font-size:12px;font-weight:700;cursor:pointer;">' +
-            '🔄 Reintentar búsqueda de letra' +
+        '<div class="fs-nolyrics">' +
+          (cover
+            ? '<img class="fs-nolyrics__cover" src="' + escHtml(cover) + '" alt="" />'
+            : '<div class="fs-nolyrics__disc">🎶</div>') +
+          '<div class="fs-nolyrics__title">' + escHtml((track && track.title) || 'Sonora Music') + '</div>' +
+          '<div class="fs-nolyrics__sub">Sin letra disponible · modo instrumental</div>' +
+          '<div class="fs-nolyrics__hint">La canción sigue sonando. Si aparece una letra nueva, puedes reintentar.</div>' +
+          '<button id="fs-retry-lyrics-btn" class="fs-nolyrics__retry" type="button">' +
+            '🔄 Reintentar letra' +
           '</button>' +
         '</div>';
 

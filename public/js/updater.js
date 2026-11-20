@@ -8,7 +8,7 @@
 
   var Sonora = window.Sonora = window.Sonora || {};
 
-  var CURRENT_VERSION = '7.18.1';
+  var CURRENT_VERSION = '7.19.0';
   // Las releases reales (APK/DMG) se publican en este repositorio.
   var GITHUB_REPO = 'raykozabala/sonora-music';
   var RELEASE_BASE = 'https://github.com/' + GITHUB_REPO + '/releases';

@@ -374,6 +374,47 @@
     }
   }
 
+  /** Busca una pista probando el id tal cual, numérico y como texto. */
+  async function findTrackAnyId(trackId) {
+    if (!(Sonora.DB && Sonora.DB.tracks)) return null;
+    var keys = [trackId];
+    var numeric = Number(trackId);
+    if (!isNaN(numeric) && keys.indexOf(numeric) === -1) keys.push(numeric);
+    var asText = String(trackId);
+    if (keys.indexOf(asText) === -1) keys.push(asText);
+    for (var i = 0; i < keys.length; i++) {
+      var found = await Sonora.DB.tracks.getById(keys[i]).catch(function () { return null; });
+      if (found) return found;
+    }
+    try {
+      var all = await Sonora.DB.tracks.getAll();
+      return (all || []).find(function (t) { return String(t.id) === asText; }) || null;
+    } catch (e) { return null; }
+  }
+
+  /** Letra desde el servidor; devuelve {synced, plain} o null. */
+  async function fetchLyricsFor(track) {
+    if (!track || !navigator.onLine) return null;
+    var base = '';
+    try {
+      if (Sonora.API && typeof Sonora.API.getMediaBase === 'function') base = Sonora.API.getMediaBase() || '';
+      if (!base && Sonora.API && typeof Sonora.API.getActiveUrl === 'function') base = Sonora.API.getActiveUrl() || '';
+    } catch (e) {}
+    base = String(base || 'https://sonora-music-b1ee.onrender.com').replace(/\/+$/, '');
+    try {
+      var url = base + '/api/lyrics?artist=' + encodeURIComponent(track.artist || '') +
+        '&title=' + encodeURIComponent(track.title || '');
+      var resp = await fetch(url);
+      if (!resp.ok) return null;
+      var data = await resp.json();
+      if (!data) return null;
+      return {
+        synced: data.syncedLyrics || '',
+        plain: data.plainLyrics || ''
+      };
+    } catch (e) { return null; }
+  }
+
   Sonora.Download = {
     /**
      * Guarda un archivo de texto (p. ej. la letra) en el teléfono.
@@ -581,6 +622,10 @@
           } catch (lrcErr) {}
 
           var trackId = track.id || ('dl_' + Date.now());
+          var remoteArt = track.thumbnail || track.artworkUrl || '';
+          // Carátula como data URL: sin esto las portadas desaparecían en
+          // modo avión y las playlists se quedaban sin mosaico.
+          var coverData = await fetchThumbnailData(remoteArt);
           var newTrack = {
             id: trackId,
             title: title,
@@ -589,7 +634,8 @@
             albumId: track.albumId || 1,
             artistId: track.artistId || 1,
             duration: track.duration || 215,
-            artworkUrl: track.thumbnail || track.artworkUrl || '',
+            artworkUrl: coverData || remoteArt,
+            coverSourceUrl: remoteArt,
             sourceUrl: targetUrl,
             streamUrl: (Sonora.API && typeof Sonora.API.externalStreamUrl === 'function')
               ? Sonora.API.externalStreamUrl(targetUrl)
@@ -608,7 +654,22 @@
           };
 
           if (Sonora.DB && Sonora.DB.tracks) {
-            await Sonora.DB.tracks.add(newTrack).catch(function () {});
+            var existing = await findTrackAnyId(trackId);
+            if (existing) {
+              // No pisar datos del usuario (favorito, historial) y conservar
+              // letra/portada si la descarga nueva no las consiguió.
+              var merged = Object.assign({}, newTrack, existing, {
+                id: existing.id,
+                isDownloaded: 1,
+                lyrics: syncedLyrics || plainLyrics || existing.lyrics || '',
+                syncedLyrics: syncedLyrics || existing.syncedLyrics || ''
+              });
+              if (coverData) merged.artworkUrl = coverData;
+              else if (existing.artworkUrl) merged.artworkUrl = existing.artworkUrl;
+              await Sonora.DB.tracks.update(merged);
+            } else {
+              await Sonora.DB.tracks.add(newTrack);
+            }
           }
           if (blob && Sonora.DB && Sonora.DB.downloads && Sonora.DB.downloads.save) {
             await Sonora.DB.downloads.save(trackId, blob);
@@ -653,6 +714,110 @@
 
     getActiveDownloads: function () {
       return Object.values(_activeDownloads);
+    },
+
+    /**
+     * Revisa TODAS las descargas offline y repara lo que se pueda:
+     *  - audio presente y con tamaño válido
+     *  - pista marcada como guardada (aunque su id sea yt_...)
+     *  - carátula guardada como data URL (visible sin internet)
+     *  - letra sincronizada descargada
+     * Devuelve un informe para mostrarlo en Ajustes.
+     */
+    repairOffline: async function () {
+      var report = {
+        total: 0,
+        healthy: 0,
+        repaired: 0,
+        missingAudio: [],
+        missingLyrics: [],
+        missingCovers: [],
+        orphans: [],
+        incomplete: [],
+        offline: navigator.onLine === false,
+        checkedAt: new Date().toISOString()
+      };
+
+      if (!(Sonora.DB && Sonora.DB.downloads && Sonora.DB.downloads.getRecords)) return report;
+
+      var records = [];
+      try { records = await Sonora.DB.downloads.getRecords(); } catch (e) { records = []; }
+
+      for (var i = 0; i < records.length; i++) {
+        var rec = records[i] || {};
+        var trackId = rec.trackId != null ? rec.trackId : String(rec.id || '').replace(/^dl_/, '');
+        if (!trackId) continue;
+        report.total++;
+
+        var blob = null;
+        try { blob = await Sonora.DB.downloads.get(trackId); } catch (e) { blob = null; }
+        var audioOk = !!(blob && blob.size && blob.size > 2048);
+
+        var track = await findTrackAnyId(trackId);
+        if (!track) {
+          report.orphans.push({ trackId: trackId, size: rec.size || 0 });
+          continue;
+        }
+
+        var changed = false;
+        var problems = [];
+
+        if (audioOk && !track.isDownloaded) {
+          track.isDownloaded = 1;
+          changed = true;
+        } else if (!audioOk) {
+          if (track.isDownloaded) track.isDownloaded = 0;
+          report.missingAudio.push({ trackId: trackId, title: track.title || '', artist: track.artist || '' });
+          problems.push('audio');
+          changed = true;
+        }
+
+        // Carátula offline
+        var art = String(track.artworkUrl || '');
+        if (!art || art.indexOf('data:') !== 0) {
+          var remote = track.coverSourceUrl || track.thumbnail || (art.indexOf('http') === 0 ? art : '');
+          var coverData = remote ? await fetchThumbnailData(remote) : '';
+          if (coverData) {
+            track.artworkUrl = coverData;
+            track.coverSourceUrl = remote || track.coverSourceUrl || '';
+            changed = true;
+          } else {
+            report.missingCovers.push({ trackId: trackId, title: track.title || '' });
+            problems.push('portada');
+          }
+        }
+
+        // Letra sincronizada
+        if (!track.syncedLyrics && !track.lyrics) {
+          var lyr = await fetchLyricsFor(track);
+          if (lyr && (lyr.synced || lyr.plain)) {
+            track.syncedLyrics = lyr.synced || '';
+            track.lyrics = lyr.plain || lyr.synced || '';
+            changed = true;
+          } else {
+            report.missingLyrics.push({ trackId: trackId, title: track.title || '' });
+            problems.push('letra');
+          }
+        }
+
+        if (changed) {
+          try { await Sonora.DB.tracks.update(track); } catch (e) {}
+          if (problems.length === 0) report.repaired++;
+        }
+
+        if (problems.length === 0) report.healthy++;
+        else report.incomplete.push({
+          trackId: trackId,
+          title: track.title || '',
+          artist: track.artist || '',
+          problems: problems
+        });
+      }
+
+      try {
+        if (Sonora.Store) Sonora.Store.emit('downloadsChanged', { audited: true, report: report });
+      } catch (e) {}
+      return report;
     },
 
     /**

@@ -662,10 +662,23 @@
     downloads: {
       save: function (trackId, blob) {
         return putToStore('downloads', { id: 'dl_' + trackId, trackId: trackId, blob: blob, savedAt: new Date().toISOString() }).then(function () {
+          // El id puede ser numérico (servidor) o texto (yt_..., ext_...).
+          // Antes se ignoraban los de texto y por eso había descargas reales
+          // que la app no mostraba como guardadas.
+          var candidates = [trackId];
           var numeric = Number(trackId);
-          if (isNaN(numeric)) return; // IDs de YouTube (yt_...) no son numéricos
-          return getByIdFromStore('tracks', numeric).then(function (track) {
-            if (track) { track.isDownloaded = 1; return putToStore('tracks', track); }
+          if (!isNaN(numeric) && candidates.indexOf(numeric) === -1) candidates.push(numeric);
+          var asText = String(trackId);
+          if (candidates.indexOf(asText) === -1) candidates.push(asText);
+          return candidates.reduce(function (chain, key) {
+            return chain.then(function (found) {
+              if (found) return found;
+              return getByIdFromStore('tracks', key).catch(function () { return null; });
+            });
+          }, Promise.resolve(null)).then(function (track) {
+            if (!track) return null;
+            track.isDownloaded = 1;
+            return putToStore('tracks', track);
           });
         });
       },

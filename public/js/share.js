@@ -610,8 +610,9 @@
     var name = opts.name || 'Mi playlist';
     var code = opts.code || '';
     var link = opts.link || (code ? playlistLink(code) : '');
-    var text = '🎧 Escucha mi playlist colaborativa "' + name + '" en Sonora Music.' +
-      (code ? '\nCódigo para unirte: ' + code : '');
+    var text = '🎧 Escucha mi playlist "' + name + '" en Sonora Music.' +
+      (code ? '\nCódigo para unirte: ' + code : '') +
+      (link ? '\n' + link : '');
 
     openShareSheet({
       title: 'Compartir playlist',
