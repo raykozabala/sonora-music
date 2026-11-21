@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.19.2
+ * Sonora Music Server v7.19.3
  * Triple-mode backend server (Local PC, Render.com & Northflank compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -26,7 +26,7 @@ const isNorthflank = SERVER_MODE === 'northflank';
 // Versión de la aplicación y repositorio oficial de instaladores. El endpoint
 // /api/app/latest usa estos datos para que la app nunca descargue una versión
 // distinta de la que anuncia.
-const APP_VERSION = '7.19.2';
+const APP_VERSION = '7.19.3';
 const APP_REPO = 'raykozabala/sonora-music';
 const APP_RELEASE_BASE = `https://github.com/${APP_REPO}/releases`;
 
@@ -3002,7 +3002,9 @@ async function spotifyEntity(input) {
       title: title,
       artist: artist,
       duration: Math.round((Number(t.duration) || 0) / 1000),
-      thumbnail: cover
+      thumbnail: cover,
+      // uri = spotify:track:ID → sirve para no duplicar al re-sincronizar.
+      spotifyId: String(t.uri || '').split(':').pop() || ''
     });
   }
   if (!tracks.length && ref.type === 'track') {
@@ -3381,10 +3383,11 @@ function importError(res, e, fallbackStatus) {
 }
 
 /** Importa una playlist/álbum/artista público de Spotify. */
-app.get('/api/import/spotify', rateLimit('import', 30, 60 * 1000), async (req, res) => {
+app.get('/api/import/spotify', rateLimit('import', 120, 60 * 1000), async (req, res) => {
   const url = String(req.query.url || '').trim();
   if (!url) return res.status(400).json({ error: 'Falta el enlace de Spotify', code: 'bad_link' });
-  const cached = importCacheGet('sp:' + url);
+  const fresh = req.query.fresh === '1';
+  const cached = !fresh && importCacheGet('sp:' + url);
   if (cached) return res.json(cached);
   try {
     const data = await spotifyEntity(url);
@@ -3397,10 +3400,11 @@ app.get('/api/import/spotify', rateLimit('import', 30, 60 * 1000), async (req, r
 });
 
 /** Importa una playlist pública de YouTube / YouTube Music. */
-app.get('/api/import/youtube', rateLimit('import', 30, 60 * 1000), async (req, res) => {
+app.get('/api/import/youtube', rateLimit('import', 120, 60 * 1000), async (req, res) => {
   const url = String(req.query.url || '').trim();
   if (!url) return res.status(400).json({ error: 'Falta el enlace de YouTube', code: 'bad_link' });
-  const cached = importCacheGet('yt:' + url);
+  const fresh = req.query.fresh === '1';
+  const cached = !fresh && importCacheGet('yt:' + url);
   if (cached) return res.json(cached);
   try {
     const data = await youtubePlaylist(url);
@@ -3424,7 +3428,7 @@ app.get('/api/import/detect', (req, res) => {
  * Empareja canciones (normalmente de Spotify) con vídeos de YouTube Music.
  * Se hace por lotes desde la app para poder mostrar el progreso real.
  */
-app.post('/api/import/match', rateLimit('import', 60, 60 * 1000), async (req, res) => {
+app.post('/api/import/match', rateLimit('import', 180, 60 * 1000), async (req, res) => {
   const list = req.body && Array.isArray(req.body.tracks) ? req.body.tracks.slice(0, 10) : [];
   if (!list.length) return res.json({ matches: [] });
   const matches = await Promise.all(list.map(async (track) => {

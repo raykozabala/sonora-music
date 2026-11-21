@@ -1227,8 +1227,21 @@
             <div class="setting-label-sub" style="margin-top:12px;line-height:1.65;">
               Sonora <strong>no inicia sesión</strong> en Spotify ni guarda tu contraseña:
               lee la ficha pública del enlace que pegues y busca cada canción en YouTube
-              para reproducirla dentro de Sonora. Puedes quitar una playlist importada
-              cuando quieras; se borra de Sonora, no de tu cuenta.
+              para reproducirla dentro de Sonora. Cuando añadas canciones en Spotify o
+              YouTube Music, pulsa <strong>Actualizar</strong> y Sonora reconstruye la
+              playlist sin duplicar: conserva las descargas, portadas y letras que ya tenía.
+              Puedes quitar una playlist importada cuando quieras; se borra de Sonora, no
+              de tu cuenta.
+            </div>
+
+            <div class="setting-item-row setting-item-row--inline" style="margin-top:12px;">
+              <div class="setting-label-box">
+                <span class="setting-label-title">Mantener copias al día</span>
+                <span class="setting-label-sub" id="import-sync-status">
+                  Vuelve a leer tus enlaces y añade solo lo nuevo.
+                </span>
+              </div>
+              <button class="btn-pill btn-pill--primary" id="btn-sync-all">Actualizar todo</button>
             </div>
 
             <div class="setting-item-row setting-item-row--inline" style="margin-top:12px;">
@@ -1338,7 +1351,7 @@
 
               <h3 class="about-title">Sonora Music</h3>
               <div style="display:flex;align-items:center;gap:10px;margin:6px 0;flex-wrap:wrap;justify-content:center;">
-                <span class="about-version-badge">v7.19.2 (Build 2026)</span>
+                <span class="about-version-badge">v7.19.3 (Build 2026)</span>
                 <button id="btn-check-updates" class="btn-update-action" style="padding:4px 12px;font-size:11px;" title="Buscar nuevas versiones">
                   🔄 Buscar actualizaciones
                 </button>
@@ -2080,6 +2093,49 @@
       if (btnSpotify) addTrackedListener(btnSpotify, 'click', () => openImport('spotify'));
       if (btnYoutube) addTrackedListener(btnYoutube, 'click', () => openImport('youtube'));
 
+      const btnSyncAll = $('#btn-sync-all');
+      if (btnSyncAll) {
+        addTrackedListener(btnSyncAll, 'click', async () => {
+          if (btnSyncAll.disabled) return;
+          const status = $('#import-sync-status');
+          const original = btnSyncAll.textContent;
+          btnSyncAll.disabled = true;
+          btnSyncAll.textContent = 'Actualizando…';
+          if (status) status.textContent = 'Buscando tus playlists importadas…';
+          try {
+            const results = await Sonora.Import.syncAll(null, (index, total, pl) => {
+              if (status) status.textContent = `Actualizando ${index + 1} de ${total}: «${pl.name}»…`;
+            });
+            const ok = results.filter((r) => !r.error);
+            const failed = results.filter((r) => r.error);
+            const added = ok.reduce((sum, r) => sum + (r.added || 0), 0);
+            const totalTracks = ok.reduce((sum, r) => sum + (r.total || 0), 0);
+            if (status) {
+              if (!results.length) {
+                status.textContent = 'No hay playlists importadas que actualizar.';
+              } else if (!ok.length) {
+                const firstError = failed[0] && failed[0].error ? `: ${failed[0].error}` : '';
+                status.textContent = `⚠️ No se pudo actualizar (${failed.length} fallaron)${firstError}`;
+              } else {
+                status.textContent = `✓ ${ok.length} playlist(s) al día · ${totalTracks} canciones · ${added} nueva(s)` +
+                  (failed.length ? ` · ${failed.length} fallaron` : '');
+              }
+            }
+            showToast(ok.length
+              ? `✓ ${ok.length} playlist(s) actualizadas${added ? ` · ${added} canción(es) nueva(s)` : ''}${failed.length ? ` · ${failed.length} fallaron` : ''}`
+              : 'No hay playlists importadas que actualizar',
+              failed.length ? 'warning' : 'success');
+            await render();
+          } catch (e) {
+            if (status) status.textContent = '⚠️ ' + String((e && e.message) || 'No se pudo actualizar');
+            showToast('No se pudieron actualizar las playlists', 'error');
+          } finally {
+            btnSyncAll.disabled = false;
+            btnSyncAll.textContent = original;
+          }
+        });
+      }
+
       const btnPlayback = $('#btn-check-playback');
       const playbackLabel = $('#playback-status-label');
       if (btnPlayback) {
@@ -2133,17 +2189,34 @@
           listEl.innerHTML = '';
           return;
         }
+        const when = (iso) => {
+          if (!iso) return 'sin actualizar todavía';
+          const diff = Date.now() - new Date(iso).getTime();
+          if (!isFinite(diff) || diff < 0) return 'actualizada';
+          const mins = Math.floor(diff / 60000);
+          if (mins < 1) return 'actualizada hace un momento';
+          if (mins < 60) return `actualizada hace ${mins} min`;
+          const hours = Math.floor(mins / 60);
+          if (hours < 24) return `actualizada hace ${hours} h`;
+          const days = Math.floor(hours / 24);
+          return days === 1 ? 'actualizada ayer' : `actualizada hace ${days} días`;
+        };
+
         listEl.innerHTML = all.map((pl) => {
           const count = (pl.trackIds || []).length;
           const cover = pl.artworkUrl || '';
           const source = pl.importedFrom === 'spotify' ? 'Spotify' : 'YouTube Music';
+          const canSync = !!(pl.importedFrom && pl.importSourceUrl);
+          const last = when(pl.lastSyncAt);
+          const added = Number(pl.lastSyncAdded || 0);
           return `
             <div class="import-conn" data-id="${pl.id}">
               ${cover ? `<img src="${cover}" alt="" />` : '<div class="import-conn__meta"></div>'}
               <div class="import-conn__meta">
                 <div class="import-conn__name">${escapeHtml(pl.name || 'Playlist importada')}</div>
-                <div class="import-conn__sub">${source} · ${count} canciones</div>
+                <div class="import-conn__sub">${source} · ${count} canciones · ${last}${added ? ` · +${added} nuevas` : ''}</div>
               </div>
+              ${canSync ? '<button data-act="sync">Actualizar</button>' : ''}
               <button data-act="open">Abrir</button>
               <button data-act="remove">Quitar</button>
             </div>`;
@@ -2153,7 +2226,39 @@
           const id = Number(row.getAttribute('data-id'));
           const openBtn = row.querySelector('[data-act="open"]');
           const removeBtn = row.querySelector('[data-act="remove"]');
+          const syncBtn = row.querySelector('[data-act="sync"]');
           if (openBtn) openBtn.addEventListener('click', () => { location.hash = '#/playlists/' + id; });
+          if (syncBtn) syncBtn.addEventListener('click', async () => {
+            if (syncBtn.disabled) return;
+            const status = $('#import-sync-status');
+            const original = syncBtn.textContent;
+            syncBtn.disabled = true;
+            syncBtn.textContent = 'Actualizando…';
+            if (status) status.textContent = 'Leyendo el enlace y comparando canciones…';
+            try {
+              const nameEl = row.querySelector('.import-conn__name');
+              const currentName = nameEl ? nameEl.textContent : 'playlist';
+              const r = await Sonora.Import.syncPlaylist(id, (done, total) => {
+                if (status) status.textContent = `Actualizando «${currentName}»… ${done} de ${total}`;
+              });
+              if (status) {
+                status.textContent = `✓ «${r.playlist.name}»: ${r.total} canciones` +
+                  (r.added ? ` · ${r.added} nuevas` : ' · sin novedades') +
+                  (r.missing ? ` · ${r.missing} sin vídeo` : '');
+              }
+              showToast(r.added
+                ? `✓ ${r.added} canción(es) nueva(s) en «${r.playlist.name}»`
+                : `✓ «${r.playlist.name}» ya estaba al día`, 'success');
+            } catch (e) {
+              const msg = String((e && e.message) || 'No se pudo actualizar');
+              if (status) status.textContent = '⚠️ ' + msg;
+              showToast(msg, 'error');
+            } finally {
+              syncBtn.disabled = false;
+              syncBtn.textContent = original;
+              await render();
+            }
+          });
           if (removeBtn) removeBtn.addEventListener('click', async () => {
             if (!window.confirm('¿Quitar esta playlist de Sonora?\n\nNo se borra de Spotify ni de YouTube.')) return;
             await Sonora.Import.removePlaylist(id);

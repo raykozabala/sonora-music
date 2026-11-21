@@ -2007,6 +2007,9 @@
             <button class="btn-action btn-action--secondary" id="btn-share-playlist">
               Compartir
             </button>
+            <button class="btn-action btn-action--secondary" id="btn-sync-source" style="display:none;">
+              🔄 Actualizar
+            </button>
             <button class="btn-action btn-action--secondary" id="btn-sync-collab" style="display:none;">
               🔄 Sincronizar
             </button>
@@ -2681,6 +2684,39 @@
           };
         } else {
           codeEl.style.display = 'none';
+        }
+      }
+
+      // Playlist importada de Spotify / YouTube Music: botón para volver a
+      // leer el enlace y traer solo lo nuevo, sin duplicar descargas.
+      const sourceSyncBtn = $('#btn-sync-source');
+      if (sourceSyncBtn) {
+        if (playlist.importedFrom && playlist.importSourceUrl && Sonora.Import &&
+            typeof Sonora.Import.syncPlaylist === 'function') {
+          const sourceName = playlist.importedFrom === 'spotify' ? 'Spotify' : 'YouTube Music';
+          sourceSyncBtn.style.display = 'inline-flex';
+          sourceSyncBtn.textContent = '🔄 Actualizar de ' + sourceName;
+          addTrackedListener(sourceSyncBtn, 'click', async () => {
+            if (sourceSyncBtn.disabled) return;
+            const original = sourceSyncBtn.textContent;
+            sourceSyncBtn.disabled = true;
+            try {
+              const r = await Sonora.Import.syncPlaylist(playlist.id, (done, total) => {
+                sourceSyncBtn.textContent = '⏳ ' + done + ' de ' + total;
+              });
+              showToast(r.added
+                ? `✓ ${r.added} canción(es) nueva(s) de ${sourceName}`
+                : '✓ La playlist ya estaba al día', 'success');
+              if (Sonora.Router && typeof Sonora.Router.refresh === 'function') Sonora.Router.refresh();
+            } catch (e) {
+              showToast(String((e && e.message) || 'No se pudo actualizar la playlist'), 'error');
+            } finally {
+              sourceSyncBtn.disabled = false;
+              sourceSyncBtn.textContent = original;
+            }
+          });
+        } else {
+          sourceSyncBtn.style.display = 'none';
         }
       }
 

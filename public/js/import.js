@@ -63,9 +63,28 @@
     if (!resp.ok) {
       var err = new Error((data && data.error) || ('El servidor respondió HTTP ' + resp.status));
       err.code = (data && data.code) || 'http_' + resp.status;
+      err.status = resp.status;
+      err.retryAfter = Number(data && data.retryAfter) || 0;
       throw err;
     }
     return data;
+  }
+
+  /** Reintenta si el servidor pide esperar (429) al actualizar varias listas. */
+  async function getJsonRetry(path, attempts) {
+    var tries = attempts || 3;
+    for (var a = 0; a < tries; a++) {
+      try {
+        return await getJson(path);
+      } catch (e) {
+        if (e && e.code === 'http_429' && a < tries - 1) {
+          await wait(Math.min((e.retryAfter || 3) * 1000, 8000));
+          continue;
+        }
+        throw e;
+      }
+    }
+    throw new Error('El servidor está ocupado. Inténtalo de nuevo en un minuto.');
   }
 
   async function postJson(path, body) {
@@ -79,6 +98,8 @@
     if (!resp.ok) {
       var err = new Error((data && data.error) || ('El servidor respondió HTTP ' + resp.status));
       err.code = (data && data.code) || 'http_' + resp.status;
+      err.status = resp.status;
+      err.retryAfter = Number(data && data.retryAfter) || 0;
       throw err;
     }
     return data;
@@ -116,21 +137,95 @@
     try { return await Sonora.DB.tracks.getById(id); } catch (e) { return null; }
   }
 
+  /** Normaliza para comparar títulos aunque cambien acentos o «(feat. …)». */
+  function normKey(text) {
+    return String(text || '')
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  }
+
+  function firstArtist(value) {
+    return String(value || '')
+      .split(/\s*(?:,|&|;|\bfeat\.?\b|\bft\.?\b|\bcon\b|\s+x\s+)\s*/i)[0]
+      .trim();
+  }
+
+  function trackKey(title, artist) {
+    var t = normKey(title);
+    var a = normKey(firstArtist(artist));
+    return a ? (t + '::' + a) : t;
+  }
+
+  function wait(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
   /**
-   * Crea (o reutiliza) la pista de Sonora para un vídeo de YouTube.
+   * Índice de todas las pistas del dispositivo. Sirve para reutilizar una
+   * canción ya descargada/favorita en lugar de crear un duplicado cuando la
+   * playlist se actualiza. Se construye una sola vez por sincronización.
+   */
+  async function buildCatalog() {
+    var all = [];
+    try { all = await Sonora.DB.tracks.getAll(); } catch (e) { all = []; }
+    var cat = { all: all || [], byId: {}, bySpotifyId: {}, byVideoId: {}, byKey: {} };
+    (cat.all || []).forEach(function (t) {
+      if (!t || !t.id) return;
+      cat.byId[t.id] = t;
+      if (t.spotifyId && !cat.bySpotifyId[t.spotifyId]) cat.bySpotifyId[t.spotifyId] = t;
+      if (t.videoId && !cat.byVideoId[t.videoId]) cat.byVideoId[t.videoId] = t;
+      var k = trackKey(t.title, t.artist);
+      if (k) {
+        cat.byKey[k] = cat.byKey[k] || [];
+        cat.byKey[k].push(t);
+      }
+    });
+    return cat;
+  }
+
+  function remember(catalog, track) {
+    if (!catalog || !track || !track.id) return;
+    catalog.byId[track.id] = track;
+    if (track.spotifyId) catalog.bySpotifyId[track.spotifyId] = track;
+    if (track.videoId) catalog.byVideoId[track.videoId] = track;
+    var k = trackKey(track.title, track.artist);
+    if (k) {
+      var bucket = catalog.byKey[k] = catalog.byKey[k] || [];
+      if (bucket.indexOf(track) === -1) bucket.push(track);
+    }
+  }
+
+  /**
+   * Crea (o reutiliza) la pista de Sonora para una canción.
    * El id `yt_<videoId>` es el mismo que usa el buscador, así que una canción
    * importada y la misma canción buscada a mano son la misma entrada.
    */
   async function ensureTrack(info, opts) {
     opts = opts || {};
     var videoId = info.videoId || '';
-    var id = videoId ? ('yt_' + videoId) : ('imp_' + Math.abs(hashCode((info.artist || '') + ' ' + (info.title || ''))).toString(36));
+    var spotifyId = info.spotifyId || '';
+    var id = videoId
+      ? ('yt_' + videoId)
+      : ('imp_' + Math.abs(hashCode(spotifyId || ((info.artist || '') + ' ' + (info.title || '')))).toString(36));
     var existing = await findTrack(id);
     var thumb = info.thumbnail || (videoId ? 'https://i.ytimg.com/vi/' + videoId + '/hqdefault.jpg' : '');
 
     if (existing) {
       var changed = false;
-      if (!existing.duration && info.duration) { existing.duration = Number(info.duration); changed = true; }
+      if (!existing.spotifyId && spotifyId) { existing.spotifyId = spotifyId; changed = true; }
+      if (!existing.videoId && videoId) {
+        existing.videoId = videoId;
+        existing.sourceUrl = 'https://www.youtube.com/watch?v=' + videoId;
+        changed = true;
+      }
+      if (!existing.duration && info.duration) {
+        existing.duration = Number(info.duration) || 0;
+        existing.durationText = durationText(existing.duration);
+        changed = true;
+      }
       if (!existing.artworkUrl && thumb) { existing.artworkUrl = thumb; existing.coverSourceUrl = thumb; changed = true; }
       if (changed) { try { await Sonora.DB.tracks.update(existing); } catch (e) {} }
       return existing;
@@ -139,6 +234,7 @@
     var track = {
       id: id,
       videoId: videoId,
+      spotifyId: spotifyId,
       title: info.title || 'Canción importada',
       artist: info.artist || 'Artista desconocido',
       album: opts.album || (opts.service === 'spotify' ? 'Importada de Spotify' : 'Importada de YouTube Music'),
@@ -169,6 +265,45 @@
     return h;
   }
 
+  /** Actualiza metadatos sin tocar descarga, portada local ni favoritos. */
+  async function adoptTrack(catalog, track, remote, service) {
+    var changed = false;
+    if (remote.spotifyId && track.spotifyId !== remote.spotifyId) { track.spotifyId = remote.spotifyId; changed = true; }
+    if (remote.title && track.title !== remote.title) { track.title = remote.title; changed = true; }
+    if (remote.artist && track.artist !== remote.artist) { track.artist = remote.artist; changed = true; }
+    if (!track.duration && remote.duration) {
+      track.duration = Number(remote.duration) || 0;
+      track.durationText = durationText(track.duration);
+      changed = true;
+    }
+    if (!track.artworkUrl && remote.thumbnail) { track.artworkUrl = remote.thumbnail; changed = true; }
+    if (!track.importedFrom) { track.importedFrom = service || ''; changed = true; }
+    if (changed) { try { await Sonora.DB.tracks.update(track); } catch (e) {} }
+    remember(catalog, track);
+    return track;
+  }
+
+  /** Añade el vídeo de YouTube que faltaba, conservando el mismo id de pista. */
+  async function attachVideo(catalog, track, match) {
+    if (!match || !match.videoId) return track;
+    var changed = false;
+    if (!track.videoId) {
+      track.videoId = match.videoId;
+      track.sourceUrl = 'https://www.youtube.com/watch?v=' + match.videoId;
+      changed = true;
+    }
+    if (!track.duration && match.duration) {
+      track.duration = Number(match.duration) || 0;
+      track.durationText = durationText(track.duration);
+      changed = true;
+    }
+    if (!track.artworkUrl && match.thumbnail) { track.artworkUrl = match.thumbnail; changed = true; }
+    if (track.platform !== 'youtube') { track.platform = 'youtube'; changed = true; }
+    if (changed) { try { await Sonora.DB.tracks.update(track); } catch (e) {} }
+    remember(catalog, track);
+    return track;
+  }
+
   async function createPlaylist(data, service) {
     var cover = await coverDataUrl(data.cover || '');
     var playlist = {
@@ -194,126 +329,241 @@
     try { await Sonora.DB.playlists.update(pl); } catch (e) {}
   }
 
-  /** Spotify: metadatos + emparejado por lotes con progreso real. */
+  /** Empareja por lotes con reintento si el servidor pide esperar (429). */
+  async function matchTracks(tracks) {
+    if (!tracks || !tracks.length) return [];
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        var payload = await postJson('/api/import/match', { tracks: tracks });
+        return (payload && payload.matches) || [];
+      } catch (e) {
+        if (attempt < 2) {
+          await wait(e && e.code === 'http_429'
+            ? Math.min((e.retryAfter || 3) * 1000, 8000)
+            : 500);
+        }
+      }
+    }
+    return [];
+  }
+
+  /** Guarda las 6 primeras carátulas como data URL para el mosaico sin red. */
+  async function cacheFirstCovers(playlist, count) {
+    var firstIds = (playlist.trackIds || []).slice(0, count || 6);
+    for (var k = 0; k < firstIds.length; k++) {
+      var t = await findTrack(firstIds[k]);
+      if (t && t.artworkUrl && String(t.artworkUrl).indexOf('data:') !== 0) {
+        var local = await coverDataUrl(t.artworkUrl);
+        if (local) {
+          t.artworkUrl = local;
+          try { await Sonora.DB.tracks.update(t); } catch (e) {}
+        }
+      }
+    }
+  }
+
+  /**
+   * Reconstruye una playlist importada desde su enlace original.
+   *
+   * - Spotify: reutiliza cada canción por `spotifyId` (y por título+artista
+   *   para las importadas antes de 7.19.3), así no se duplica nada.
+   * - YouTube Music: reutiliza por `videoId`.
+   * - Respeta el orden de la fuente, añade las nuevas y conserva las
+   *   descargas, portadas y favoritos de las que ya existían.
+   * - Las canciones que ya no están en el origen se quedan al final (no se
+   *   borra trabajo del usuario).
+   */
+  async function syncFromSource(playlist, onProgress, preloaded) {
+    var service = playlist.importedFrom;
+    var sourceUrl = playlist.importSourceUrl;
+    if (!service || !sourceUrl) {
+      var err = new Error('Esta playlist no tiene guardado el enlace de Spotify/YouTube.');
+      err.code = 'no_source';
+      throw err;
+    }
+
+    var data = preloaded;
+    if (!data) {
+      var endpoint = service === 'spotify' ? '/api/import/spotify' : '/api/import/youtube';
+      // fresh=1 evita la caché del servidor: al actualizar queremos el estado real.
+      data = await getJsonRetry(endpoint + '?fresh=1&url=' + encodeURIComponent(sourceUrl), 3);
+    }
+    if (!data || !data.tracks || !data.tracks.length) {
+      throw new Error('La playlist de origen ya no tiene canciones públicas.');
+    }
+
+    var catalog = await buildCatalog();
+    var currentIds = (playlist.trackIds || []).slice();
+    var currentSet = {};
+    var used = {};
+    currentIds.forEach(function (id) { currentSet[id] = true; });
+
+    var stats = { total: 0, matched: 0, missing: 0, reused: 0, added: 0, kept: 0 };
+    var items = [];
+
+    for (var i = 0; i < data.tracks.length; i++) {
+      var remote = data.tracks[i];
+      if (!remote || !remote.title) continue;
+      stats.total++;
+
+      var found = null;
+      if (service === 'spotify') {
+        if (remote.spotifyId && catalog.bySpotifyId[remote.spotifyId]) {
+          found = catalog.bySpotifyId[remote.spotifyId];
+        }
+        if (!found) {
+          // Compatibilidad con importaciones anteriores: se reconocen por
+          // título+artista y se les guarda el spotifyId para la próxima vez.
+          var bucket = catalog.byKey[trackKey(remote.title, remote.artist)] || [];
+          for (var b = 0; b < bucket.length; b++) {
+            if (used[bucket[b].id]) continue;
+            // Preferimos una pista que ya estaba en ESTA playlist.
+            if (currentSet[bucket[b].id]) { found = bucket[b]; break; }
+            if (!found) found = bucket[b];
+          }
+        }
+      } else if (remote.videoId && catalog.byVideoId[remote.videoId]) {
+        found = catalog.byVideoId[remote.videoId];
+      }
+
+      if (found) {
+        used[found.id] = true;
+        await adoptTrack(catalog, found, remote, service);
+        stats.reused++;
+      }
+      items.push({ remote: remote, track: found || null });
+    }
+
+    // Emparejar solo lo que todavía no tiene vídeo (lo nuevo o lo pendiente).
+    var need = [];
+    for (var n = 0; n < items.length; n++) {
+      if (!items[n].track || !items[n].track.videoId) need.push(n);
+    }
+
+    var batchSize = 10;
+    for (var start = 0; start < need.length; start += batchSize) {
+      var indexes = need.slice(start, start + batchSize);
+      var payloadTracks = indexes.map(function (idx) { return items[idx].remote; });
+      var matches = await matchTracks(payloadTracks);
+
+      for (var m = 0; m < indexes.length; m++) {
+        var item = items[indexes[m]];
+        var match = matches[m];
+
+        if (!item.track) {
+          // ¿Ese vídeo ya existe en el dispositivo (buscado a mano u otra lista)?
+          var byVideo = match && match.videoId ? catalog.byVideoId[match.videoId] : null;
+          if (byVideo && !used[byVideo.id]) {
+            item.track = await adoptTrack(catalog, byVideo, item.remote, service);
+            used[byVideo.id] = true;
+            stats.reused++;
+          } else {
+            item.track = await ensureTrack({
+              videoId: match ? match.videoId : '',
+              spotifyId: item.remote.spotifyId || '',
+              title: item.remote.title,
+              artist: item.remote.artist || (match && match.artist) || '',
+              duration: (match && match.duration) || item.remote.duration,
+              thumbnail: (match && match.thumbnail) || item.remote.thumbnail || (data.cover || '')
+            }, {
+              service: service,
+              album: data.name,
+              playlistName: playlist.name,
+              index: indexes[m] + 1
+            });
+            remember(catalog, item.track);
+            used[item.track.id] = true;
+            stats.added++;
+          }
+        }
+
+        if (item.track && match && !item.track.videoId) {
+          await attachVideo(catalog, item.track, match);
+        }
+      }
+
+      if (onProgress) {
+        var doneSoFar = 0;
+        var matchedSoFar = 0;
+        for (var d = 0; d < items.length; d++) {
+          if (items[d].track && items[d].track.id) {
+            doneSoFar++;
+            if (items[d].track.videoId) matchedSoFar++;
+          }
+        }
+        onProgress(doneSoFar, stats.total, matchedSoFar, Math.max(0, doneSoFar - matchedSoFar));
+      }
+    }
+
+    // Recuento real al terminar (algunas pistas pendientes se resolvieron al emparejar).
+    stats.matched = 0;
+    stats.missing = 0;
+    for (var c = 0; c < items.length; c++) {
+      if (items[c].track && items[c].track.videoId) stats.matched++;
+      else stats.missing++;
+    }
+
+    // Orden de la fuente primero; lo que no está en el origen se conserva al final.
+    var targetIds = [];
+    for (var t = 0; t < items.length; t++) {
+      var tr = items[t].track;
+      if (tr && tr.id && targetIds.indexOf(tr.id) === -1) targetIds.push(tr.id);
+    }
+    var extras = currentIds.filter(function (id) { return targetIds.indexOf(id) === -1; });
+    stats.kept = extras.length;
+    playlist.trackIds = targetIds.concat(extras);
+
+    // Nombre, descripción y portada al día (sin volver a bajar la portada si es la misma).
+    if (data.name) playlist.name = data.name;
+    playlist.description = service === 'spotify'
+      ? ('Importada de Spotify · ' + stats.total + ' canciones · actualizada')
+      : ('Importada de YouTube Music · ' + stats.total + ' canciones · actualizada');
+    if (data.cover && playlist.coverSourceUrl !== data.cover) {
+      var localCover = await coverDataUrl(data.cover);
+      playlist.coverSourceUrl = data.cover;
+      playlist.artworkUrl = localCover || playlist.artworkUrl || data.cover;
+    }
+    playlist.lastSyncAt = new Date().toISOString();
+    playlist.lastSyncCount = stats.total;
+    // En la importación inicial no decimos «+N nuevas»: ya se ve el total.
+    playlist.lastSyncAdded = preloaded ? 0 : stats.added;
+    playlist.importSourceName = data.author || playlist.importSourceName || '';
+
+    await cacheFirstCovers(playlist, 6);
+    await savePlaylist(playlist);
+
+    if (onProgress) onProgress(stats.total, stats.total, stats.matched, stats.missing);
+
+    return {
+      playlist: playlist,
+      added: stats.added,
+      reused: stats.reused,
+      kept: stats.kept,
+      matched: stats.matched,
+      missing: stats.missing,
+      total: stats.total
+    };
+  }
+
+  /** Importación nueva: crea la playlist y delega en el mismo motor de sync. */
   async function runSpotify(url, onProgress) {
     var data = await getJson('/api/import/spotify?url=' + encodeURIComponent(url));
     if (!data.tracks || !data.tracks.length) {
       throw new Error('Esa lista de Spotify no tiene canciones visibles.');
     }
     var playlist = await createPlaylist(data, 'spotify');
-    var matched = 0;
-    var missing = 0;
-    var batchSize = 8;
-
-    for (var i = 0; i < data.tracks.length; i += batchSize) {
-      var batch = data.tracks.slice(i, i + batchSize);
-      var matches = [];
-      try {
-        var payload = await postJson('/api/import/match', { tracks: batch });
-        matches = (payload && payload.matches) || [];
-      } catch (e) {
-        matches = [];
-      }
-
-      for (var j = 0; j < batch.length; j++) {
-        var original = batch[j];
-        var match = matches[j];
-        var info;
-        if (match) {
-          matched++;
-          info = {
-            videoId: match.videoId,
-            title: original.title,
-            artist: original.artist || match.artist,
-            duration: match.duration || original.duration,
-            thumbnail: match.thumbnail
-          };
-        } else {
-          missing++;
-          // Sin coincidencia: se guarda igual y Sonora la busca al reproducir.
-          info = {
-            videoId: '',
-            title: original.title,
-            artist: original.artist,
-            duration: original.duration,
-            thumbnail: data.cover || ''
-          };
-        }
-        var track = await ensureTrack(info, {
-          service: 'spotify',
-          album: data.name,
-          playlistName: playlist.name,
-          index: i + j + 1
-        });
-        if (track && playlist.trackIds.indexOf(track.id) === -1) playlist.trackIds.push(track.id);
-      }
-
-      await savePlaylist(playlist);
-      if (onProgress) {
-        onProgress(Math.min(data.tracks.length, i + batch.length), data.tracks.length, matched, missing);
-      }
-    }
-
-    // Carátulas locales para el mosaico (las 6 primeras).
-    var firstIds = playlist.trackIds.slice(0, 6);
-    for (var k = 0; k < firstIds.length; k++) {
-      var t = await findTrack(firstIds[k]);
-      if (t && t.artworkUrl && String(t.artworkUrl).indexOf('data:') !== 0) {
-        var local = await coverDataUrl(t.artworkUrl);
-        if (local) {
-          t.artworkUrl = local;
-          try { await Sonora.DB.tracks.update(t); } catch (e) {}
-        }
-      }
-    }
-
-    await savePlaylist(playlist);
-    return { playlist: playlist, matched: matched, missing: missing };
+    var result = await syncFromSource(playlist, onProgress, data);
+    return result;
   }
 
-  /** YouTube Music: los vídeos ya vienen con id, no hay que emparejar nada. */
   async function runYouTube(url, onProgress) {
     var data = await getJson('/api/import/youtube?url=' + encodeURIComponent(url));
     if (!data.tracks || !data.tracks.length) {
       throw new Error('Esa playlist de YouTube no tiene canciones públicas.');
     }
     var playlist = await createPlaylist(data, 'youtube');
-
-    for (var i = 0; i < data.tracks.length; i++) {
-      var item = data.tracks[i];
-      var track = await ensureTrack({
-        videoId: item.videoId,
-        title: item.title,
-        artist: item.artist,
-        duration: item.duration,
-        thumbnail: item.thumbnail
-      }, {
-        service: 'youtube',
-        album: data.name,
-        playlistName: playlist.name,
-        index: i + 1
-      });
-      if (track && playlist.trackIds.indexOf(track.id) === -1) playlist.trackIds.push(track.id);
-      if (i % 15 === 0) {
-        await savePlaylist(playlist);
-        if (onProgress) onProgress(i + 1, data.tracks.length, i + 1, 0);
-      }
-    }
-
-    var firstIds = playlist.trackIds.slice(0, 6);
-    for (var k = 0; k < firstIds.length; k++) {
-      var t = await findTrack(firstIds[k]);
-      if (t && t.artworkUrl && String(t.artworkUrl).indexOf('data:') !== 0) {
-        var local = await coverDataUrl(t.artworkUrl);
-        if (local) {
-          t.artworkUrl = local;
-          try { await Sonora.DB.tracks.update(t); } catch (e) {}
-        }
-      }
-    }
-
-    await savePlaylist(playlist);
-    return { playlist: playlist, matched: data.tracks.length, missing: 0 };
+    var result = await syncFromSource(playlist, onProgress, data);
+    return result;
   }
 
   function notify() {
@@ -701,6 +951,47 @@
         });
       } catch (e) {}
       return out;
+    },
+    /**
+     * Vuelve a leer el enlace de origen y reconstruye la playlist sin
+     * duplicar: reutiliza cada canción por spotifyId (Spotify) o videoId
+     * (YouTube Music) y conserva descargas, portadas y favoritos.
+     */
+    syncPlaylist: async function (id, onProgress) {
+      var pl = null;
+      try { pl = await Sonora.DB.playlists.getById(id); } catch (e) { pl = null; }
+      if (!pl) throw new Error('Esa playlist ya no está en Sonora.');
+      if (!pl.importedFrom || !pl.importSourceUrl) {
+        var err = new Error('Esta playlist no se importó desde Spotify ni YouTube Music.');
+        err.code = 'no_source';
+        throw err;
+      }
+      var result = await syncFromSource(pl, onProgress);
+      notify();
+      return result;
+    },
+    /** Actualiza todas las playlists importadas que tengan enlace guardado. */
+    syncAll: async function (onProgress, onItem) {
+      var all = [];
+      try { all = await Sonora.DB.playlists.getAll(); } catch (e) { all = []; }
+      var list = (all || []).filter(function (pl) {
+        return pl && pl.importedFrom && pl.importSourceUrl;
+      });
+      var results = [];
+      for (var i = 0; i < list.length; i++) {
+        if (onItem) onItem(i, list.length, list[i]);
+        try {
+          var r = await syncFromSource(list[i], null);
+          results.push(r);
+        } catch (e) {
+          results.push({ playlist: list[i], error: String((e && e.message) || 'No se pudo actualizar') });
+        }
+      }
+      notify();
+      return results;
+    },
+    hasSource: function (pl) {
+      return !!(pl && pl.importedFrom && pl.importSourceUrl);
     },
     removePlaylist: async function (id) {
       try {
