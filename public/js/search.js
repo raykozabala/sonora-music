@@ -1553,6 +1553,31 @@
 
       if (!searchInput || !contentContainer) return;
 
+      const offerImport = (link, service) => {
+        cancelActiveSearch();
+        currentExternalResults = [];
+        if (!contentContainer) return;
+        const label = service === 'spotify' ? 'Spotify' : 'YouTube Music';
+        contentContainer.innerHTML =
+          '<div style="max-width:560px;margin:38px auto;padding:26px;border-radius:22px;' +
+            'background:linear-gradient(180deg,rgba(30,215,96,.14),rgba(255,255,255,.03));' +
+            'border:1px solid rgba(255,255,255,.1);text-align:center;">' +
+            '<div style="font-size:38px;margin-bottom:10px;">🎧</div>' +
+            '<h3 style="margin:0 0 6px;font-size:19px;font-weight:800;">Enlace de ' + label + ' detectado</h3>' +
+            '<p style="margin:0 0 18px;font-size:13px;line-height:1.6;color:var(--color-text-secondary);">' +
+              'Sonora puede traer esta playlist, buscar cada canción y dejarla lista para sonar y descargar.' +
+            '</p>' +
+            '<button id="search-import-open" style="border:0;border-radius:999px;padding:12px 26px;' +
+              'background:#1ed760;color:#08130b;font-weight:900;font-size:14px;cursor:pointer;">' +
+              'Importar esta playlist' +
+            '</button>' +
+          '</div>';
+        const btn = document.getElementById('search-import-open');
+        if (btn) btn.addEventListener('click', () => {
+          if (Sonora.Import && Sonora.Import.open) Sonora.Import.open(link);
+        });
+      };
+
       const onInput = () => {
         const query = (searchInput.value || '').trim();
         if (clearBtn) {
@@ -1561,6 +1586,18 @@
         }
 
         if (debounceTimeout) clearTimeout(debounceTimeout);
+
+        // Pegar el enlace de una playlist de Spotify/YouTube Music no es una
+        // búsqueda: se ofrece importarla directamente en Sonora.
+        try {
+          if (query && Sonora.Import && Sonora.Import.detectPlaylistLink) {
+            const service = Sonora.Import.detectPlaylistLink(query);
+            if (service) {
+              offerImport(query, service);
+              return;
+            }
+          }
+        } catch (e) {}
 
         if (!query) {
           cancelActiveSearch();
@@ -1585,6 +1622,14 @@
             if (historyContainer) historyContainer.innerHTML = renderHistoryChips();
             searchInput.blur();
             if (debounceTimeout) clearTimeout(debounceTimeout);
+            try {
+              const service = Sonora.Import && Sonora.Import.detectPlaylistLink
+                ? Sonora.Import.detectPlaylistLink(query) : '';
+              if (service) {
+                if (Sonora.Import.open) Sonora.Import.open(query);
+                return;
+              }
+            } catch (e) {}
             executeOnlineSearch(query);
           }
         }

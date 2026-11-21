@@ -1,5 +1,5 @@
 /**
- * Sonora Music Server v7.19.1
+ * Sonora Music Server v7.19.2
  * Triple-mode backend server (Local PC, Render.com & Northflank compatible)
  * Express.js + SQLite (better-sqlite3) + Multer + Audio Streaming (HTTP 206)
  */
@@ -26,7 +26,7 @@ const isNorthflank = SERVER_MODE === 'northflank';
 // Versión de la aplicación y repositorio oficial de instaladores. El endpoint
 // /api/app/latest usa estos datos para que la app nunca descargue una versión
 // distinta de la que anuncia.
-const APP_VERSION = '7.19.1';
+const APP_VERSION = '7.19.2';
 const APP_REPO = 'raykozabala/sonora-music';
 const APP_RELEASE_BASE = `https://github.com/${APP_REPO}/releases`;
 
@@ -2680,6 +2680,56 @@ app.get('/api/download/external', rateLimit('download', 20, 60 * 1000), async (r
 });
 
 /**
+ * GET /api/playback/status
+ * Comprueba de verdad si ESTE servidor puede extraer audio de YouTube.
+ * Sirve para que la app avise antes de prometer reproducción que no va a
+ * funcionar (por ejemplo, en un servidor en la nube bloqueado por YouTube).
+ */
+let _playbackStatus = { at: 0, value: null };
+
+app.get('/api/playback/status', async (req, res) => {
+  const fresh = req.query.fresh === '1';
+  if (!fresh && _playbackStatus.value && Date.now() - _playbackStatus.at < 10 * 60 * 1000) {
+    return res.json(_playbackStatus.value);
+  }
+  const started = Date.now();
+  let value;
+  try {
+    const probe = runYtDlpWithFallback([
+      '--no-playlist', '--no-warnings', '--no-progress',
+      '-f', 'bestaudio[ext=m4a]/bestaudio/best', '-g', '--',
+      'https://www.youtube.com/watch?v=XFkzRNyygfk'
+    ], 10000);
+    probe.catch(() => {});
+    const { stdout } = await Promise.race([
+      probe,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('La prueba tardó demasiado (YouTube bloquea este servidor)')), 16000))
+    ]);
+    const direct = stdout.trim().split(/\r?\n/).map((x) => x.trim()).filter(Boolean)[0];
+    value = {
+      ok: !!direct,
+      ms: Date.now() - started,
+      mode: SERVER_MODE,
+      hint: direct
+        ? 'Este servidor puede reproducir y descargar de YouTube.'
+        : 'El servidor no devolvió una URL de audio.'
+    };
+  } catch (e) {
+    value = {
+      ok: false,
+      ms: Date.now() - started,
+      mode: SERVER_MODE,
+      error: String((e && e.message) || e).slice(0, 140),
+      hint: SERVER_MODE === 'render'
+        ? 'El servidor en la nube está bloqueado por YouTube. Con el servidor local (tu Mac) sí funciona, y lo ya descargado se escucha siempre.'
+        : 'YouTube no respondió. Revisa la conexión o el archivo de cookies del servidor.'
+    };
+  }
+  _playbackStatus = { at: Date.now(), value: value };
+  res.json(value);
+});
+
+/**
  * GET /api/recommendations?artist=...&title=...
  * Continuous autoplay / radio recommendations for related tracks
  */
@@ -2730,6 +2780,344 @@ function recIsJunk(title, duration, uploader) {
   if (Number(duration) > 900 || (Number(duration) > 0 && Number(duration) < 45)) return true;
   if (/(compilation|records|music hits|top music|playlist)/.test(u) && !/vevo/.test(u)) return true;
   return false;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   YouTube Music (InnerTube) — sin clave propia del usuario
+   Es la misma API pública que usa music.youtube.com en el navegador. Con
+   ella se obtiene la radio oficial de "siguientes" en ~1 s, que es justo lo
+   que hacía falta para recomendaciones variadas y rápidas.
+   ───────────────────────────────────────────────────────────────────────── */
+
+const YTM_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+const YTM_CLIENT = { clientName: 'WEB_REMIX', clientVersion: '1.20240101.01.00', hl: 'es', gl: 'US' };
+let _ytmKey = '';
+let _ytmKeyAt = 0;
+
+async function ytmApiKey(force) {
+  if (!force && _ytmKey && Date.now() - _ytmKeyAt < 6 * 3600 * 1000) return _ytmKey;
+  try {
+    const resp = await fetch('https://music.youtube.com/', {
+      headers: { 'User-Agent': YTM_UA, 'Accept-Language': 'es-ES,es;q=0.9' },
+      signal: AbortSignal.timeout(8000)
+    });
+    const html = await resp.text();
+    const m = html.match(/"INNERTUBE_API_KEY":"([^"]+)"/) || html.match(/INNERTUBE_API_KEY\\?"\s*:\s*\\?"([^"\\]+)/);
+    if (m && m[1]) {
+      _ytmKey = m[1];
+      _ytmKeyAt = Date.now();
+      return _ytmKey;
+    }
+  } catch (e) {}
+  if (_ytmKey) return _ytmKey;
+  // Clave pública del reproductor web de YouTube Music (no es una clave
+  // personal ni da acceso a ninguna cuenta).
+  _ytmKey = 'AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30';
+  _ytmKeyAt = Date.now();
+  return _ytmKey;
+}
+
+async function ytmPost(endpoint, body, timeoutMs) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const key = await ytmApiKey(attempt > 0);
+    try {
+      const resp = await fetch('https://music.youtube.com/youtubei/v1/' + endpoint + '?key=' + key + '&prettyPrint=false', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': YTM_UA,
+          'Accept-Language': 'es-ES,es;q=0.9',
+          'Origin': 'https://music.youtube.com',
+          'Referer': 'https://music.youtube.com/'
+        },
+        body: JSON.stringify(Object.assign({ context: { client: YTM_CLIENT } }, body || {})),
+        signal: AbortSignal.timeout(timeoutMs || 9000)
+      });
+      if (!resp.ok) throw new Error('YouTube Music HTTP ' + resp.status);
+      return await resp.json();
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('YouTube Music no respondió');
+}
+
+function ytmRuns(node) {
+  if (!node) return '';
+  if (typeof node === 'string') return node;
+  if (node.simpleText) return node.simpleText;
+  if (Array.isArray(node.runs)) return node.runs.map((r) => r && r.text ? r.text : '').join('');
+  return '';
+}
+
+const YTM_TYPE_WORDS = /^(canci[oó]n|v[íi]deo|álbum|album|artista|sencillo|single|song|video|album|artist|playlist|lista de reproducci[oó]n|ep|podcast)$/i;
+
+function ytmParseDuration(text) {
+  const m = String(text || '').match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return 0;
+  if (m[3]) return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function ytmArtistFromByline(byline, fallback) {
+  const parts = String(byline || '').split('•').map((x) => x.trim()).filter(Boolean);
+  for (const part of parts) {
+    if (!part) continue;
+    if (YTM_TYPE_WORDS.test(part)) continue;
+    if (/visualizaciones|views|me gusta|likes|suscriptores|subscribers|usuarios mensuales/i.test(part)) continue;
+    if (/^\d{1,2}:\d{2}$/.test(part)) continue;
+    return part.replace(/\s*-\s*Topic$/i, '').trim();
+  }
+  return fallback || 'YouTube Music';
+}
+
+/** Radio oficial ("siguientes") de YouTube Music para un videoId. */
+async function ytmRadio(videoId, limit) {
+  const json = await ytmPost('next', {
+    videoId: videoId,
+    playlistId: 'RDAMVM' + videoId,
+    isAudioOnly: true
+  }, 9000);
+  const out = [];
+  const seen = new Set();
+  (function walk(o) {
+    if (!o || typeof o !== 'object') return;
+    const p = o.playlistPanelVideoRenderer;
+    if (p && p.videoId && !seen.has(p.videoId)) {
+      seen.add(p.videoId);
+      const title = ytmRuns(p.title);
+      const byline = ytmRuns(p.longBylineText) || ytmRuns(p.shortBylineText);
+      if (title) {
+        out.push({
+          videoId: p.videoId,
+          title: title,
+          artist: ytmArtistFromByline(byline, ''),
+          duration: ytmParseDuration(ytmRuns(p.lengthText))
+        });
+      }
+    }
+    for (const k in o) walk(o[k]);
+  })(json);
+  return out.slice(0, limit || 50);
+}
+
+/** Búsqueda de canciones en YouTube Music (para emparejar Spotify). */
+async function ytmSearchTracks(query, limit) {
+  const json = await ytmPost('search', { query: query, params: 'EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D' }, 9000);
+  const out = [];
+  const seen = new Set();
+  (function walk(o) {
+    if (!o || typeof o !== 'object') return;
+    const r = o.musicResponsiveListItemRenderer;
+    if (r) {
+      const cols = r.flexColumns || [];
+      const textOf = (c) => ytmRuns(c && c.musicResponsiveListItemFlexColumnRenderer && c.musicResponsiveListItemFlexColumnRenderer.text);
+      const title = textOf(cols[0]);
+      const sub = textOf(cols[1]);
+      const vid = r.playlistItemData && r.playlistItemData.videoId;
+      if (title && vid && !seen.has(vid)) {
+        seen.add(vid);
+        const parts = String(sub || '').split('•').map((x) => x.trim());
+        const fixed = (r.fixedColumns || []).map((c) => ytmRuns(c && c.musicResponsiveListItemFixedColumnRenderer && c.musicResponsiveListItemFixedColumnRenderer.text)).filter(Boolean);
+        const durationText = parts.find((x) => /^\d{1,2}:\d{2}$/.test(x)) || fixed.find((x) => /^\d{1,2}:\d{2}$/.test(x)) || '';
+        out.push({
+          videoId: vid,
+          title: title,
+          artist: ytmArtistFromByline(sub, ''),
+          album: parts.filter((x) => x && !YTM_TYPE_WORDS.test(x) && !/^\d{1,2}:\d{2}$/.test(x))[1] || '',
+          duration: ytmParseDuration(durationText),
+          thumbnail: 'https://i.ytimg.com/vi/' + vid + '/hqdefault.jpg'
+        });
+      }
+    }
+    for (const k in o) walk(o[k]);
+  })(json);
+  return out.slice(0, limit || 12);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Spotify sin API key ni contraseña: se lee la ficha pública (embed) que
+   Spotify sirve a cualquier visitante. Funciona con playlists, álbumes y
+   artistas PÚBLICOS; lo privado exige iniciar sesión y no se toca.
+   ───────────────────────────────────────────────────────────────────────── */
+
+function spotifyRef(input) {
+  const raw = String(input || '').trim();
+  let m = raw.match(/spotify:(track|album|artist|playlist|episode|show):([A-Za-z0-9]+)/);
+  if (m) return { type: m[1], id: m[2] };
+  m = raw.match(/open\.spotify\.com\/(?:intl-[A-Za-z-]+\/)?(track|album|artist|playlist|episode|show)\/([A-Za-z0-9]+)/i);
+  if (m) return { type: m[1].toLowerCase(), id: m[2] };
+  return null;
+}
+
+function spotifyCover(entity) {
+  try {
+    const sources = (entity.coverArt && entity.coverArt.sources) || [];
+    if (sources.length) return sources[sources.length - 1].url || sources[0].url || '';
+    const vi = entity.visualIdentity && entity.visualIdentity.image;
+    if (Array.isArray(vi) && vi.length) return vi[vi.length - 1].url || '';
+  } catch (e) {}
+  return '';
+}
+
+async function spotifyEntity(input) {
+  const ref = spotifyRef(input);
+  if (!ref) {
+    const err = new Error('Ese enlace no es de Spotify. Pega un enlace de playlist, álbum o artista.');
+    err.code = 'bad_link';
+    throw err;
+  }
+  const resp = await fetch('https://open.spotify.com/embed/' + ref.type + '/' + ref.id, {
+    headers: { 'User-Agent': YTM_UA, 'Accept-Language': 'es-ES,es;q=0.9' },
+    signal: AbortSignal.timeout(12000)
+  });
+  if (!resp.ok) {
+    const err = new Error('Spotify respondió HTTP ' + resp.status + '. Puede que la lista sea privada.');
+    err.code = 'spotify_http';
+    throw err;
+  }
+  const html = await resp.text();
+  const m = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+  if (!m) {
+    const err = new Error('Spotify no devolvió la lista. Copia el enlace con «Compartir → Copiar enlace».');
+    err.code = 'no_data';
+    throw err;
+  }
+  let data;
+  try { data = JSON.parse(m[1]); } catch (e) { throw new Error('Spotify devolvió datos ilegibles'); }
+  const entity = data && data.props && data.props.pageProps && data.props.pageProps.state &&
+    data.props.pageProps.state.data && data.props.pageProps.state.data.entity;
+  if (!entity) throw new Error('Spotify no devolvió datos de esa lista');
+
+  const cover = spotifyCover(entity);
+  const tracks = [];
+  const list = Array.isArray(entity.trackList) ? entity.trackList : [];
+  for (const t of list) {
+    if (!t) continue;
+    const title = String(t.title || '').trim();
+    if (!title) continue;
+    const artist = String(t.subtitle || '').replace(/\s*•\s*/g, ', ').trim() || entity.subtitle || '';
+    tracks.push({
+      title: title,
+      artist: artist,
+      duration: Math.round((Number(t.duration) || 0) / 1000),
+      thumbnail: cover
+    });
+  }
+  if (!tracks.length && ref.type === 'track') {
+    tracks.push({
+      title: String(entity.name || entity.title || '').trim(),
+      artist: String(entity.subtitle || '').trim(),
+      duration: Math.round((Number(entity.duration) || 0) / 1000),
+      thumbnail: cover
+    });
+  }
+  return {
+    source: 'spotify',
+    type: ref.type,
+    spotifyId: ref.id,
+    url: 'https://open.spotify.com/' + ref.type + '/' + ref.id,
+    name: String(entity.name || entity.title || 'Spotify').trim(),
+    author: String(entity.subtitle || '').trim(),
+    cover: cover,
+    total: tracks.length,
+    tracks: tracks
+  };
+}
+
+/** Id de playlist de YouTube / YouTube Music a partir de un enlace. */
+function youtubeListRef(input) {
+  const raw = String(input || '').trim();
+  const m = raw.match(/[?&]list=([A-Za-z0-9_-]{10,})/);
+  if (m) return m[1];
+  if (/^[A-Za-z0-9_-]{18,}$/.test(raw)) return raw;
+  return '';
+}
+
+async function youtubePlaylist(input) {
+  const listId = youtubeListRef(input);
+  if (!listId) {
+    const err = new Error('Ese enlace no tiene una lista de YouTube. Usa «Compartir → Copiar enlace» de la playlist.');
+    err.code = 'bad_link';
+    throw err;
+  }
+  if (/^(WL|LL|LM)$/.test(listId)) {
+    const err = new Error('Las listas privadas de tu cuenta necesitan iniciar sesión. Exporta la playlist como pública o comparte su enlace.');
+    err.code = 'private_list';
+    throw err;
+  }
+  const json = await ytmPost('browse', { browseId: 'VL' + listId }, 12000);
+  let name = 'Playlist de YouTube Music';
+  (function walk(o) {
+    if (!o || typeof o !== 'object' || name !== 'Playlist de YouTube Music') return;
+    const h = o.musicDetailHeaderRenderer || o.musicResponsiveHeaderRenderer || o.musicEditablePlaylistDetailHeaderRenderer;
+    if (h) {
+      const t = ytmRuns(h.title) || ytmRuns(h.heading);
+      if (t) { name = t; return; }
+    }
+    for (const k in o) walk(o[k]);
+  })(json);
+
+  const tracks = [];
+  const seen = new Set();
+  (function walk(o) {
+    if (!o || typeof o !== 'object') return;
+    const r = o.musicResponsiveListItemRenderer;
+    if (r) {
+      const cols = r.flexColumns || [];
+      const textOf = (c) => ytmRuns(c && c.musicResponsiveListItemFlexColumnRenderer && c.musicResponsiveListItemFlexColumnRenderer.text);
+      const title = textOf(cols[0]);
+      const sub = textOf(cols[1]);
+      const vid = r.playlistItemData && r.playlistItemData.videoId;
+      if (title && vid && !seen.has(vid)) {
+        seen.add(vid);
+        const parts = String(sub || '').split('•').map((x) => x.trim());
+        const fixed = (r.fixedColumns || []).map((c) => ytmRuns(c && c.musicResponsiveListItemFixedColumnRenderer && c.musicResponsiveListItemFixedColumnRenderer.text)).filter(Boolean);
+        const durationText = parts.find((x) => /^\d{1,2}:\d{2}$/.test(x)) || fixed.find((x) => /^\d{1,2}:\d{2}$/.test(x)) || '';
+        tracks.push({
+          videoId: vid,
+          title: title,
+          artist: ytmArtistFromByline(sub, ''),
+          duration: ytmParseDuration(durationText),
+          thumbnail: 'https://i.ytimg.com/vi/' + vid + '/hqdefault.jpg'
+        });
+      }
+    }
+    for (const k in o) walk(o[k]);
+  })(json);
+
+  return {
+    source: 'youtube',
+    listId: listId,
+    url: 'https://music.youtube.com/playlist?list=' + listId,
+    name: name,
+    cover: tracks[0] ? tracks[0].thumbnail : '',
+    total: tracks.length,
+    tracks: tracks
+  };
+}
+
+/** Elige el mejor resultado de YouTube Music para una canción de Spotify. */
+function ytmBestMatch(results, title, artist) {
+  if (!results || !results.length) return null;
+  const wantTitle = recNorm(title);
+  const wantArtist = recNorm(artist);
+  let best = null;
+  let bestScore = -1;
+  for (const r of results) {
+    const t = recNorm(r.title);
+    const a = recNorm(r.artist);
+    let score = 0;
+    if (t === wantTitle) score += 60;
+    else if (t.indexOf(wantTitle) !== -1 || wantTitle.indexOf(t) !== -1) score += 35;
+    else if (wantTitle && t.split(' ').filter((w) => w && wantTitle.includes(w)).length >= Math.min(2, wantTitle.split(' ').length)) score += 12;
+    if (wantArtist && a && (a.indexOf(wantArtist) !== -1 || wantArtist.indexOf(a) !== -1)) score += 40;
+    if (/topic$/.test(recNorm(r.artist))) score += 4;
+    if (recIsJunk(r.title, r.duration, r.artist)) score -= 30;
+    if (score > bestScore) { bestScore = score; best = r; }
+  }
+  return bestScore >= 20 ? best : null;
 }
 
 /** GET JSON con timeout corto (Deezer/otros servicios públicos). */
@@ -2859,73 +3247,73 @@ app.get('/api/recommendations', async (req, res) => {
       });
     }
 
-    // Mix de YouTube y artistas relacionados (Deezer) EN PARALELO: en Render
-    // yt-dlp puede tardar o estar bloqueado, y no queremos sumar esperas.
-    const mixTask = (async () => {
-      if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return [];
+    // 1) Radio oficial de YouTube Music: son las mismas "siguientes" que usa
+    //    la app de YT Music. Responde en ~1 s y trae artistas variados, así
+    //    que es la fuente principal (antes se dependía de yt-dlp, que en
+    //    Render está bloqueado y tardaba 40 s en devolver 3 canciones).
+    if (/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+      try {
+        const radio = await ytmRadio(videoId, 40);
+        radio.forEach((e) => addCandidate({
+          id: e.videoId,
+          title: e.title,
+          uploader: e.artist,
+          duration: e.duration
+        }, 'ytm-radio'));
+      } catch (e) {
+        console.warn('[Recommendations] radio de YouTube Music no disponible:', e.message);
+      }
+    }
+
+    // 2) Respaldo local: Mix de YouTube con yt-dlp (en Render suele estar
+    //    bloqueado, por eso no se intenta allí para no sumar esperas).
+    if (raw.length < 6 && !isRender) {
       try {
         const { stdout } = await runYtDlpWithFallback([
           '--flat-playlist', '--dump-single-json', '--no-warnings', '--no-progress',
           '--playlist-end', '25', '--',
           `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`
-        ], 8000);
-        return JSON.parse(stdout).entries || [];
+        ], 9000);
+        (JSON.parse(stdout).entries || []).forEach((e) => addCandidate(e, 'mix'));
       } catch (e) {
         console.warn('[Recommendations] mix no disponible:', e.message);
-        return [];
       }
-    })();
+    }
 
-    const relatedTask = (async () => {
-      if (!artist) return [];
+    // 3) Último respaldo: artistas parecidos (Deezer) buscados en YouTube
+    //    Music, y si aún falta, canciones populares del género.
+    if (raw.length < 6 && artist) {
       try {
         const related = (await recRelatedArtists(artist)).slice(0, 4);
-        if (!related.length) return [];
         const pools = await Promise.all(related.map(async (rel) => {
           const tops = await recArtistTopTracks(rel.id, 1);
           return tops.map((t) => ({ artist: rel.name, title: t.title, duration: t.duration }));
         }));
-        const wanted = pools.flat().slice(0, 4);
-        const searched = await Promise.all(wanted.map(async (want) => {
+        const wanted = pools.flat().slice(0, 5);
+        const found = await Promise.all(wanted.map(async (want) => {
           try {
-            const r = await searchWithTimeout((want.artist + ' ' + want.title).trim(), 7000);
-            const videos = (r && r.videos ? r.videos : []).filter((v) => {
-              if (!v || !v.videoId) return false;
-              if (recIsJunk(v.title, v.seconds, v.author && v.author.name)) return false;
-              if (want.duration && v.seconds && Math.abs(v.seconds - want.duration) > 45) return false;
-              return true;
-            });
-            const v = videos[0];
+            const results = await ytmSearchTracks((want.artist + ' ' + want.title).trim(), 6);
+            const v = ytmBestMatch(results, want.title, want.artist);
             if (!v) return null;
-            return {
-              id: v.videoId,
-              title: v.title,
-              uploader: want.artist,
-              duration: v.seconds,
-              source: 'related'
-            };
+            return { id: v.videoId, title: v.title, uploader: want.artist, duration: v.duration };
           } catch (e) { return null; }
         }));
-        return searched.filter(Boolean);
+        found.filter(Boolean).forEach((e) => addCandidate(e, 'related'));
       } catch (e) {
         console.warn('[Recommendations] relacionados no disponibles:', e.message);
-        return [];
       }
-    })();
-
-    const mixEntries = await mixTask;
-    mixEntries.forEach((e) => addCandidate(e, 'mix'));
-    const relatedEntries = await relatedTask;
-    relatedEntries.forEach((e) => addCandidate(e, 'related'));
-
-    // Sin Mix (Render bloquea yt-dlp a veces): canciones populares del género.
-    // Nunca "music mix", que el filtro descarta por ser recopilatorio.
-    if (raw.length < 6) {
-      await addFromSearch(genre ? (genre + ' songs') : 'popular songs');
     }
-    // Último recurso: del propio artista, mejor algo que silencio.
-    if (raw.length < 3 && artist) {
-      await addFromSearch(artist + ' songs');
+
+    if (raw.length < 6) {
+      try {
+        const results = await ytmSearchTracks(genre ? (genre + ' songs') : 'popular songs', 16);
+        results.forEach((v) => addCandidate({
+          id: v.videoId,
+          title: v.title,
+          uploader: v.artist,
+          duration: v.duration
+        }, 'ytm-search'));
+      } catch (e) {}
     }
 
     // 3) Diversidad: como máximo 2 por artista y el artista semilla sólo si
@@ -2956,6 +3344,114 @@ app.get('/api/recommendations', async (req, res) => {
     console.warn('[Recommendations] error:', err.message);
     res.json([]);
   }
+});
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Importación desde otras apps (sin contraseñas ni API keys del usuario)
+   ───────────────────────────────────────────────────────────────────────── */
+
+const IMPORT_CACHE = new Map();
+const IMPORT_TTL = 10 * 60 * 1000;
+
+function importCacheGet(key) {
+  const hit = IMPORT_CACHE.get(key);
+  if (!hit) return null;
+  if (Date.now() > hit.expires) { IMPORT_CACHE.delete(key); return null; }
+  return hit.value;
+}
+
+function importCacheSet(key, value) {
+  if (IMPORT_CACHE.size > 120) {
+    const oldest = IMPORT_CACHE.keys().next().value;
+    if (oldest) IMPORT_CACHE.delete(oldest);
+  }
+  IMPORT_CACHE.set(key, { expires: Date.now() + IMPORT_TTL, value: value });
+}
+
+function importError(res, e, fallbackStatus) {
+  const code = (e && e.code) || 'import_failed';
+  let status = fallbackStatus || 400;
+  if (code === 'bad_link') status = 400;
+  if (code === 'private_list') status = 403;
+  if (code === 'spotify_http' || code === 'no_data') status = 422;
+  return res.status(status).json({
+    error: String((e && e.message) || 'No se pudo importar'),
+    code: code
+  });
+}
+
+/** Importa una playlist/álbum/artista público de Spotify. */
+app.get('/api/import/spotify', rateLimit('import', 30, 60 * 1000), async (req, res) => {
+  const url = String(req.query.url || '').trim();
+  if (!url) return res.status(400).json({ error: 'Falta el enlace de Spotify', code: 'bad_link' });
+  const cached = importCacheGet('sp:' + url);
+  if (cached) return res.json(cached);
+  try {
+    const data = await spotifyEntity(url);
+    importCacheSet('sp:' + url, data);
+    res.json(data);
+  } catch (e) {
+    console.warn('[Import] Spotify:', e.message);
+    importError(res, e, 422);
+  }
+});
+
+/** Importa una playlist pública de YouTube / YouTube Music. */
+app.get('/api/import/youtube', rateLimit('import', 30, 60 * 1000), async (req, res) => {
+  const url = String(req.query.url || '').trim();
+  if (!url) return res.status(400).json({ error: 'Falta el enlace de YouTube', code: 'bad_link' });
+  const cached = importCacheGet('yt:' + url);
+  if (cached) return res.json(cached);
+  try {
+    const data = await youtubePlaylist(url);
+    importCacheSet('yt:' + url, data);
+    res.json(data);
+  } catch (e) {
+    console.warn('[Import] YouTube:', e.message);
+    importError(res, e, 422);
+  }
+});
+
+/** Detecta el servicio de un enlace pegado. */
+app.get('/api/import/detect', (req, res) => {
+  const url = String(req.query.url || '').trim();
+  if (spotifyRef(url)) return res.json({ service: 'spotify' });
+  if (youtubeListRef(url)) return res.json({ service: 'youtube' });
+  res.json({ service: '' });
+});
+
+/**
+ * Empareja canciones (normalmente de Spotify) con vídeos de YouTube Music.
+ * Se hace por lotes desde la app para poder mostrar el progreso real.
+ */
+app.post('/api/import/match', rateLimit('import', 60, 60 * 1000), async (req, res) => {
+  const list = req.body && Array.isArray(req.body.tracks) ? req.body.tracks.slice(0, 10) : [];
+  if (!list.length) return res.json({ matches: [] });
+  const matches = await Promise.all(list.map(async (track) => {
+    const title = String(track && track.title || '').trim();
+    const artist = String(track && track.artist || '').trim();
+    if (!title) return null;
+    const key = 'm:' + recNorm(artist + ' ' + title);
+    const cached = importCacheGet(key);
+    if (cached) return cached;
+    try {
+      const results = await ytmSearchTracks((artist + ' ' + title).trim(), 8);
+      const best = ytmBestMatch(results, title, artist);
+      if (!best) return null;
+      const match = {
+        videoId: best.videoId,
+        title: best.title,
+        artist: best.artist || artist,
+        duration: best.duration || Number(track.duration) || 0,
+        thumbnail: best.thumbnail || ('https://i.ytimg.com/vi/' + best.videoId + '/hqdefault.jpg')
+      };
+      importCacheSet(key, match);
+      return match;
+    } catch (e) {
+      return null;
+    }
+  }));
+  res.json({ matches: matches });
 });
 
 /**

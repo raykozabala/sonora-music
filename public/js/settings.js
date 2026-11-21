@@ -653,6 +653,47 @@
               overflow-y: auto;
               margin-bottom: 14px;
             }
+            .import-card {
+              display: flex;
+              align-items: center;
+              gap: 12px;
+              padding: 12px;
+              margin-bottom: 10px;
+              border-radius: 14px;
+              background: var(--color-surface-elevated, rgba(255,255,255,.04));
+              border: 1px solid var(--color-card-border, rgba(255,255,255,.08));
+            }
+            .import-card__icon {
+              width: 42px; height: 42px; border-radius: 12px; flex: 0 0 42px;
+              display: grid; place-items: center; font-size: 20px;
+            }
+            .import-card__icon--spotify { background: linear-gradient(135deg, #1ed760, #0b6b33); }
+            .import-card__icon--yt { background: linear-gradient(135deg, #ff4b4b, #8b0f0f); }
+            .import-card__body { flex: 1; min-width: 0; }
+            .import-card__title { font-size: 14px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+            .import-card__sub { font-size: 11.5px; color: var(--color-text-secondary); margin-top: 3px; line-height: 1.45; }
+            .import-exp {
+              font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+              padding: 2px 7px; border-radius: 999px;
+              background: rgba(255, 165, 2, .16); color: #ffc46b;
+            }
+            .import-connections { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+            .import-conn {
+              display: flex; align-items: center; gap: 10px;
+              padding: 8px 10px; border-radius: 12px;
+              background: rgba(255,255,255,.035);
+              border: 1px solid rgba(255,255,255,.07);
+            }
+            .import-conn img {
+              width: 38px; height: 38px; border-radius: 8px; object-fit: cover; flex: 0 0 38px;
+            }
+            .import-conn__meta { flex: 1; min-width: 0; }
+            .import-conn__name { font-size: 12.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .import-conn__sub { font-size: 10.5px; color: var(--color-text-secondary); margin-top: 2px; }
+            .import-conn button {
+              border: 1px solid rgba(255,255,255,.12); background: transparent; color: var(--color-text-secondary);
+              border-radius: 999px; padding: 4px 10px; font-size: 10.5px; font-weight: 700; cursor: pointer;
+            }
             .downloads-audit-row {
               display: flex;
               align-items: center;
@@ -1157,6 +1198,52 @@
             </div>
           </section>
 
+          <!-- SECCIÓN: MÚSICA DE OTRAS APPS -->
+          <section class="settings-section" id="settings-import">
+            <h2 class="settings-section__title">🌐 Música de otras apps</h2>
+
+            <div class="import-card">
+              <div class="import-card__icon import-card__icon--spotify">🎧</div>
+              <div class="import-card__body">
+                <div class="import-card__title">Spotify</div>
+                <div class="import-card__sub" id="import-spotify-status">
+                  Sin contraseñas: importa playlists, álbumes y artistas públicos.
+                </div>
+              </div>
+              <button class="btn-pill btn-pill--primary" id="btn-import-spotify">Importar</button>
+            </div>
+
+            <div class="import-card">
+              <div class="import-card__icon import-card__icon--yt">▶️</div>
+              <div class="import-card__body">
+                <div class="import-card__title">YouTube Music <span class="import-exp">experimental</span></div>
+                <div class="import-card__sub" id="import-youtube-status">
+                  Playlists públicas de YouTube Music, con sus mismos vídeos.
+                </div>
+              </div>
+              <button class="btn-pill btn-pill--secondary" id="btn-import-youtube">Importar</button>
+            </div>
+
+            <div class="setting-label-sub" style="margin-top:12px;line-height:1.65;">
+              Sonora <strong>no inicia sesión</strong> en Spotify ni guarda tu contraseña:
+              lee la ficha pública del enlace que pegues y busca cada canción en YouTube
+              para reproducirla dentro de Sonora. Puedes quitar una playlist importada
+              cuando quieras; se borra de Sonora, no de tu cuenta.
+            </div>
+
+            <div class="setting-item-row setting-item-row--inline" style="margin-top:12px;">
+              <div class="setting-label-box">
+                <span class="setting-label-title">Reproducción de YouTube</span>
+                <span class="setting-label-sub" id="playback-status-label">
+                  Comprueba si el servidor activo puede sonar y descargar.
+                </span>
+              </div>
+              <button class="btn-pill btn-pill--secondary" id="btn-check-playback">Comprobar</button>
+            </div>
+
+            <div id="import-connections-list" class="import-connections"></div>
+          </section>
+
           <!-- SECTION 7: PRIVACIDAD -->
           <section class="settings-section" id="settings-app-links" style="display:none;">
             <h2 class="settings-section__title">🔗 Enlaces de Sonora</h2>
@@ -1251,7 +1338,7 @@
 
               <h3 class="about-title">Sonora Music</h3>
               <div style="display:flex;align-items:center;gap:10px;margin:6px 0;flex-wrap:wrap;justify-content:center;">
-                <span class="about-version-badge">v7.19.1 (Build 2026)</span>
+                <span class="about-version-badge">v7.19.2 (Build 2026)</span>
                 <button id="btn-check-updates" class="btn-update-action" style="padding:4px 12px;font-size:11px;" title="Buscar nuevas versiones">
                   🔄 Buscar actualizaciones
                 </button>
@@ -1295,6 +1382,7 @@
           this.initLanguageSection(),
           this.initNotificationsSection(),
           this.initLinksSection(),
+          this.initImportSection(),
           this.initPrivacySection(),
           this.initAboutSection()
         ]);
@@ -1969,6 +2057,116 @@
           else showToast(`Temporizador programado: ${btn.textContent.trim()}`);
         });
       });
+    },
+
+    /**
+     * Importar desde Spotify / YouTube Music (sin contraseñas ni API keys).
+     */
+    async initImportSection() {
+      const btnSpotify = $('#btn-import-spotify');
+      const btnYoutube = $('#btn-import-youtube');
+      const listEl = $('#import-connections-list');
+
+      const openImport = (service) => {
+        if (Sonora.Import && typeof Sonora.Import.open === 'function') {
+          Sonora.Import.open();
+          const tab = document.querySelector('[data-service="' + service + '"]');
+          if (tab && !tab.classList.contains('is-active')) tab.click();
+        } else {
+          showToast('La importación no está disponible en esta versión', 'error');
+        }
+      };
+
+      if (btnSpotify) addTrackedListener(btnSpotify, 'click', () => openImport('spotify'));
+      if (btnYoutube) addTrackedListener(btnYoutube, 'click', () => openImport('youtube'));
+
+      const btnPlayback = $('#btn-check-playback');
+      const playbackLabel = $('#playback-status-label');
+      if (btnPlayback) {
+        addTrackedListener(btnPlayback, 'click', async () => {
+          const original = btnPlayback.textContent;
+          btnPlayback.disabled = true;
+          btnPlayback.textContent = 'Comprobando…';
+          if (playbackLabel) playbackLabel.textContent = 'Probando la extracción de audio de YouTube…';
+          try {
+            let base = '';
+            try {
+              base = (Sonora.API && Sonora.API.getMediaBase && Sonora.API.getMediaBase()) || '';
+            } catch (e) { base = ''; }
+            const resp = await fetch(String(base || '').replace(/\/+$/, '') + '/api/playback/status?fresh=1');
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            if (playbackLabel) {
+              playbackLabel.textContent = data.ok
+                ? `✓ Funciona (${Math.round((data.ms || 0) / 1000)} s). Puedes reproducir y descargar.`
+                : `⚠️ ${data.hint || 'No se pudo comprobar'}${data.error ? ' (' + data.error + ')' : ''}`;
+            }
+            showToast(data.ok ? '✓ Este servidor puede reproducir YouTube' : '⚠️ Este servidor no puede extraer audio de YouTube',
+              data.ok ? 'success' : 'warning');
+          } catch (e) {
+            if (playbackLabel) playbackLabel.textContent = '⚠️ No se pudo comprobar. Revisa la conexión con el servidor.';
+            showToast('No se pudo comprobar la reproducción', 'error');
+          } finally {
+            btnPlayback.disabled = false;
+            btnPlayback.textContent = original;
+          }
+        });
+      }
+
+      const render = async () => {
+        if (!listEl || !Sonora.Import) return;
+        const connections = await Sonora.Import.getConnections();
+        const all = (connections.spotify || []).concat(connections.youtube || []);
+        const spotifyStatus = $('#import-spotify-status');
+        const youtubeStatus = $('#import-youtube-status');
+        if (spotifyStatus) {
+          spotifyStatus.textContent = (connections.spotify || []).length
+            ? `${connections.spotify.length} playlist(s) importadas de Spotify.`
+            : 'Sin contraseñas: importa playlists, álbumes y artistas públicos.';
+        }
+        if (youtubeStatus) {
+          youtubeStatus.textContent = (connections.youtube || []).length
+            ? `${connections.youtube.length} playlist(s) importadas de YouTube Music.`
+            : 'Playlists públicas de YouTube Music, con sus mismos vídeos.';
+        }
+        if (!all.length) {
+          listEl.innerHTML = '';
+          return;
+        }
+        listEl.innerHTML = all.map((pl) => {
+          const count = (pl.trackIds || []).length;
+          const cover = pl.artworkUrl || '';
+          const source = pl.importedFrom === 'spotify' ? 'Spotify' : 'YouTube Music';
+          return `
+            <div class="import-conn" data-id="${pl.id}">
+              ${cover ? `<img src="${cover}" alt="" />` : '<div class="import-conn__meta"></div>'}
+              <div class="import-conn__meta">
+                <div class="import-conn__name">${escapeHtml(pl.name || 'Playlist importada')}</div>
+                <div class="import-conn__sub">${source} · ${count} canciones</div>
+              </div>
+              <button data-act="open">Abrir</button>
+              <button data-act="remove">Quitar</button>
+            </div>`;
+        }).join('');
+
+        listEl.querySelectorAll('.import-conn').forEach((row) => {
+          const id = Number(row.getAttribute('data-id'));
+          const openBtn = row.querySelector('[data-act="open"]');
+          const removeBtn = row.querySelector('[data-act="remove"]');
+          if (openBtn) openBtn.addEventListener('click', () => { location.hash = '#/playlists/' + id; });
+          if (removeBtn) removeBtn.addEventListener('click', async () => {
+            if (!window.confirm('¿Quitar esta playlist de Sonora?\n\nNo se borra de Spotify ni de YouTube.')) return;
+            await Sonora.Import.removePlaylist(id);
+            await render();
+            showToast('Playlist quitada de Sonora');
+          });
+        });
+      };
+
+      await render();
+      if (Sonora.Store && typeof Sonora.Store.subscribe === 'function') {
+        Sonora.Store.subscribe('playlistsChanged', render);
+      }
     },
 
     /**
